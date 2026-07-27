@@ -1,0 +1,262 @@
+[build-system]
+# >=1.14: the pyo3-free cffi build (#B.6) runs cbindgen, which maturin only *embeds* from 1.14
+# (publish.yml pins 1.14.1). `pip install -e .` reads this, so a pre-1.14 resolver would fail the
+# cffi cdylib build with "cbindgen not found".
+requires = ["maturin>=1.14,<2"]
+build-backend = "maturin"
+
+[project]
+name = "intentdiff"
+version = "0.0.1b1"
+description = "Semantic code review: detect intent, moves, refactorings, and style changes"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+keywords = ["diff", "semantic", "ast", "refactoring", "code-analysis"]
+authors = [{ name = "BuchochelliQ Labs" }]
+maintainers = [{ name = "BuchochelliQ Labs" }]
+
+dependencies = [
+    "click>=8.1",
+    "pydantic>=2.7",
+    "rich>=13.0",
+    "rich-click>=1.8",
+    "unidiff>=0.7",
+    "pygments>=2.17",
+    "pyyaml>=6.0",
+    "wasmtime>=45.0",
+    "defusedxml>=0.7",
+    "pathspec>=0.12",
+    "watchdog>=3.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/buchochelliq-labs/intentdiff"
+Repository = "https://github.com/buchochelliq-labs/intentdiff"
+Issues = "https://github.com/buchochelliq-labs/intentdiff/issues"
+Documentation = "https://github.com/buchochelliq-labs/intentdiff/tree/main/docs"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-snapshot",
+    "pytest-benchmark>=4.0",
+    "pytest-timeout>=2.3",
+    "coverage>=7.0",
+    "ruff>=0.4",
+    "mypy>=1.10",
+    "pre-commit>=4.0",
+    "hypothesis>=6.100",
+    "pydantic[mypy]",
+    "httpx>=0.27",
+    # Test-harness only — the product shells to the git CLI, not GitPython (#98, A2.4).
+    "gitpython>=3.1",
+    # Optional-feature packages required to run the full test suite
+    "lsprotocol>=2023.0",
+    "pygls>=1.3",
+    "duckdb>=0.10",
+    "numpy>=1.26",
+    "pandas>=2.0",
+]
+analytics = [
+    "duckdb>=0.10",
+    "numpy>=1.26",
+    "pandas>=2.0",
+]
+lsp = [
+    "lsprotocol>=2023.0",
+]
+lsp-server = [
+    "pygls>=1.3",
+]
+serve = [
+    "fastapi>=0.110",
+    "starlette>=1.0.1",
+    "uvicorn[standard]>=0.29",
+]
+# Mercurial support needs only the `hg` CLI on PATH — the Rust core shells it directly
+# (#98, A2.4.4); python-hglib is no longer used. The extra is kept as a no-op so existing
+# `pip install "intentdiff[hg]"` invocations still resolve.
+hg = []
+# Perforce support needs only the `p4` CLI on PATH — the Rust core shells it directly
+# (#98, A2.4.4); p4python is no longer used. The extra is kept as a no-op so existing
+# `pip install "intentdiff[perforce]"` invocations still resolve.
+perforce = []
+
+[project.scripts]
+intentdiff = "intentdiff.cli:main"
+
+# ── Built-in plugin registration ─────────────────────────────────────────────
+# All plugins (built-in and third-party) are discovered via these entry points.
+# Built-in plugins ship as pre-compiled .wasm files inside the package.
+
+[project.entry-points."intentdiff.parsers"]
+python     = "intentdiff.plugins.builtins:python_parser_entry"
+sql        = "intentdiff.plugins.builtins:sql_parser_entry"
+generic    = "intentdiff.plugins.builtins:generic_parser_entry"
+graphql   = "intentdiff.plugins.builtins:graphql_parser_entry"
+gitignore = "intentdiff.plugins.builtins:gitignore_parser_entry"
+ocaml     = "intentdiff.plugins.builtins:ocaml_parser_entry"
+reasonml  = "intentdiff.plugins.builtins:reasonml_parser_entry"
+latex     = "intentdiff.plugins.builtins:latex_parser_entry"
+asciidoc  = "intentdiff.plugins.builtins:asciidoc_parser_entry"
+po        = "intentdiff.plugins.builtins:po_parser_entry"
+javascript = "intentdiff.plugins.builtins:js_ts_parser_entry"
+typescript = "intentdiff.plugins.builtins:js_ts_parser_entry"
+tsx        = "intentdiff.plugins.builtins:js_ts_parser_entry"
+java       = "intentdiff.plugins.builtins:java_parser_entry"
+go         = "intentdiff.plugins.builtins:go_parser_entry"
+rust       = "intentdiff.plugins.builtins:rust_parser_entry"
+csharp     = "intentdiff.plugins.builtins:csharp_parser_entry"
+ruby       = "intentdiff.plugins.builtins:ruby_parser_entry"
+php        = "intentdiff.plugins.builtins:php_parser_entry"
+kotlin     = "intentdiff.plugins.builtins:kotlin_parser_entry"
+c          = "intentdiff.plugins.builtins:cpp_parser_entry"
+cpp        = "intentdiff.plugins.builtins:cpp_parser_entry"
+swift      = "intentdiff.plugins.builtins:swift_parser_entry"
+bash       = "intentdiff.plugins.builtins:bash_parser_entry"
+powershell = "intentdiff.plugins.builtins:powershell_parser_entry"
+elixir     = "intentdiff.plugins.builtins:elixir_parser_entry"
+groovy     = "intentdiff.plugins.builtins:groovy_parser_entry"
+dart       = "intentdiff.plugins.builtins:dart_parser_entry"
+lua        = "intentdiff.plugins.builtins:lua_parser_entry"
+xml        = "intentdiff.plugins.builtins:xml_parser_entry"
+dockerfile = "intentdiff.plugins.builtins:dockerfile_parser_entry"
+vbnet      = "intentdiff.plugins.builtins:vbnet_parser_entry"
+squirrel   = "intentdiff.plugins.builtins:squirrel_parser_entry"
+puppet     = "intentdiff.plugins.builtins:puppet_parser_entry"
+hcl        = "intentdiff.plugins.builtins:terraform_parser_entry"
+delphi     = "intentdiff.plugins.builtins:delphi_parser_entry"
+adf        = "intentdiff.plugins.builtins:adf_parser_entry"
+databricks-workflow = "intentdiff.plugins.builtins:databricks_parser_entry"
+mdx        = "intentdiff.plugins.builtins:mdx_parser_entry"
+markdown   = "intentdiff.plugins.builtins:markdown_parser_entry"
+toml       = "intentdiff.plugins.builtins:toml_parser_entry"
+ini        = "intentdiff.plugins.builtins:ini_parser_entry"
+gomod      = "intentdiff.plugins.builtins:gomod_parser_entry"
+make       = "intentdiff.plugins.builtins:make_parser_entry"
+proto      = "intentdiff.plugins.builtins:proto_parser_entry"
+cmake      = "intentdiff.plugins.builtins:cmake_parser_entry"
+r          = "intentdiff.plugins.builtins:r_parser_entry"
+haskell    = "intentdiff.plugins.builtins:haskell_parser_entry"
+zig        = "intentdiff.plugins.builtins:zig_parser_entry"
+scala      = "intentdiff.plugins.builtins:scala_parser_entry"
+clojure    = "intentdiff.plugins.builtins:clojure_parser_entry"
+perl             = "intentdiff.plugins.builtins:perl_parser_entry"
+asm              = "intentdiff.plugins.builtins:asm_parser_entry"
+assemblyscript   = "intentdiff.plugins.builtins:assemblyscript_parser_entry"
+odin             = "intentdiff.plugins.builtins:odin_parser_entry"
+wat              = "intentdiff.plugins.builtins:wat_parser_entry"
+tsql             = "intentdiff.plugins.builtins:tsql_parser_entry"
+plsql            = "intentdiff.plugins.builtins:plsql_parser_entry"
+abap             = "intentdiff.plugins.builtins:abap_parser_entry"
+dax              = "intentdiff.plugins.builtins:dax_parser_entry"
+m                = "intentdiff.plugins.builtins:dax_parser_entry"
+sas              = "intentdiff.plugins.builtins:sas_parser_entry"
+qsharp           = "intentdiff.plugins.builtins:qsharp_parser_entry"
+postscript       = "intentdiff.plugins.builtins:postscript_parser_entry"
+css              = "intentdiff.plugins.builtins:css_parser_entry"
+json             = "intentdiff.plugins.builtins:json_parser_entry"
+yaml             = "intentdiff.plugins.builtins:yaml_parser_entry"
+html             = "intentdiff.plugins.builtins:html_parser_entry"
+scss             = "intentdiff.plugins.builtins:scss_parser_entry"
+vue              = "intentdiff.plugins.builtins:vue_parser_entry"
+svelte           = "intentdiff.plugins.builtins:svelte_parser_entry"
+astro             = "intentdiff.plugins.builtins:astro_parser_entry"
+
+[project.entry-points."intentdiff.renderers"]
+terminal = "intentdiff.plugins.builtins:terminal_renderer_entry"
+patch    = "intentdiff.plugins.builtins:patch_renderer_entry"
+html     = "intentdiff.plugins.builtins:html_renderer_entry"
+llm      = "intentdiff.plugins.builtins:llm_renderer_entry"
+
+# Diff-analyzer plugins post-process the classified SemanticDiff and can
+# add or modify Change objects with language-specific change_type strings.
+# Third-party packages register here via:
+#   [project.entry-points."intentdiff.diff_analyzers"]
+#   my-lang = "my_lang_plugin:diff_analyzer_wasm_path"
+
+# ── Maturin native wheel config ──────────────────────────────────────────────
+# IntentDiff is shipped as one native platform wheel. The wheel contains:
+# - the Python public API/CLI packages from src/
+# - pre-built first-party Wasm parser/renderer components
+# - the PyO3 Rust core host extension module
+#
+# Do NOT publish an sdist for the first public release. Installing from source
+# requires Rust, maturin, and the wasm32-wasip2 target, which is the opposite of
+# the intended user experience. Use .github/workflows/publish.yml to build
+# pre-compiled platform wheels.
+
+[tool.maturin]
+# The engine lives in intentdiff-core (#82 split) — this repo is the THIN Python binding.
+# `python scripts/provision_build_inputs.py` stages a pinned checkout of intentdiff-core at
+# build/intentdiff-core (and the built parser components into src/intentdiff/wasm) before any
+# wheel build; the monorepo remains the archive of record.
+manifest-path = "build/intentdiff-core/crates/rust-core-host/Cargo.toml"
+python-source = "src"
+module-name = "intentdiff.intentdiff_rust_core"
+python-packages = ["intentdiff"]
+# The crate is PyO3-free (#82/B.6): both `maturin develop` and the release wheel build a bare cdylib
+# (`intentdiff/intentdiff_rust_core/intentdiff_rust_core.<ext>`) that `rust_core.py` loads via ctypes
+# over the C ABI. `bindings = "cffi"` builds + packages that cdylib (maturin embeds cbindgen; its
+# generated cffi wrapper is unused — the loader ctypes-loads the cdylib directly, so no cffi runtime
+# dep). Release: `maturin build --release -b cffi --compatibility pypi`.
+bindings = "cffi"
+include = [
+    { path = "src/intentdiff/wasm/*.wasm", format = "wheel" },
+    { path = "src/intentdiff/invariances/*.yaml", format = "wheel" },
+    { path = "src/intentdiff/invariances/*.json", format = "wheel" },
+    # The published plugin-registry schema (#95) — loaded at runtime via resources.files.
+    { path = "src/intentdiff/plugins/*.json", format = "wheel" },
+]
+
+# ── Ruff ─────────────────────────────────────────────────────────────────────
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "S"]
+ignore = ["S101"]  # allow assert in tests
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S"]
+
+# ── Mypy ─────────────────────────────────────────────────────────────────────
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]
+
+# ── Pytest ────────────────────────────────────────────────────────────────────
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# A generous per-test timeout is a HARD safety net: no single test may ever stall the suite for
+# hours (the #73 named-pipe hang cost a ~2h wall block). `thread` is the only method that works on
+# Windows. 600s is far above any real unit test, so it only ever catches a genuine hang/deadlock.
+addopts = ["-m", "not benchmark", "--timeout=600", "--timeout-method=thread"]
+log_cli = true
+log_cli_level = "INFO"
+log_cli_format = "%(levelname)-8s %(name)s: %(message)s"
+markers = [
+    "security: adversarial sandbox tests",
+    "integration: requires git binary and fixture repo",
+    "snapshot: renderer snapshot tests",
+    "browser: optional Playwright browser smoke tests",
+    "benchmark: performance + opt-in real-LLM accuracy benchmarks (need a key/network) excluded from default pytest runs",
+]
+
+# ── Coverage ──────────────────────────────────────────────────────────────────
+[tool.coverage.run]
+source = ["src/intentdiff"]
+omit = ["*/wasm/*"]
+
+[tool.coverage.report]
+fail_under = 80
+exclude_lines = ["pragma: no cover", "if TYPE_CHECKING:"]
+
+[dependency-groups]
+dev = [
+    "pytest-benchmark>=4.0",
+    "pytest-timeout>=2.3",
+]

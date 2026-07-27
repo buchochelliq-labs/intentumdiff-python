@@ -1,0 +1,28 @@
+# Provisioned build inputs (staged by scripts/provision_build_inputs.py)
+/build/
+src/intentdiff/wasm/*.wasm
+src/intentdiff/wasm/wasm_provenance.json
+src/intentdiff/intentdiff_rust_core/
+
+# Python
+__pycache__/
+*.pyc
+*.pyd
+.venv/
+*.egg-info/
+dist/
+.pytest_cache/
+.coverage
+
+# Never-commit artifacts (same guards as the monorepo)
+*.orig
+vendor/
+boo.py
+image.png
+
+# Editor / OS cruft
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/

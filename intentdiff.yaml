@@ -1,0 +1,14 @@
+config:
+  min_similarity: 0.5
+  approx_move_threshold: 0.4
+  min_height: 2
+  ignore_style: true
+  detect_refactorings: true
+  strict_plugins: false
+  # Wasm instruction budget per plugin call.
+  plugin_fuel: 10_000_000
+  # 4 MB CST JSON size cap per file side.
+  max_cst_bytes: 4_194_304
+
+guardrails:
+  protected: []

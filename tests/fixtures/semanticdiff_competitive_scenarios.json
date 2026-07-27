@@ -1,0 +1,787 @@
+{
+  "metadata": {
+    "schema_version": 1,
+    "created_at": "2026-05-26",
+    "description": "License-safe synthetic scenarios inspired by public examples, tutorials, docs, bug reports, and developer war stories for comparing IntentDiff with SemanticDiff.",
+    "fixture_policy": "Source URLs describe the shape of the change only. Old/new fixtures are fictional and intentionally not copied from the source.",
+    "semanticdiff_observed_version": "0.10.0",
+    "semanticdiff_marketplace_url": "https://marketplace.visualstudio.com/items?itemName=semanticdiff.semanticdiff",
+    "semanticdiff_docs_url": "https://semanticdiff.com/docs/what-is-semanticdiff/"
+  },
+  "labels": [
+    "parity",
+    "differentiator",
+    "quality-gap",
+    "test-candidate"
+  ],
+  "semanticdiff": {
+    "supported_language_ids": [
+      "csharp",
+      "css",
+      "scss",
+      "go",
+      "html",
+      "java",
+      "javascript",
+      "jsx",
+      "json",
+      "lua",
+      "po",
+      "python",
+      "rust",
+      "typescript",
+      "tsx",
+      "vue",
+      "xml",
+      "dtd"
+    ],
+    "strengths": [
+      "polished custom diff UI",
+      "changed-only review mode",
+      "context expansion",
+      "next and previous change navigation",
+      "minimap",
+      "default diff-viewer integration",
+      "moved-code comparison visualization"
+    ],
+    "weaknesses_to_exploit": [
+      {
+        "id": "broader-language-coverage",
+        "weakness": "SemanticDiff has a narrower parser matrix.",
+        "opportunity": "Keep advertising broad parser coverage and enforce it with runtime language smoke tests.",
+        "labels": [
+          "differentiator",
+          "test-candidate"
+        ]
+      },
+      {
+        "id": "partial-parse-and-fallback",
+        "weakness": "SemanticDiff documents syntactically invalid code as a hard limitation for semantic diffs.",
+        "opportunity": "Make IntentDiff's fallback, parse warning, and partial-parse behavior explicit and testable.",
+        "labels": [
+          "differentiator",
+          "quality-gap"
+        ]
+      },
+      {
+        "id": "structured-review-artifacts",
+        "weakness": "SemanticDiff is primarily a black-box visual reviewer.",
+        "opportunity": "Expose structured JSON, diagnostics, review tree state, and CI-friendly reports.",
+        "labels": [
+          "differentiator"
+        ]
+      },
+      {
+        "id": "repository-level-review",
+        "weakness": "SemanticDiff does not expose an obvious cross-file semantic review surface in VS Code.",
+        "opportunity": "Strengthen repository-level Semantic Changes, cross-file grouping, and dependency-aware review.",
+        "labels": [
+          "differentiator"
+        ]
+      },
+      {
+        "id": "privacy-positioning",
+        "weakness": "SemanticDiff documents anonymous usage telemetry controlled by VS Code telemetry settings.",
+        "opportunity": "Document local processing and no-telemetry behavior if true, or add an explicit privacy setting.",
+        "labels": [
+          "differentiator"
+        ]
+      },
+      {
+        "id": "automation-surfaces",
+        "weakness": "SemanticDiff exposes few automation surfaces beyond the editor UI.",
+        "opportunity": "Add stable commands, test-only APIs, and report export for CI and review bots.",
+        "labels": [
+          "differentiator",
+          "parity"
+        ]
+      }
+    ]
+  },
+  "command_parity": [
+    {
+      "semanticdiff_command": "semanticdiff.show",
+      "intentdiff_candidate": "intentdiff.openSemanticDiffViewer",
+      "status": "missing",
+      "labels": [
+        "parity"
+      ],
+      "reason": "Switch an existing VS Code diff into a dedicated IntentDiff viewer."
+    },
+    {
+      "semanticdiff_command": "semanticdiff.show-alt",
+      "intentdiff_candidate": "intentdiff.openSemanticDiffViewerAlternate",
+      "status": "missing",
+      "labels": [
+        "parity"
+      ],
+      "reason": "Offer an alternate switch command for keybindings and menus."
+    },
+    {
+      "semanticdiff_command": "semanticdiff.hide",
+      "intentdiff_candidate": "intentdiff.openVscodeTextDiff",
+      "status": "missing",
+      "labels": [
+        "parity"
+      ],
+      "reason": "Return from the custom semantic viewer to the stock VS Code diff."
+    },
+    {
+      "semanticdiff_command": "semanticdiff.hideComments",
+      "intentdiff_candidate": "intentdiff.hideCommentOnlyChanges",
+      "status": "missing",
+      "labels": [
+        "parity"
+      ],
+      "reason": "Recompute or filter comment-only changes from the semantic viewer."
+    },
+    {
+      "semanticdiff_command": "semanticdiff.showComments",
+      "intentdiff_candidate": "intentdiff.showCommentOnlyChanges",
+      "status": "missing",
+      "labels": [
+        "parity"
+      ],
+      "reason": "Restore comment-only changes after filtering."
+    },
+    {
+      "semanticdiff_command": "semanticdiff.previousChange",
+      "intentdiff_candidate": "intentdiff.previousSemanticChange",
+      "status": "missing",
+      "labels": [
+        "parity"
+      ],
+      "reason": "Navigate to the previous semantic change in viewer or tree context."
+    },
+    {
+      "semanticdiff_command": "semanticdiff.nextChange",
+      "intentdiff_candidate": "intentdiff.nextSemanticChange",
+      "status": "missing",
+      "labels": [
+        "parity"
+      ],
+      "reason": "Navigate to the next semantic change in viewer or tree context."
+    },
+    {
+      "semanticdiff_command": "semanticdiff.openFile",
+      "intentdiff_candidate": "intentdiff.openSemanticChangeFile",
+      "status": "partial",
+      "labels": [
+        "parity"
+      ],
+      "reason": "The tree can open entries, but the custom viewer should expose a direct command."
+    },
+    {
+      "semanticdiff_command": "semanticdiff.recomputeDiff",
+      "intentdiff_candidate": "intentdiff.refreshSemanticDiffViewer",
+      "status": "partial",
+      "labels": [
+        "parity"
+      ],
+      "reason": "Semantic Changes refresh exists; a dedicated viewer recompute command is still needed."
+    },
+    {
+      "semanticdiff_command": "semanticdiff.collapseContextLines",
+      "intentdiff_candidate": "intentdiff.collapseSemanticDiffContext",
+      "status": "missing",
+      "labels": [
+        "parity"
+      ],
+      "reason": "Changed-only custom viewer needs collapsible context."
+    },
+    {
+      "semanticdiff_command": "semanticdiff.expandContextLines",
+      "intentdiff_candidate": "intentdiff.expandSemanticDiffContext",
+      "status": "missing",
+      "labels": [
+        "parity"
+      ],
+      "reason": "Changed-only custom viewer needs expandable local and parent-scope context."
+    },
+    {
+      "semanticdiff_command": "semanticdiff.makeDefault",
+      "intentdiff_candidate": "intentdiff.makeDefaultSemanticDiffViewer",
+      "status": "missing",
+      "labels": [
+        "parity"
+      ],
+      "reason": "Offer default viewer integration once the custom viewer exists."
+    },
+    {
+      "semanticdiff_command": "semanticdiff.printState",
+      "intentdiff_candidate": "intentdiff.exportSemanticReviewState",
+      "status": "partial",
+      "labels": [
+        "parity",
+        "differentiator"
+      ],
+      "reason": "A stable export command can beat print-only state by producing machine-readable review artifacts."
+    },
+    {
+      "semanticdiff_command": "semanticdiff.resetState",
+      "intentdiff_candidate": "intentdiff.resetSemanticDiffState",
+      "status": "missing",
+      "labels": [
+        "parity"
+      ],
+      "reason": "Clear viewer caches, loaded context, and comparison mode state."
+    }
+  ],
+  "setting_parity": [
+    {
+      "semanticdiff_setting": "semanticdiff.defaultDiffViewer",
+      "intentdiff_candidate": "intentdiff.diff.defaultViewer",
+      "status": "missing",
+      "labels": [
+        "parity"
+      ],
+      "reason": "Let users make the IntentDiff viewer the default for supported languages."
+    },
+    {
+      "semanticdiff_setting": "semanticdiff.closeOriginalTab",
+      "intentdiff_candidate": "intentdiff.diff.closeOriginalTab",
+      "status": "missing",
+      "labels": [
+        "parity"
+      ],
+      "reason": "Control whether switching to the custom viewer closes the original diff tab."
+    },
+    {
+      "semanticdiff_setting": "semanticdiff.fallbackDiff",
+      "intentdiff_candidate": "intentdiff.diff.fallbackMode",
+      "status": "partial",
+      "labels": [
+        "parity",
+        "differentiator"
+      ],
+      "reason": "Expose fallback behavior explicitly, including parse-warning and partial-parse choices."
+    },
+    {
+      "semanticdiff_setting": "semanticdiff.colorIcon",
+      "intentdiff_candidate": "intentdiff.diff.colorIcon",
+      "status": "missing",
+      "labels": [
+        "parity"
+      ],
+      "reason": "Match toolbar affordance customization."
+    },
+    {
+      "semanticdiff_setting": "semanticdiff.minimap",
+      "intentdiff_candidate": "intentdiff.diff.minimap",
+      "status": "missing",
+      "labels": [
+        "parity"
+      ],
+      "reason": "Custom viewer should offer none/simple/detailed overview modes."
+    },
+    {
+      "semanticdiff_setting": "semanticdiff.diff.contextLines",
+      "intentdiff_candidate": "intentdiff.diff.contextLines",
+      "status": "missing",
+      "labels": [
+        "parity"
+      ],
+      "reason": "Control changed-only context size."
+    },
+    {
+      "semanticdiff_setting": "semanticdiff.diff.hideComments",
+      "intentdiff_candidate": "intentdiff.diff.hideCommentOnlyChanges",
+      "status": "missing",
+      "labels": [
+        "parity"
+      ],
+      "reason": "Default comment filtering behavior should be configurable."
+    },
+    {
+      "semanticdiff_setting": "semanticdiff.diff.compareMovedCode",
+      "intentdiff_candidate": "intentdiff.diff.compareMovedCode",
+      "status": "missing",
+      "labels": [
+        "parity"
+      ],
+      "reason": "Moved-code visualization needs an opt-in default."
+    }
+  ],
+  "separate_viewer_backlog": {
+    "id": "custom-intentdiff-diff-viewer",
+    "priority": "P1",
+    "labels": [
+      "parity",
+      "differentiator"
+    ],
+    "summary": "Add a webview-based semantic diff viewer while keeping live overlays and the Semantic Changes tree.",
+    "items": [
+      "changed-only view",
+      "expandable line context",
+      "parent-scope expansion",
+      "next and previous navigation",
+      "overview minimap",
+      "comment-only change hiding",
+      "moved-code comparison mode",
+      "fallback text diff",
+      "switch-back command"
+    ]
+  },
+  "prioritized_backlog": [
+    {
+      "id": "p0-runtime-language-smoke-matrix",
+      "priority": "P0",
+      "labels": [
+        "differentiator",
+        "test-candidate"
+      ],
+      "summary": "Keep the runtime supported-language smoke matrix and discrepancy baseline current."
+    },
+    {
+      "id": "p1-custom-diff-viewer",
+      "priority": "P1",
+      "labels": [
+        "parity"
+      ],
+      "summary": "Build the separate changed-only IntentDiff viewer for SemanticDiff UX parity."
+    },
+    {
+      "id": "p1-command-settings-parity",
+      "priority": "P1",
+      "labels": [
+        "parity"
+      ],
+      "summary": "Add commands and settings listed in the parity matrices."
+    },
+    {
+      "id": "p1-operational-language-positioning",
+      "priority": "P1",
+      "labels": [
+        "differentiator",
+        "test-candidate"
+      ],
+      "summary": "Turn Databricks, ADF, HCL, SQL, YAML, and config scenarios into high-signal tests and demos."
+    },
+    {
+      "id": "p2-invalid-code-best-effort-review",
+      "priority": "P2",
+      "labels": [
+        "differentiator",
+        "quality-gap"
+      ],
+      "summary": "Improve and document partial-parse and fallback behavior on syntactically invalid edits."
+    },
+    {
+      "id": "p2-privacy-docs-and-setting",
+      "priority": "P2",
+      "labels": [
+        "differentiator"
+      ],
+      "summary": "Document local/no-telemetry behavior if true, or add an explicit privacy setting."
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "python-moved-helper-edited-policy",
+      "language": "python",
+      "filename": "billing.py",
+      "tier": "complex",
+      "source": {
+        "url": "https://refactoring.com/catalog/moveFunction.html",
+        "type": "refactoring catalog",
+        "license_note": "Inspired by the move-function refactoring shape; fixture is synthetic."
+      },
+      "scenario_shape": "Nested helper extracted to module scope while business thresholds and call arguments change.",
+      "semanticdiff_support": "supported",
+      "expected": {
+        "semantic_or_style_result": true,
+        "families_any_of": [
+          "refactoring",
+          "modification"
+        ],
+        "requires_position_evidence": true,
+        "labels": [
+          "parity",
+          "test-candidate"
+        ]
+      },
+      "fixture": {
+        "old": "def charge_total(order):\n    def discount(subtotal):\n        if subtotal > 100:\n            return subtotal * 0.1\n        return 0\n\n    subtotal = sum(item[\"price\"] for item in order[\"items\"])\n    return subtotal - discount(subtotal)\n",
+        "new": "def discount(subtotal, vip=False):\n    if vip:\n        return subtotal * 0.2\n    if subtotal > 150:\n        return subtotal * 0.1\n    return 0\n\n\ndef charge_total(order):\n    subtotal = sum(item[\"price\"] for item in order[\"items\"])\n    return subtotal - discount(subtotal, order.get(\"vip\", False))\n"
+      },
+      "candidate_test": "test_python_moved_helper_edits_are_grouped"
+    },
+    {
+      "id": "typescript-discriminated-union-status-migration",
+      "language": "typescript",
+      "filename": "result.ts",
+      "tier": "medium",
+      "source": {
+        "url": "https://www.typescriptlang.org/docs/handbook/2/narrowing.html",
+        "type": "language guide",
+        "license_note": "Inspired by discriminated-union narrowing; fixture is synthetic."
+      },
+      "scenario_shape": "Boolean success flag migrates to a string discriminant and gains retry metadata.",
+      "semanticdiff_support": "supported",
+      "expected": {
+        "semantic_or_style_result": true,
+        "families_any_of": [
+          "modification",
+          "addition",
+          "refactoring"
+        ],
+        "requires_position_evidence": true,
+        "labels": [
+          "parity",
+          "test-candidate"
+        ]
+      },
+      "fixture": {
+        "old": "type Result = { ok: true; value: string } | { ok: false; error: string };\n\nexport function label(result: Result): string {\n  if (result.ok) {\n    return result.value;\n  }\n  return \"failed\";\n}\n",
+        "new": "type Result =\n  | { status: \"ok\"; value: string }\n  | { status: \"error\"; error: string; retryable: boolean };\n\nexport function label(result: Result): string {\n  switch (result.status) {\n    case \"ok\":\n      return result.value;\n    case \"error\":\n      return result.retryable ? \"retry later\" : result.error;\n  }\n}\n"
+      },
+      "candidate_test": "test_typescript_discriminant_migration_reports_guard_changes"
+    },
+    {
+      "id": "go-error-wrapping-with-context",
+      "language": "go",
+      "filename": "store.go",
+      "tier": "medium",
+      "source": {
+        "url": "https://go.dev/blog/go1.13-errors",
+        "type": "language blog",
+        "license_note": "Inspired by Go error wrapping with %w; fixture is synthetic."
+      },
+      "scenario_shape": "Raw error return changes to contextual wrapping and adds fmt import.",
+      "semanticdiff_support": "supported",
+      "expected": {
+        "semantic_or_style_result": true,
+        "families_any_of": [
+          "modification",
+          "addition"
+        ],
+        "requires_position_evidence": true,
+        "labels": [
+          "parity",
+          "test-candidate"
+        ]
+      },
+      "fixture": {
+        "old": "package store\n\nimport \"os\"\n\nfunc readConfig(path string) ([]byte, error) {\n    data, err := os.ReadFile(path)\n    if err != nil {\n        return nil, err\n    }\n    return data, nil\n}\n",
+        "new": "package store\n\nimport (\n    \"fmt\"\n    \"os\"\n)\n\nfunc readConfig(path string) ([]byte, error) {\n    data, err := os.ReadFile(path)\n    if err != nil {\n        return nil, fmt.Errorf(\"read config %s: %w\", path, err)\n    }\n    return data, nil\n}\n"
+      },
+      "candidate_test": "test_go_error_wrapping_preserves_contextual_modification"
+    },
+    {
+      "id": "rust-match-to-if-let",
+      "language": "rust",
+      "filename": "listener.rs",
+      "tier": "simple",
+      "source": {
+        "url": "https://doc.rust-lang.org/book/ch06-03-if-let.html",
+        "type": "language guide",
+        "license_note": "Inspired by match-to-if-let control-flow simplification; fixture is synthetic."
+      },
+      "scenario_shape": "Equivalent option handling changes from match arms to if-let form.",
+      "semanticdiff_support": "supported",
+      "expected": {
+        "semantic_or_style_result": true,
+        "families_any_of": [
+          "modification",
+          "refactoring"
+        ],
+        "requires_position_evidence": true,
+        "labels": [
+          "parity",
+          "test-candidate"
+        ]
+      },
+      "fixture": {
+        "old": "pub fn describe(port: Option<u16>) -> String {\n    match port {\n        Some(value) => format!(\"listening on {value}\"),\n        None => String::from(\"disabled\"),\n    }\n}\n",
+        "new": "pub fn describe(port: Option<u16>) -> String {\n    if let Some(value) = port {\n        format!(\"listening on {value}\")\n    } else {\n        String::from(\"disabled\")\n    }\n}\n"
+      },
+      "candidate_test": "test_rust_match_to_if_let_is_not_noisy_delete_add"
+    },
+    {
+      "id": "json-package-scripts-expand",
+      "language": "json",
+      "filename": "package.json",
+      "tier": "simple",
+      "source": {
+        "url": "https://docs.npmjs.com/cli/v8/using-npm/scripts/",
+        "type": "tool documentation",
+        "license_note": "Inspired by npm script lifecycle additions; fixture is synthetic."
+      },
+      "scenario_shape": "Build metadata adds scripts and dev dependencies while changing test command semantics.",
+      "semanticdiff_support": "supported",
+      "expected": {
+        "semantic_or_style_result": true,
+        "families_any_of": [
+          "addition",
+          "modification"
+        ],
+        "requires_position_evidence": true,
+        "labels": [
+          "parity",
+          "test-candidate"
+        ]
+      },
+      "fixture": {
+        "old": "{\n  \"scripts\": {\n    \"test\": \"vitest\"\n  },\n  \"dependencies\": {\n    \"vite\": \"^5.0.0\"\n  }\n}\n",
+        "new": "{\n  \"scripts\": {\n    \"lint\": \"eslint src\",\n    \"test\": \"vitest run\",\n    \"prepublishOnly\": \"npm test\"\n  },\n  \"dependencies\": {\n    \"vite\": \"^5.0.0\"\n  },\n  \"devDependencies\": {\n    \"eslint\": \"^9.0.0\"\n  }\n}\n"
+      },
+      "candidate_test": "test_json_package_script_additions_are_key_aware"
+    },
+    {
+      "id": "html-accessible-status-region",
+      "language": "html",
+      "filename": "status.html",
+      "tier": "simple",
+      "source": {
+        "url": "https://developer.mozilla.org/docs/Web/HTML/Reference/Global_attributes/class",
+        "type": "reference documentation",
+        "license_note": "Inspired by HTML global attribute changes; fixture is synthetic."
+      },
+      "scenario_shape": "Class list and ARIA live-region attribute change without touching the child text.",
+      "semanticdiff_support": "supported",
+      "expected": {
+        "semantic_or_style_result": true,
+        "families_any_of": [
+          "modification",
+          "addition"
+        ],
+        "requires_position_evidence": true,
+        "labels": [
+          "parity",
+          "test-candidate"
+        ]
+      },
+      "fixture": {
+        "old": "<section class=\"note\">\n  <h2>Status</h2>\n  <p>Pending review</p>\n</section>\n",
+        "new": "<section class=\"note editorial\" aria-live=\"polite\">\n  <h2>Status</h2>\n  <p>Pending review</p>\n</section>\n"
+      },
+      "candidate_test": "test_html_attribute_changes_do_not_select_child_text"
+    },
+    {
+      "id": "vue-inline-handler-extracted-method",
+      "language": "vue",
+      "filename": "Counter.vue",
+      "tier": "medium",
+      "source": {
+        "url": "https://vuejs.org/guide/scaling-up/sfc",
+        "type": "framework guide",
+        "license_note": "Inspired by Vue single-file component organization; fixture is synthetic."
+      },
+      "scenario_shape": "Inline template handler becomes a named script function with a class addition.",
+      "semanticdiff_support": "supported",
+      "expected": {
+        "semantic_or_style_result": true,
+        "families_any_of": [
+          "addition",
+          "modification",
+          "refactoring"
+        ],
+        "requires_position_evidence": true,
+        "labels": [
+          "parity",
+          "test-candidate"
+        ]
+      },
+      "fixture": {
+        "old": "<template>\n  <button @click=\"count++\">{{ count }}</button>\n</template>\n\n<script setup>\nimport { ref } from \"vue\"\nconst count = ref(0)\n</script>\n",
+        "new": "<template>\n  <button class=\"counter\" @click=\"increment\">{{ count }}</button>\n</template>\n\n<script setup>\nimport { ref } from \"vue\"\nconst count = ref(0)\n\nfunction increment() {\n  count.value += 1\n}\n</script>\n"
+      },
+      "candidate_test": "test_vue_template_and_script_changes_are_connected"
+    },
+    {
+      "id": "css-delete-debug-banner",
+      "language": "css",
+      "filename": "app.css",
+      "tier": "simple",
+      "source": {
+        "url": "https://developer.mozilla.org/en-US/docs/Web/CSS/display",
+        "type": "reference documentation",
+        "license_note": "Inspired by visibility/display rule cleanup; fixture is synthetic."
+      },
+      "scenario_shape": "Obsolete debug rule is deleted while status styling changes.",
+      "semanticdiff_support": "supported",
+      "expected": {
+        "semantic_or_style_result": true,
+        "families_any_of": [
+          "deletion",
+          "modification"
+        ],
+        "requires_position_evidence": true,
+        "labels": [
+          "parity",
+          "test-candidate"
+        ]
+      },
+      "fixture": {
+        "old": ".status {\n  display: block;\n  color: #444;\n}\n\n.debug-banner {\n  display: block;\n}\n",
+        "new": ".status {\n  display: flex;\n  color: #222;\n}\n"
+      },
+      "candidate_test": "test_css_deleted_rule_remains_base_side_selectable_in_viewer"
+    },
+    {
+      "id": "hcl-s3-versioning-and-tags",
+      "language": "hcl",
+      "filename": "main.tf",
+      "tier": "complex",
+      "source": {
+        "url": "https://developer.hashicorp.com/terraform/language",
+        "type": "tool documentation",
+        "license_note": "Inspired by Terraform HCL resource configuration; fixture is synthetic."
+      },
+      "scenario_shape": "Infrastructure resource adds tags and changes versioning from disabled to enabled.",
+      "semanticdiff_support": "unsupported_by_semanticdiff",
+      "expected": {
+        "semantic_or_style_result": true,
+        "families_any_of": [
+          "addition",
+          "modification"
+        ],
+        "requires_position_evidence": true,
+        "labels": [
+          "differentiator",
+          "test-candidate"
+        ]
+      },
+      "fixture": {
+        "old": "resource \"aws_s3_bucket\" \"logs\" {\n  bucket = \"example-logs\"\n}\n\nresource \"aws_s3_bucket_versioning\" \"logs\" {\n  bucket = aws_s3_bucket.logs.id\n  versioning_configuration {\n    status = \"Disabled\"\n  }\n}\n",
+        "new": "resource \"aws_s3_bucket\" \"logs\" {\n  bucket = \"example-logs\"\n  tags = {\n    Environment = \"prod\"\n  }\n}\n\nresource \"aws_s3_bucket_versioning\" \"logs\" {\n  bucket = aws_s3_bucket.logs.id\n  versioning_configuration {\n    status = \"Enabled\"\n  }\n}\n"
+      },
+      "candidate_test": "test_hcl_resource_updates_are_semanticdiff_differentiator"
+    },
+    {
+      "id": "databricks-workflow-conditional-task",
+      "language": "databricks-workflow",
+      "filename": "workflow.yml",
+      "tier": "extreme",
+      "source": {
+        "url": "https://docs.databricks.com/aws/en/jobs/run-if",
+        "type": "platform documentation",
+        "license_note": "Inspired by Databricks task dependency and run-if configuration; fixture is synthetic."
+      },
+      "scenario_shape": "Single-task workflow grows into a DAG with a parameter and conditional downstream task.",
+      "semanticdiff_support": "unsupported_by_semanticdiff",
+      "expected": {
+        "semantic_or_style_result": true,
+        "families_any_of": [
+          "addition",
+          "modification"
+        ],
+        "requires_position_evidence": true,
+        "labels": [
+          "differentiator",
+          "test-candidate"
+        ]
+      },
+      "fixture": {
+        "old": "name: revenue_daily\ntasks:\n  - task_key: ingest\n    notebook_task:\n      notebook_path: /Repos/acme/ingest\n",
+        "new": "name: revenue_daily\nparameters:\n  - name: env\n    default: prod\ntasks:\n  - task_key: ingest\n    notebook_task:\n      notebook_path: /Repos/acme/ingest\n  - task_key: publish\n    depends_on:\n      - task_key: ingest\n    run_if: ALL_SUCCESS\n    notebook_task:\n      notebook_path: /Repos/acme/publish\n"
+      },
+      "candidate_test": "test_databricks_workflow_dag_changes_are_rendered"
+    },
+    {
+      "id": "adf-pipeline-success-webhook",
+      "language": "adf",
+      "filename": "pipeline.json",
+      "tier": "extreme",
+      "source": {
+        "url": "https://learn.microsoft.com/en-us/azure/data-factory/concepts-pipelines-activities",
+        "type": "platform documentation",
+        "license_note": "Inspired by Azure Data Factory activity dependency configuration; fixture is synthetic."
+      },
+      "scenario_shape": "ADF pipeline adds a parameter and a dependent success webhook activity.",
+      "semanticdiff_support": "unsupported_by_semanticdiff",
+      "expected": {
+        "semantic_or_style_result": true,
+        "families_any_of": [
+          "addition",
+          "modification"
+        ],
+        "requires_position_evidence": true,
+        "labels": [
+          "differentiator",
+          "test-candidate"
+        ]
+      },
+      "fixture": {
+        "old": "{\n  \"name\": \"CopyPipeline\",\n  \"properties\": {\n    \"activities\": [\n      {\n        \"name\": \"CopyData\",\n        \"type\": \"Copy\",\n        \"typeProperties\": {\n          \"source\": {\"type\": \"BlobSource\"},\n          \"sink\": {\"type\": \"BlobSink\"}\n        }\n      }\n    ]\n  }\n}\n",
+        "new": "{\n  \"name\": \"CopyPipeline\",\n  \"properties\": {\n    \"parameters\": {\n      \"targetFolder\": {\"type\": \"string\", \"defaultValue\": \"output\"}\n    },\n    \"activities\": [\n      {\n        \"name\": \"CopyData\",\n        \"type\": \"Copy\",\n        \"typeProperties\": {\n          \"source\": {\"type\": \"BlobSource\"},\n          \"sink\": {\"type\": \"BlobSink\"}\n        }\n      },\n      {\n        \"name\": \"LogSuccess\",\n        \"type\": \"WebActivity\",\n        \"dependsOn\": [\n          {\"activity\": \"CopyData\", \"dependencyConditions\": [\"Succeeded\"]}\n        ],\n        \"typeProperties\": {\"url\": \"https://example.invalid/log\", \"method\": \"POST\"}\n      }\n    ]\n  }\n}\n"
+      },
+      "candidate_test": "test_adf_pipeline_dependency_changes_are_key_aware"
+    },
+    {
+      "id": "sql-windowed-revenue-filter",
+      "language": "sql",
+      "filename": "revenue.sql",
+      "tier": "complex",
+      "source": {
+        "url": "https://learn.microsoft.com/en-us/sql/t-sql/queries/with-common-table-expression-transact-sql",
+        "type": "database documentation",
+        "license_note": "Inspired by CTE-based query refactoring; fixture is synthetic."
+      },
+      "scenario_shape": "Flat aggregation becomes a CTE with a windowed rank filter.",
+      "semanticdiff_support": "unsupported_by_semanticdiff",
+      "expected": {
+        "semantic_or_style_result": true,
+        "families_any_of": [
+          "addition",
+          "modification",
+          "refactoring"
+        ],
+        "requires_position_evidence": true,
+        "labels": [
+          "differentiator",
+          "test-candidate"
+        ]
+      },
+      "fixture": {
+        "old": "SELECT customer_id, SUM(amount) AS total_amount\nFROM invoices\nWHERE status = 'paid'\nGROUP BY customer_id;\n",
+        "new": "WITH ranked_customers AS (\n  SELECT\n    customer_id,\n    SUM(amount) AS total_amount,\n    ROW_NUMBER() OVER (ORDER BY SUM(amount) DESC) AS revenue_rank\n  FROM invoices\n  WHERE status = 'paid'\n  GROUP BY customer_id\n)\nSELECT customer_id, total_amount\nFROM ranked_customers\nWHERE revenue_rank <= 10;\n"
+      },
+      "candidate_test": "test_sql_cte_refactor_is_semanticdiff_differentiator"
+    },
+    {
+      "id": "csharp-null-coalescing-guard",
+      "language": "csharp",
+      "filename": "Greeting.cs",
+      "tier": "simple",
+      "source": {
+        "url": "https://learn.microsoft.com/en-us/dotnet/csharp/language-reference/operators/null-coalescing-operator",
+        "type": "language reference",
+        "license_note": "Inspired by C# null-coalescing guard idioms; fixture is synthetic."
+      },
+      "scenario_shape": "Null guard changes from an explicit if block to null-coalescing assignment.",
+      "semanticdiff_support": "supported",
+      "expected": {
+        "semantic_or_style_result": true,
+        "families_any_of": [
+          "modification",
+          "refactoring"
+        ],
+        "requires_position_evidence": true,
+        "labels": [
+          "parity",
+          "test-candidate"
+        ]
+      },
+      "fixture": {
+        "old": "public static class Greeting\n{\n    public static string Format(string? name)\n    {\n        if (name == null)\n        {\n            name = \"guest\";\n        }\n        return $\"Hello {name}\";\n    }\n}\n",
+        "new": "public static class Greeting\n{\n    public static string Format(string? name)\n    {\n        name ??= \"guest\";\n        return $\"Hello {name}\";\n    }\n}\n"
+      },
+      "candidate_test": "test_csharp_null_coalescing_guard_is_not_delete_add_noise"
+    }
+  ],
+  "vscode_comparison_smoke": {
+    "manual_or_extension_harness_targets": [
+      "python-moved-helper-edited-policy",
+      "css-delete-debug-banner",
+      "hcl-s3-versioning-and-tags",
+      "databricks-workflow-conditional-task"
+    ],
+    "assertions": [
+      "overlap-language fixtures can be opened in SemanticDiff and IntentDiff",
+      "unsupported-by-SemanticDiff fixtures fall back in SemanticDiff but remain structured in IntentDiff",
+      "deleted text remains selected on intentdiff-base for deletion scenarios",
+      "custom IntentDiff viewer backlog remains additive to existing live overlays and Semantic Changes tree"
+    ]
+  }
+}

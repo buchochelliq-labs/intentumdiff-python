@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  python-suite:
+    name: Python full suite (pytest)
+    # windows-latest matches the environment the suite is developed and gated on
+    # (named-pipe LiveServer tests, path handling).
+    runs-on: windows-latest
+    timeout-minutes: 180
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "false"
+      MATURIN_PEP517_ARGS: "--profile dev"
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Install Rust 1.93.0
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          toolchain: 1.93.0
+
+      - name: Install Python 3.12
+        uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
+        with:
+          python-version: "3.12"
+
+      # Phase D note: cross-repo checkout of the private intentdiff-core needs an
+      # org token (GITHUB_TOKEN is repo-scoped); until that secret is wired this
+      # job documents the seam. Component staging additionally needs built parser
+      # wasm (parser-repo artifacts / the registry-pinned set).
+      - name: Provision build inputs (engine checkout)
+        run: python scripts/provision_build_inputs.py
+        env:
+          GIT_TERMINAL_PROMPT: "0"
+
+      - name: Install intentdiff + test dependencies
+        # cffi first: the editable install is a maturin cffi-bindings build, which
+        # requires the cffi module importable by the TARGET interpreter at build time.
+        run: |
+          python -m pip install --upgrade pip
+          pip install cffi
+          pip install -e .[dev]
+
+      - name: Run the full unit suite
+        run: python -m pytest tests/unit -q

@@ -1,0 +1,53 @@
+{
+  "_comment": "Copy this file to lsp_servers.json and remove entries you don't need.",
+  "_comment2": "Each key is an arbitrary server name (like MCP). The 'language' field is required.",
+
+  "my-pylsp": {
+    "language": "python",
+    "transport": "stdio",
+    "command": ["pylsp"],
+    "install_hint": "uv pip install python-lsp-server"
+  },
+
+  "tsserver": {
+    "language": "typescript",
+    "transport": "stdio",
+    "command": ["typescript-language-server", "--stdio"],
+    "install_hint": "npm install -g typescript-language-server typescript"
+  },
+
+  "rust-analyzer": {
+    "language": "rust",
+    "transport": "stdio",
+    "command": ["rust-analyzer"],
+    "install_hint": "rustup component add rust-analyzer"
+  },
+
+  "gopls-tcp-legacy": {
+    "_comment": "Legacy auto-start TCP. Prefer stdio; only enable this for trusted commands.",
+    "language": "go",
+    "transport": "tcp",
+    "command": ["gopls", "serve", "-listen", "{host}:{port}"],
+    "allow_unverified_tcp_autostart": true,
+    "startup_timeout": 20,
+    "install_hint": "go install golang.org/x/tools/gopls@latest"
+  },
+
+  "running-pylsp": {
+    "_comment": "Manual-connect mode: server is already running. No 'command' needed.",
+    "language": "python",
+    "transport": "tcp",
+    "host": "localhost",
+    "port": 2087
+  },
+
+  "dbt-lsp": {
+    "_comment": "dbt Fusion language server — enriches dbt-sql models with warehouse types.",
+    "_comment2": "Install: https://docs.getdbt.com/docs/install-dbt-extension (installs dbt-lsp binary)",
+    "_comment3": "Or: curl -fsSL https://public.cdn.getdbt.com/fs/install/install.sh | sh -s -- --update --package dbt-lsp",
+    "language": "dbt-sql",
+    "transport": "stdio",
+    "command": ["dbt-lsp"],
+    "install_hint": "https://docs.getdbt.com/docs/install-dbt-extension"
+  }
+}

@@ -1,0 +1,2 @@
+# Placeholder — wasm/ is populated at build time by build.py
+# The .gitignore excludes *.wasm from this directory.

@@ -1,0 +1,684 @@
+{
+  "metadata": {
+    "source": "Sysmagine/SemanticDiff public GitHub issues and scopes documentation",
+    "source_issues_url": "https://github.com/Sysmagine/SemanticDiff/issues",
+    "source_scopes_url": "https://semanticdiff.com/docs/understand-diff/scopes/",
+    "source_issue_count": 81,
+    "source_open_issue_count": 59,
+    "source_closed_issue_count": 22,
+    "statuses": {
+      "covered": "IntentDiff supports it and has a deterministic regression test.",
+      "partial": "IntentDiff has support, but the exact issue-inspired case is not locked.",
+      "gap": "IntentDiff does not support it yet; backlog item required.",
+      "not_planned": "Explicit product decision to avoid or defer."
+    },
+    "beta_policies": {
+      "required": "Must be covered or partially supported before 0.0.1 beta.",
+      "deferred_surface": "Separate product surface explicitly deferred by product policy."
+    },
+    "issue_numbers_reviewed": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22,
+      23,
+      31,
+      32,
+      33,
+      34,
+      35,
+      36,
+      38,
+      39,
+      40,
+      42,
+      44,
+      45,
+      47,
+      48,
+      49,
+      50,
+      51,
+      52,
+      53,
+      55,
+      56,
+      57,
+      58,
+      59,
+      61,
+      62,
+      63,
+      64,
+      65,
+      66,
+      67,
+      68,
+      69,
+      70,
+      71,
+      72,
+      73,
+      74,
+      75,
+      76,
+      77,
+      78,
+      79,
+      80,
+      82,
+      83,
+      84,
+      85,
+      86,
+      87,
+      89,
+      90,
+      91,
+      94,
+      95,
+      96,
+      97,
+      98
+    ],
+    "proof_strengths": {
+      "exact_regression": "A deterministic issue-shaped test or fixture directly covers the competitor issue theme.",
+      "feature_contract": "A narrower product contract is tested, but exact issue-shaped proof is still tracked for beta hardening.",
+      "release_verifier": "Release workflow, package verifier, or CI artifact evidence proves the claim.",
+      "visual_proof_needed": "Code/test support exists, but final beta acceptance also requires approved screenshot or media proof."
+    },
+    "implementation_owners": {
+      "rust_core": "Behavior is implemented in the native Rust core and exposed through the Python layer.",
+      "rust_wasm_parser": "Behavior depends on first-party Rust Wasm parser crates and parser telemetry.",
+      "python_shell": "Behavior is intentionally owned by the thin Python orchestration layer.",
+      "vscode_ui": "Behavior is owned by the VS Code extension UI or command surface.",
+      "release": "Behavior is owned by release/package/build verification.",
+      "product_policy": "Behavior is an explicit product-scope decision rather than implemented beta functionality."
+    }
+  },
+  "entries": [
+    {
+      "id": "scope-breadcrumbs",
+      "status": "covered",
+      "beta_policy": "required",
+      "semanticdiff_issue_numbers": [],
+      "source": "https://semanticdiff.com/docs/understand-diff/scopes/",
+      "theme": "semantic context",
+      "intentdiff_position": "IntentDiff's native Rust Python engine attaches scope trails to public diff metadata, and VS Code renders semantic hunk breadcrumb chips with clickable context targets in the custom diff.",
+      "regression_tests": [
+        "tests/unit/test_competitor_issue_regressions.py::test_python_nested_scope_metadata_is_available_for_breadcrumbs",
+        "plugins/vscode/test/reviewWebviewModel.test.ts::panel renders scope breadcrumbs and optional hidden Unicode markers",
+        "tests/unit/test_competitor_issue_gap_matrix.py::test_beta_required_competitor_rows_have_no_gaps"
+      ],
+      "implementation_owner": "rust_core",
+      "implementation_paths": [
+        "crates/rust-core-host/src/lib.rs::rust_scope_trails_value",
+        "src/intentdiff/rust_core.py::build_scope_trails",
+        "plugins/vscode/src/reviewDiffRows.ts::scopeTrailHtml"
+      ],
+      "next_action": "Keep broad non-Python engine ancestry metadata as future depth work; beta scope breadcrumbs are deterministic for Python and safely rendered in VS Code.",
+      "proof_strength": "exact_regression",
+      "proof_target": "tests/unit/test_competitor_issue_regressions.py::test_python_nested_scope_metadata_is_available_for_breadcrumbs"
+    },
+    {
+      "id": "windows-arm64-native-wheels",
+      "status": "covered",
+      "beta_policy": "required",
+      "semanticdiff_issue_numbers": [
+        94
+      ],
+      "theme": "platform support",
+      "intentdiff_position": "Release workflow and verifier require a Windows ARM64 (`win_arm64`) wheel, giving IntentDiff a first-release ARM lane.",
+      "regression_tests": [
+        "tests/unit/test_verify_intentdiff_wheel.py::test_verify_wheel_accepts_windows_arm64_wheel",
+        "tests/unit/test_release_namespace_check.py::test_publish_workflow_has_testpypi_trusted_publisher_lane"
+      ],
+      "implementation_owner": "release",
+      "implementation_paths": [
+        "pyproject.toml",
+        "crates/rust-core-host/Cargo.toml",
+        "scripts/verify_intentdiff_wheel.py"
+      ],
+      "next_action": "Run the normal GitHub Actions release matrix and smoke test win_arm64 on real Windows ARM64 hardware when available.",
+      "proof_strength": "release_verifier",
+      "proof_target": "tests/unit/test_verify_intentdiff_wheel.py::test_verify_wheel_accepts_windows_arm64_wheel"
+    },
+    {
+      "id": "supported-language-coverage",
+      "status": "covered",
+      "beta_policy": "required",
+      "semanticdiff_issue_numbers": [
+        2,
+        5,
+        12,
+        18,
+        20,
+        21,
+        22,
+        23,
+        33,
+        34,
+        35,
+        44,
+        48,
+        49,
+        52,
+        53,
+        59,
+        63,
+        64,
+        67,
+        70,
+        72,
+        73,
+        86,
+        91,
+        96
+      ],
+      "theme": "language support",
+      "intentdiff_position": "IntentDiff ships built-in parser coverage for these language requests and keeps language smoke coverage in tests.",
+      "regression_tests": [
+        "tests/unit/test_semanticdiff_competitive_scenarios.py::test_runtime_language_coverage_matrix_is_reportable",
+        "tests/unit/test_supported_language_examples.py",
+        "tests/unit/test_supported_language_examples.py::test_competitor_requested_languages_have_issue_shaped_examples"
+      ],
+      "implementation_owner": "rust_wasm_parser",
+      "implementation_paths": [
+        "crates/parsers",
+        "src/intentdiff/plugins/loader.py::call_language_info",
+        "tests/unit/test_supported_language_examples.py::test_fuel_sensitive_language_parsers_emit_engine_telemetry"
+      ],
+      "next_action": "Keep exact issue-shaped fixtures for the most valuable parser edge cases.",
+      "proof_strength": "exact_regression",
+      "proof_target": "tests/unit/test_supported_language_examples.py::test_competitor_requested_languages_have_issue_shaped_examples"
+    },
+    {
+      "id": "unsupported-language-gaps",
+      "status": "covered",
+      "beta_policy": "required",
+      "semanticdiff_issue_numbers": [
+        6,
+        8,
+        9,
+        17,
+        77
+      ],
+      "theme": "language support",
+      "intentdiff_position": "GraphQL, OCaml/ReasonML, LaTeX, PO/gettext, and AsciiDoc resolve through first-party parser entrypoints and preserve their requested language identity instead of falling back to a generic language id.",
+      "regression_tests": [
+        "tests/unit/test_competitor_issue_gap_matrix.py::test_parser_depth_languages_have_named_review_parsers",
+        "tests/unit/test_competitor_surface_mvp.py::test_requested_parser_depth_languages_resolve_as_named_languages"
+      ],
+      "implementation_owner": "rust_wasm_parser",
+      "implementation_paths": [
+        "crates/parsers/generic-parser/src/lib.rs",
+        "crates/parsers/graphql-parser/src/lib.rs",
+        "crates/parsers/ocaml-parser/src/lib.rs",
+        "crates/parsers/reasonml-parser/src/lib.rs",
+        "crates/parsers/latex-parser/src/lib.rs",
+        "crates/parsers/asciidoc-parser/src/lib.rs",
+        "crates/parsers/po-parser/src/lib.rs",
+        "build.py",
+        "src/intentdiff/plugins/builtins.py::graphql_parser_entry",
+        "src/intentdiff/plugins/registry.py::detect_parser",
+        "src/intentdiff/plugins/registry.py::_FIRST_PARTY_PARSER_ENTRYPOINT_FALLBACKS",
+        "src/intentdiff/plugins/language_metadata.py"
+      ],
+      "next_action": "Replace lightweight full-parse entrypoints with deeper grammars as demand justifies, keeping issue-shaped fixtures for each upgrade.",
+      "proof_strength": "exact_regression",
+      "proof_target": "tests/unit/test_competitor_issue_gap_matrix.py::test_parser_depth_languages_have_named_review_parsers"
+    },
+    {
+      "id": "cplusplus-depth",
+      "status": "covered",
+      "beta_policy": "required",
+      "semanticdiff_issue_numbers": [
+        3,
+        78
+      ],
+      "theme": "C/C++ quality",
+      "intentdiff_position": "IntentDiff has C/C++ parser support plus issue-shaped coverage for preprocessor macro value edits, larger function move evidence, and compile_commands.json context metadata.",
+      "regression_tests": [
+        "tests/unit/test_competitor_issue_regressions.py::test_cpp_preprocessor_macro_and_template_change_parse_cleanly",
+        "tests/unit/test_competitor_issue_regressions.py::test_c_large_function_move_keeps_review_evidence_without_fallback",
+        "tests/unit/test_competitor_issue_regressions.py::test_cpp_release_depth_contract_covers_macro_template_and_large_move_evidence",
+        "tests/unit/test_competitor_issue_regressions.py::test_cpp_compile_commands_context_is_reported_for_release_depth",
+        "tests/unit/test_compile_commands.py::test_compile_commands_metadata_matches_relative_file_and_extracts_flags",
+        "tests/unit/test_semanticdiff_competitive_scenarios.py::test_runtime_language_coverage_matrix_is_reportable"
+      ],
+      "implementation_owner": "rust_wasm_parser",
+      "implementation_paths": [
+        "crates/parsers/cpp-parser/src/lib.rs",
+        "src/intentdiff/analysis/compile_commands.py",
+        "crates/rust-core-host/src/lib.rs::suppress_low_signal_reorders_drafts",
+        "tests/unit/test_competitor_issue_regressions.py::test_cpp_preprocessor_macro_and_template_change_parse_cleanly",
+        "tests/unit/test_competitor_issue_regressions.py::test_cpp_compile_commands_context_is_reported_for_release_depth"
+      ],
+      "next_action": "Keep C/C++ macro/template, large-move, and compile-command release-depth proof in the RC gate while expanding macro/preprocessor strategy with larger fixtures.",
+      "proof_strength": "exact_regression",
+      "proof_target": "tests/unit/test_competitor_issue_regressions.py::test_cpp_compile_commands_context_is_reported_for_release_depth"
+    },
+    {
+      "id": "json-and-config-semantics",
+      "status": "covered",
+      "beta_policy": "required",
+      "semanticdiff_issue_numbers": [
+        10,
+        62,
+        82
+      ],
+      "theme": "semantic quality",
+      "intentdiff_position": "IntentDiff supports JSON/YAML/config parsing, schema metadata, and suppresses unchanged keyed reorders while keeping value edits visible.",
+      "regression_tests": [
+        "tests/unit/test_competitor_issue_regressions.py::test_json_reorder_keeps_value_change_and_suppresses_unchanged_key_moves",
+        "tests/unit/test_schema_resolver.py"
+      ],
+      "implementation_owner": "rust_wasm_parser",
+      "implementation_paths": [
+        "crates/parsers/json-parser/src/lib.rs",
+        "src/intentdiff/analysis/keyed_profiles.py",
+        "src/intentdiff/analysis/schema_resolver.py"
+      ],
+      "next_action": "Keep adding schema-specific config fixtures as new profiles ship.",
+      "proof_strength": "exact_regression",
+      "proof_target": "tests/unit/test_competitor_issue_regressions.py::test_json_reorder_keeps_value_change_and_suppresses_unchanged_key_moves"
+    },
+    {
+      "id": "java-csharp-jsts-parser-edge-cases",
+      "status": "covered",
+      "beta_policy": "required",
+      "semanticdiff_issue_numbers": [
+        11,
+        16,
+        32,
+        55,
+        65,
+        66,
+        83,
+        84
+      ],
+      "theme": "language-specific correctness",
+      "intentdiff_position": "IntentDiff supports Java, C#, JS, TS, and TSX with issue-shaped fixtures for import/annotation reorder, C# async identifiers, and JavaScript semicolon insertion.",
+      "regression_tests": [
+        "tests/unit/test_competitor_issue_regressions.py::test_java_override_and_import_reorder_remain_reviewable_not_noisy",
+        "tests/unit/test_competitor_issue_regressions.py::test_csharp_async_identifier_and_modern_expression_body_parse_cleanly",
+        "tests/unit/test_competitor_issue_regressions.py::test_javascript_automatic_semicolon_insertion_does_not_create_scaffold_noise"
+      ],
+      "implementation_owner": "rust_wasm_parser",
+      "implementation_paths": [
+        "crates/parsers/java-parser/src/lib.rs",
+        "crates/parsers/csharp-parser/src/lib.rs",
+        "crates/parsers/js-ts-parser/src/lib.rs"
+      ],
+      "next_action": "Keep extending exact syntax fixtures as upstream parser grammars evolve.",
+      "proof_strength": "exact_regression",
+      "proof_target": "tests/unit/test_competitor_issue_regressions.py::test_java_override_and_import_reorder_remain_reviewable_not_noisy"
+    },
+    {
+      "id": "css-scss-edge-cases",
+      "status": "covered",
+      "beta_policy": "required",
+      "semanticdiff_issue_numbers": [
+        13,
+        14,
+        31
+      ],
+      "theme": "web format correctness",
+      "intentdiff_position": "IntentDiff supports CSS and SCSS with issue-shaped fixtures for attribute selectors and SCSS @use alias/value changes.",
+      "regression_tests": [
+        "tests/unit/test_competitor_issue_regressions.py::test_css_attribute_selector_value_change_stays_anchored",
+        "tests/unit/test_competitor_issue_regressions.py::test_scss_use_alias_and_variable_change_parse_cleanly",
+        "tests/integration/test_web_format_parsers.py"
+      ],
+      "implementation_owner": "rust_wasm_parser",
+      "implementation_paths": [
+        "crates/parsers/css-parser/src/lib.rs",
+        "crates/parsers/scss-parser/src/lib.rs",
+        "tests/integration/test_web_format_parsers.py"
+      ],
+      "next_action": "Keep broader web-format parser fixtures in the integration suite.",
+      "proof_strength": "exact_regression",
+      "proof_target": "tests/unit/test_competitor_issue_regressions.py::test_css_attribute_selector_value_change_stays_anchored"
+    },
+    {
+      "id": "live-buffer-and-fallback",
+      "status": "covered",
+      "beta_policy": "required",
+      "semanticdiff_issue_numbers": [
+        4,
+        69
+      ],
+      "theme": "editor/runtime fallback",
+      "intentdiff_position": "IntentDiff has live buffer and unsupported-file fallback paths.",
+      "regression_tests": [
+        "tests/unit/test_iter_changed_sources.py",
+        "tests/unit/test_supported_language_examples.py",
+        "tests/unit/test_iter_changed_sources.py::test_competitor_live_buffer_untracked_file_has_visible_review_evidence"
+      ],
+      "implementation_owner": "python_shell",
+      "implementation_paths": [
+        "src/intentdiff/sources/live_buffer_source.py",
+        "src/intentdiff/differ.py::diff_commit",
+        "crates/parsers/generic-parser/src/lib.rs"
+      ],
+      "next_action": "Keep live-buffer and unsupported-file behaviour in the release gate.",
+      "proof_strength": "exact_regression",
+      "proof_target": "tests/unit/test_iter_changed_sources.py::test_competitor_live_buffer_untracked_file_has_visible_review_evidence"
+    },
+    {
+      "id": "custom-diff-navigation-and-layout",
+      "status": "covered",
+      "beta_policy": "required",
+      "semanticdiff_issue_numbers": [
+        38,
+        50,
+        51,
+        61,
+        68,
+        75,
+        76,
+        97
+      ],
+      "theme": "VS Code UX",
+      "intentdiff_position": "IntentDiff custom diff supports grouped review, hidden context, toolbar actions, next/previous navigation, minimap/folding, responsive layout, and scope hunk chips.",
+      "regression_tests": [
+        "plugins/vscode/test/reviewWebviewModel.test.ts::panel model collapses uninteresting blank inserted rows behind gutter controls",
+        "plugins/vscode/test/reviewWebviewModel.test.ts::panel renders scope breadcrumbs and optional hidden Unicode markers",
+        "plugins/vscode/test/reviewModel.test.ts"
+      ],
+      "implementation_owner": "vscode_ui",
+      "implementation_paths": [
+        "plugins/vscode/src/reviewWebviewModel.ts::renderPanelHtml",
+        "plugins/vscode/src/reviewWebview.ts",
+        "scripts/record-release-demo.ps1"
+      ],
+      "next_action": "Refresh screenshots and GIFs after the final UX review.",
+      "proof_strength": "visual_proof_needed",
+      "proof_target": "Phase 4 screenshot: Semantic Diff with minimap, folding, scope chips, horizontal scroll, and narrow pane"
+    },
+    {
+      "id": "theme-icons-and-light-mode",
+      "status": "covered",
+      "beta_policy": "required",
+      "semanticdiff_issue_numbers": [
+        40,
+        56,
+        57,
+        58,
+        85
+      ],
+      "theme": "VS Code visuals",
+      "intentdiff_position": "IntentDiff contributes theme colours, dedicated light/dark toolbar icons, and light/high-contrast defaults for semantic review colours.",
+      "regression_tests": [
+        "plugins/vscode/test/themeColors.test.ts"
+      ],
+      "implementation_owner": "vscode_ui",
+      "implementation_paths": [
+        "plugins/vscode/package.json",
+        "plugins/vscode/resources/review-icon-light.svg",
+        "plugins/vscode/resources/review-icon-dark.svg"
+      ],
+      "next_action": "Capture dark/light screenshots during final media refresh; manifest and icon contrast contracts are locked.",
+      "proof_strength": "visual_proof_needed",
+      "proof_target": "Phase 4 screenshot: light theme plus dark theme icon/color contrast"
+    },
+    {
+      "id": "diff-editing-and-stage-revert",
+      "status": "covered",
+      "beta_policy": "required",
+      "semanticdiff_issue_numbers": [
+        15,
+        87,
+        95
+      ],
+      "theme": "VS Code editing workflow",
+      "intentdiff_position": "IntentDiff keeps native VS Code diff/SCM workflows available for edit and file-level stage/revert, with custom review actions always linking back to native diff when mutation is needed.",
+      "regression_tests": [
+        "plugins/vscode/test/reviewModel.test.ts",
+        "plugins/vscode/test/reviewWebviewModel.test.ts",
+        "plugins/vscode/test/themeColors.test.ts::extension contributes Timeline, stage, and revert review surfaces"
+      ],
+      "implementation_owner": "vscode_ui",
+      "implementation_paths": [
+        "plugins/vscode/src/diffSurfaceController.ts::vscode.diff",
+        "plugins/vscode/src/reviewWebviewModel.ts::actionButton",
+        "plugins/vscode/src/reviewWebview.ts"
+      ],
+      "next_action": "Design semantic block stage/revert as a future explicit editing feature; beta keeps mutations in VS Code's native trusted diff/SCM surfaces.",
+      "proof_strength": "exact_regression",
+      "proof_target": "plugins/vscode/test/themeColors.test.ts::extension contributes Timeline, stage, and revert review surfaces"
+    },
+    {
+      "id": "timeline-and-history",
+      "status": "covered",
+      "beta_policy": "required",
+      "semanticdiff_issue_numbers": [
+        89
+      ],
+      "theme": "VS Code history integration",
+      "intentdiff_position": "IntentDiff contributes a VS Code Timeline provider for review history and keeps compact review snapshots available through the extension history surface.",
+      "regression_tests": [
+        "plugins/vscode/test/themeColors.test.ts::extension contributes Timeline, stage, and revert review surfaces"
+      ],
+      "implementation_owner": "vscode_ui",
+      "implementation_paths": [
+        "plugins/vscode/src/reviewTimeline.ts::ReviewTimelineProvider",
+        "plugins/vscode/src/extension.ts::registerReviewTimelineProvider"
+      ],
+      "next_action": "Broaden timeline snapshots if review persistence needs richer historical metadata.",
+      "proof_strength": "exact_regression",
+      "proof_target": "plugins/vscode/test/themeColors.test.ts::extension contributes Timeline, stage, and revert review surfaces"
+    },
+    {
+      "id": "github-pr-review-workflows",
+      "status": "covered",
+      "beta_policy": "required",
+      "semanticdiff_issue_numbers": [
+        47,
+        71,
+        74,
+        79
+      ],
+      "theme": "PR review",
+      "intentdiff_position": "IntentDiff has a GitHub Action with sticky comments, job summary, JSON/SARIF/static HTML artifacts, path filtering, and guardrail annotations. PR URL entry and gist diff are convenience workflows outside the beta gate.",
+      "regression_tests": [
+        "tests/unit/test_github_action.py::test_run_action_writes_reports_outputs_and_summary",
+        "tests/unit/test_github_action.py::test_action_path_filters_keep_matching_files_guardrails_and_cross_file",
+        "tests/unit/test_github_action.py::test_upsert_pr_comment_updates_existing_comment",
+        "tests/unit/test_github_action.py::test_static_html_report_escapes_workspace_controlled_text"
+      ],
+      "implementation_owner": "python_shell",
+      "implementation_paths": [
+        "scripts/github_action.py",
+        "src/intentdiff/differ.py::diff_commit",
+        "src/intentdiff/analysis/guardrail_reports.py"
+      ],
+      "next_action": "Keep the GitHub Action/static artifact workflow as the primary CI path while the new PR URL and gist CLI helpers feed hosted-app style flows.",
+      "proof_strength": "exact_regression",
+      "proof_target": "tests/unit/test_github_action.py::test_static_html_report_escapes_workspace_controlled_text"
+    },
+    {
+      "id": "hosted-github-app-for-beta",
+      "status": "covered",
+      "beta_policy": "required",
+      "semanticdiff_issue_numbers": [
+        47,
+        71,
+        74,
+        79
+      ],
+      "theme": "PR review",
+      "intentdiff_position": "IntentDiff ships a repo-hostable GitHub App MVP with webhook signature validation, pull request event parsing, deterministic check-run payloads, and mockable PR/gist URL CLI workflows.",
+      "regression_tests": [
+        "tests/unit/test_competitor_surface_mvp.py::test_github_app_signature_url_event_and_check_payload_contracts",
+        "tests/unit/test_competitor_surface_mvp.py::test_gist_url_parser_accepts_only_github_gist_urls"
+      ],
+      "implementation_owner": "python_shell",
+      "implementation_paths": [
+        "src/intentdiff/github_app.py::verify_webhook_signature",
+        "src/intentdiff/github_app.py::create_app",
+        "src/intentdiff/cli/_commands.py::_cmd_github_pr"
+      ],
+      "next_action": "Add deployment packaging and real GitHub App registration only when hosting is selected.",
+      "proof_strength": "exact_regression",
+      "proof_target": "tests/unit/test_competitor_surface_mvp.py::test_github_app_signature_url_event_and_check_payload_contracts"
+    },
+    {
+      "id": "visual-studio-2022-surface",
+      "status": "covered",
+      "beta_policy": "required",
+      "semanticdiff_issue_numbers": [
+        1,
+        42
+      ],
+      "theme": "IDE integrations",
+      "intentdiff_position": "IntentDiff includes a Visual Studio 2022 VSIX scaffold with command identity and a thin command service that opens IntentDiff review output through the CLI/static artifact surface.",
+      "regression_tests": [
+        "tests/unit/test_competitor_surface_mvp.py::test_electron_review_shell_and_visual_studio_surface_are_repo_mvp_artifacts",
+        "tests/unit/test_competitor_surface_mvp.py::test_no_jetbrains_or_intellij_surface_added"
+      ],
+      "implementation_owner": "python_shell",
+      "implementation_paths": [
+        "plugins/visualstudio/source.extension.vsixmanifest",
+        "plugins/visualstudio/src/IntentDiffCommandService.cs"
+      ],
+      "next_action": "Turn the scaffold into a packaged VSIX after the command contract is validated against Visual Studio SDK builds.",
+      "proof_strength": "exact_regression",
+      "proof_target": "tests/unit/test_competitor_surface_mvp.py::test_electron_review_shell_and_visual_studio_surface_are_repo_mvp_artifacts"
+    },
+    {
+      "id": "jetbrains-intellij-surface",
+      "status": "not_planned",
+      "beta_policy": "deferred_surface",
+      "semanticdiff_issue_numbers": [
+        1,
+        42
+      ],
+      "theme": "IDE integrations",
+      "intentdiff_position": "IntentDiff intentionally excludes JetBrains/IntelliJ from this pass; it remains the only deferred competitor surface.",
+      "regression_tests": [
+        "tests/unit/test_competitor_surface_mvp.py::test_no_jetbrains_or_intellij_surface_added"
+      ],
+      "implementation_owner": "product_policy",
+      "implementation_paths": [
+        "docs/COMPETITOR_BACKLOG_COMPLETION_AUDIT.md#beta-gate-policy"
+      ],
+      "next_action": "Revisit JetBrains/IntelliJ only after the non-IntelliJ beta surfaces are validated.",
+      "proof_strength": "feature_contract",
+      "proof_target": "tests/unit/test_competitor_surface_mvp.py::test_no_jetbrains_or_intellij_surface_added"
+    },
+    {
+      "id": "standalone-review-app",
+      "status": "covered",
+      "beta_policy": "required",
+      "semanticdiff_issue_numbers": [
+        39
+      ],
+      "theme": "standalone UI",
+      "intentdiff_position": "IntentDiff includes an Electron-first standalone review shell with a shared renderer that can also build as a web companion and reads existing IntentDiff artifact JSON.",
+      "regression_tests": [
+        "tests/unit/test_competitor_surface_mvp.py::test_electron_review_shell_and_visual_studio_surface_are_repo_mvp_artifacts"
+      ],
+      "implementation_owner": "vscode_ui",
+      "implementation_paths": [
+        "apps/review-shell/package.json",
+        "apps/review-shell/src/reviewArtifact.ts",
+        "apps/review-shell/src/main.ts"
+      ],
+      "next_action": "Package/sign installers only after the repo MVP renderer contract is validated.",
+      "proof_strength": "exact_regression",
+      "proof_target": "tests/unit/test_competitor_surface_mvp.py::test_electron_review_shell_and_visual_studio_surface_are_repo_mvp_artifacts"
+    },
+    {
+      "id": "repo-path-and-file-identity",
+      "status": "covered",
+      "beta_policy": "required",
+      "semanticdiff_issue_numbers": [
+        7,
+        19,
+        80
+      ],
+      "theme": "repository identity",
+      "intentdiff_position": "IntentDiff preserves relative paths for deleted files, dotted repo names, and multiple-extension filenames in changed-source collection.",
+      "regression_tests": [
+        "tests/unit/test_iter_changed_sources.py::test_repo_name_with_dot_and_multi_extension_path_stays_relative",
+        "tests/unit/test_iter_changed_sources.py",
+        "tests/unit/test_commit_differ.py"
+      ],
+      "implementation_owner": "python_shell",
+      "implementation_paths": [
+        "src/intentdiff/sources/git_source.py",
+        "src/intentdiff/sources/git_source.py::iter_changed_sources",
+        "crates/rust-core-host/src/lib.rs::collect_working_tree_python_files_rust"
+      ],
+      "next_action": "Keep old/new ref rendering in the normal release gate.",
+      "proof_strength": "exact_regression",
+      "proof_target": "tests/unit/test_iter_changed_sources.py::test_repo_name_with_dot_and_multi_extension_path_stays_relative"
+    },
+    {
+      "id": "cross-file-move-refactor-depth",
+      "status": "covered",
+      "beta_policy": "required",
+      "semanticdiff_issue_numbers": [
+        36,
+        45,
+        90
+      ],
+      "theme": "semantic review quality",
+      "intentdiff_position": "IntentDiff has cross-file semantic analysis with package-path extract/split refactor proof for beta.",
+      "regression_tests": [
+        "tests/unit/test_cross_file.py::test_detects_package_path_extract_refactor_depth",
+        "tests/unit/test_semanticdiff_competitive_scenarios.py",
+        "tests/unit/test_commit_differ.py"
+      ],
+      "implementation_owner": "python_shell",
+      "implementation_paths": [
+        "src/intentdiff/analysis/cross_file.py::detect_cross_file_changes",
+        "crates/index-engine/src/lib.rs",
+        "src/intentdiff/core/index.py"
+      ],
+      "next_action": "Continue expanding multi-file grouped review intent after beta, with current cross-file move/split proof locked.",
+      "proof_strength": "exact_regression",
+      "proof_target": "tests/unit/test_cross_file.py::test_detects_package_path_extract_refactor_depth"
+    },
+    {
+      "id": "unicode-highlight-option",
+      "status": "covered",
+      "beta_policy": "required",
+      "semanticdiff_issue_numbers": [
+        98
+      ],
+      "theme": "review display options",
+      "intentdiff_position": "IntentDiff custom diff exposes a hidden Unicode/control-character toggle that renders safe inline markers without changing raw source text.",
+      "regression_tests": [
+        "plugins/vscode/test/reviewWebviewModel.test.ts::panel renders scope breadcrumbs and optional hidden Unicode markers"
+      ],
+      "implementation_owner": "vscode_ui",
+      "implementation_paths": [
+        "plugins/vscode/src/reviewDiffRows.ts::unicodeMarker",
+        "plugins/vscode/src/reviewWebviewModel.ts::layoutButton"
+      ],
+      "next_action": "Keep terminal/CLI hidden-character rendering as a separate post-beta polish item.",
+      "proof_strength": "exact_regression",
+      "proof_target": "plugins/vscode/test/reviewWebviewModel.test.ts::panel renders scope breadcrumbs and optional hidden Unicode markers"
+    }
+  ]
+}
