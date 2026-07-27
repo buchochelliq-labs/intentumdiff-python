@@ -11,8 +11,12 @@ import pytest
 class TestSerializeCst:
     def test_round_trips_to_dict(self):
         from intentdiff.core.cst_serializer import deserialize_cst, serialize_cst
-        import tree_sitter
-        import tree_sitter_python as tspython
+        tree_sitter = pytest.importorskip(
+            "tree_sitter", reason="parse-side debt dep (#82 split repo does not carry it)"
+        )
+        tspython = pytest.importorskip(
+            "tree_sitter_python", reason="parse-side debt dep (#82 split repo does not carry it)"
+        )
 
         lang = tree_sitter.Language(tspython.language())
         parser = tree_sitter.Parser(lang)
@@ -25,8 +29,12 @@ class TestSerializeCst:
 
     def test_leaf_has_text(self):
         from intentdiff.core.cst_serializer import deserialize_cst, serialize_cst
-        import tree_sitter
-        import tree_sitter_python as tspython
+        tree_sitter = pytest.importorskip(
+            "tree_sitter", reason="parse-side debt dep (#82 split repo does not carry it)"
+        )
+        tspython = pytest.importorskip(
+            "tree_sitter_python", reason="parse-side debt dep (#82 split repo does not carry it)"
+        )
 
         lang = tree_sitter.Language(tspython.language())
         parser = tree_sitter.Parser(lang)

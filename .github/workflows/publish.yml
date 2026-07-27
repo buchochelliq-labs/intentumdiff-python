@@ -1,0 +1,236 @@
+name: Build platform wheels
+
+# Builds native IntentDiff wheels and publishes verified release wheels to PyPI
+# from version tags after the PyPI Trusted Publishing gate is configured.
+on:
+  push:
+    tags:
+      - "v[0-9]*.[0-9]*.[0-9]*"
+  workflow_dispatch:
+    inputs:
+      publish_testpypi:
+        description: "Publish verified wheels to TestPyPI"
+        required: false
+        default: false
+        type: boolean
+      testpypi_version:
+        description: "TestPyPI-only rehearsal version; use a new value if TestPyPI has tombstoned filenames"
+        required: false
+        default: "0.0.1b1"
+        type: string
+
+jobs:
+  build-wheels:
+    name: Build ${{ matrix.artifact }} wheel
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    env:
+      INTENTDIFF_EXPECTED_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_testpypi && inputs.testpypi_version || '0.0.1b1' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact: Linux-x64
+            rust_targets: wasm32-wasip2
+            maturin_target_args: ""
+          - os: macos-latest
+            artifact: macOS
+            rust_targets: wasm32-wasip2
+            maturin_target_args: ""
+          - os: windows-latest
+            artifact: Windows-x64
+            rust_targets: wasm32-wasip2
+            maturin_target_args: ""
+          - os: windows-latest
+            artifact: Windows-arm64
+            rust_targets: wasm32-wasip2,aarch64-pc-windows-msvc
+            maturin_target_args: "--target aarch64-pc-windows-msvc"
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Install Rust 1.93.0
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          toolchain: 1.93.0
+          targets: ${{ matrix.rust_targets }}
+
+      - name: Set up Python
+        uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
+        with:
+          python-version: "3.12"
+
+      - name: Stamp TestPyPI rehearsal version
+        if: github.event_name == 'workflow_dispatch' && inputs.publish_testpypi
+        run: python scripts/set_release_version.py ${{ env.INTENTDIFF_EXPECTED_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          # Release artifacts must not be built from restorable caches (zizmor
+          # cache-poisoning, issue #76).
+          enable-cache: false
+
+      - name: Build and copy Wasm components
+        run: python build.py
+
+      - name: Install maturin
+        run: uv tool install "maturin==1.14.1"
+
+      # PyO3-free release wheel (#82/B.6): a bare cdylib shipped as a data file that the Python
+      # package loads via ctypes over the C ABI. `--no-default-features` drops the `python`/pyo3
+      # feature; `-b cffi` builds + packages the cdylib (maturin embeds cbindgen to emit the C
+      # header — restricted to functions by crates/rust-core-host/cbindgen.toml so cffi's macro
+      # parser is happy — and its generated cffi wrapper is unused: rust_core.py ctypes-loads the
+      # cdylib directly).
+      # #82 split: stage the engine checkout + parser components the wheel bundles.
+      # Cross-repo access to the private intentdiff-core needs the org token (Phase D).
+      - name: Provision build inputs (engine checkout)
+        run: python scripts/provision_build_inputs.py
+        env:
+          GIT_TERMINAL_PROMPT: "0"
+
+      - name: Build native IntentDiff wheel (pyo3-free cdylib)
+        run: maturin build --release --no-default-features -b cffi --out dist --compatibility pypi ${{ matrix.maturin_target_args }}
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/target-intentdiff-rust-wheel
+
+      - name: Verify wheel contents and size budget
+        run: >
+          python scripts/verify_intentdiff_wheel.py dist
+          --max-wheel-mb 75
+          --max-release-mb 75
+          --expected-version ${{ env.INTENTDIFF_EXPECTED_VERSION }}
+
+      - name: Record artifact checksums
+        run: >
+          python scripts/verify_artifacts.py
+          --root dist
+          --manifest dist/artifacts-${{ matrix.artifact }}.sha256
+          record
+          --patterns "*.whl"
+
+      - name: Upload dist artefacts
+        uses: actions/upload-artifact@6f51ac03b9356f520e9adb1b1b7802705f340c2b # v4.5.0
+        with:
+          name: dist-${{ matrix.artifact }}
+          path: |
+            dist/
+
+  publish:
+    name: Publish to PyPI
+    needs: build-wheels
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/intentdiff
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Validate release media manifest
+        run: python scripts/validate_release_media_manifest.py
+
+      - uses: actions/download-artifact@c850b930e6ba138125429b7e5c93fc707a7f8427 # v4.1.4
+        with:
+          pattern: dist-*
+          path: downloaded-dist/
+          merge-multiple: true
+
+      - name: Prepare release wheels for publishing
+        run: python scripts/prepare_release_dist.py downloaded-dist publish-dist
+
+      - name: Verify downloaded artifact checksums before publishing
+        shell: bash
+        run: |
+          shopt -s nullglob
+          manifests=(downloaded-dist/artifacts-*.sha256)
+          if [ "${#manifests[@]}" -eq 0 ]; then
+            echo "No artifact checksum manifests found in downloaded-dist" >&2
+            exit 1
+          fi
+          for manifest in "${manifests[@]}"; do
+            python scripts/verify_artifacts.py --root publish-dist --manifest "$manifest" verify
+          done
+
+      - name: Verify downloaded wheels before publishing
+        run: >
+          python scripts/verify_intentdiff_wheel.py publish-dist
+          --max-wheel-mb 75
+          --max-release-mb 250
+          --expected-name intentdiff
+          --expected-version 0.0.1b1
+          --expected-platform-pattern ".*manylinux.*x86_64.*"
+          --expected-platform-pattern "macosx_.*"
+          --expected-platform-pattern "win_amd64"
+          --expected-platform-pattern "win_arm64"
+
+      - uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # release/v1
+        with:
+          packages-dir: publish-dist/
+          attestations: false
+
+  publish-testpypi:
+    name: Publish to TestPyPI
+    needs: build-wheels
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_testpypi
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/project/intentdiff/
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      INTENTDIFF_EXPECTED_VERSION: ${{ inputs.testpypi_version }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Validate release media manifest
+        run: python scripts/validate_release_media_manifest.py
+
+      - uses: actions/download-artifact@c850b930e6ba138125429b7e5c93fc707a7f8427 # v4.1.4
+        with:
+          pattern: dist-*
+          path: downloaded-dist/
+          merge-multiple: true
+
+      - name: Prepare release wheels for publishing
+        run: python scripts/prepare_release_dist.py downloaded-dist publish-dist
+
+      - name: Verify downloaded artifact checksums before TestPyPI publishing
+        shell: bash
+        run: |
+          shopt -s nullglob
+          manifests=(downloaded-dist/artifacts-*.sha256)
+          if [ "${#manifests[@]}" -eq 0 ]; then
+            echo "No artifact checksum manifests found in downloaded-dist" >&2
+            exit 1
+          fi
+          for manifest in "${manifests[@]}"; do
+            python scripts/verify_artifacts.py --root publish-dist --manifest "$manifest" verify
+          done
+
+      - name: Verify downloaded wheels before TestPyPI publishing
+        run: >
+          python scripts/verify_intentdiff_wheel.py publish-dist
+          --max-wheel-mb 75
+          --max-release-mb 250
+          --expected-version ${{ env.INTENTDIFF_EXPECTED_VERSION }}
+
+      - uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # release/v1
+        with:
+          packages-dir: publish-dist/
+          repository-url: https://test.pypi.org/legacy/
+          attestations: false

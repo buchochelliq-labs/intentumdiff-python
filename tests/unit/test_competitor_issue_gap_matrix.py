@@ -5,6 +5,12 @@ from pathlib import Path
 from typing import Any
 
 from intentdiff.plugins.registry import PluginRegistry
+import pytest
+
+pytestmark = pytest.mark.skipif(
+    not (Path(__file__).resolve().parents[2] / "docs" / "COMPETITOR_BACKLOG_COMPLETION_AUDIT.md").exists(),
+    reason="monorepo release docs/artifacts not present (#82 split python repo)",
+)
 
 _FIXTURE_PATH = (
     Path(__file__).resolve().parents[1]

@@ -13,6 +13,12 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+import pytest
+
+pytestmark = pytest.mark.skipif(
+    not (Path(__file__).resolve().parents[2] / "crates" / "parsers").exists(),
+    reason="monorepo crates tree not present (#82 split python repo)",
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 

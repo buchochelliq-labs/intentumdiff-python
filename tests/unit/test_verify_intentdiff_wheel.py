@@ -236,7 +236,9 @@ def test_pyproject_uses_top_level_maturin_native_wheel_backend() -> None:
     assert pyproject["project"]["authors"] == [{"name": "BuchochelliQ Labs"}]
     assert pyproject["project"]["maintainers"] == [{"name": "BuchochelliQ Labs"}]
     assert pyproject["build-system"]["build-backend"] == "maturin"
-    assert pyproject["tool"]["maturin"]["manifest-path"] == (
+    # Suffix match: the monorepo points at crates/rust-core-host directly; the #82 split
+    # python repo points at the PROVISIONED engine checkout (build/intentdiff-core/crates/…).
+    assert pyproject["tool"]["maturin"]["manifest-path"].endswith(
         "crates/rust-core-host/Cargo.toml"
     )
     assert pyproject["tool"]["maturin"]["module-name"] == "intentdiff.intentdiff_rust_core"

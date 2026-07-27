@@ -8,6 +8,12 @@ from pathlib import Path
 
 from intentdiff.plugins.adapter import ParserAdapter
 from intentdiff.plugins.loader import _language_info_record_to_dict
+import pytest
+
+pytestmark = pytest.mark.skipif(
+    not (Path(__file__).resolve().parents[2] / "crates" / "parsers").exists(),
+    reason="monorepo crates tree not present (#82 split python repo)",
+)
 
 
 ROOT = Path(__file__).resolve().parents[2]

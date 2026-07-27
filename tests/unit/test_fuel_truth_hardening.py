@@ -16,6 +16,11 @@ from intentdiff.core.models import ChangeType, DiffConfig
 from intentdiff.differ import _FUEL_HOTSPOT_ABSOLUTE
 from intentdiff.plugins.exceptions import PluginFuelExhausted
 
+pytestmark = pytest.mark.skipif(
+    not (Path(__file__).resolve().parents[2] / "crates" / "parsers").exists(),
+    reason="monorepo crates tree not present (#82 split python repo)",
+)
+
 
 _MAIN_TS_BEFORE = """import { app, BrowserWindow } from "electron";
 import { readFileSync } from "fs";

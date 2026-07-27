@@ -23,6 +23,11 @@ from intentdiff.github_app import (
 )
 from intentdiff.plugins.registry import PluginRegistry
 
+pytestmark = pytest.mark.skipif(
+    not (Path(__file__).resolve().parents[2] / "apps" / "review-shell").exists(),
+    reason="monorepo MVP artifact tree not present (#82 split python repo)",
+)
+
 
 
 def test_github_app_signature_url_event_and_check_payload_contracts() -> None:

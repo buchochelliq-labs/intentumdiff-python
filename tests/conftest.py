@@ -20,6 +20,37 @@ SRC_ROOT = REPO_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
+# ── #82 split guard ─────────────────────────────────────────────────────────
+# The split python repo does not carry the monorepo's release/CI tooling under
+# scripts/ (some of it travels to other split repos, e.g. the media validator to
+# intentdiff-vscode). Ignore each tooling test when its script module is absent;
+# in the monorepo every script exists, so nothing is ever ignored here.
+_SCRIPT_TESTS = {
+    "unit/test_github_action.py": "github_action.py",
+    "unit/test_prepare_release_dist.py": "prepare_release_dist.py",
+    "unit/test_release_media_manifest_validator.py": "validate_release_media_manifest.py",
+    "unit/test_release_readiness_accounting.py": "release_readiness_accounting.py",
+    "unit/test_sem_benchmark_docker_runner.py": "benchmark_sem_docker.py",
+    "unit/test_sem_benchmark_harness.py": "benchmark_sem.py",
+    "unit/test_set_release_version.py": "set_release_version.py",
+    "unit/test_security_prereq_check.py": "security_prereq_check.py",
+    "unit/test_vendor_monaco.py": "vendor_monaco.py",
+    "unit/test_verify_artifacts.py": "verify_artifacts.py",
+}
+collect_ignore = [
+    test
+    for test, script in _SCRIPT_TESTS.items()
+    if not (REPO_ROOT / "scripts" / script).exists()
+]
+# Same guard for monorepo ROOT tooling files (the parser build helper, the pre-commit gate).
+_ROOT_TESTS = {
+    "unit/test_build_helper.py": "build.py",
+    "unit/test_pre_commit_security_gate.py": "scripts/pre_commit_security_gate.py",
+}
+collect_ignore += [
+    test for test, rel in _ROOT_TESTS.items() if not (REPO_ROOT / rel).exists()
+]
+
 # ---------------------------------------------------------------------------
 # Set INTENTDIFF_ALLOW_VULNERABLE_WASMTIME=1 at import time so benchmark modules
 # that run availability probes during collection keep working in unsynced
