@@ -16,7 +16,7 @@
     {"pattern": "no case for scenario", "class": "scenario-matrix", "justification": "sparse per-language scenario cells — pre-release burn-down backlog (#45/#65)"},
     {"pattern": "not derivable from this snippet", "class": "scenario-matrix", "justification": "mutation not applicable to the language snippet — burn-down backlog"},
     {"pattern": "discoverable in the semantic tree", "class": "scenario-matrix", "justification": "snippet lacks the construct family (source f-string + runtime expansions) — burn-down backlog"},
-    {"pattern": "^raised: ", "class": "scenario-matrix", "justification": "matrix harness treats mutation-construction exceptions as inapplicable cells — SCRUTINIZE at release (could mask real crashes)"},
+    {"pattern": "raised during mutation derivation", "class": "scenario-matrix", "justification": "derivation-phase-only tolerance (skip-audit fix): engine/verification exceptions now propagate and fail the suite"},
     {"pattern": "no (visible tokens|applicable mutations)", "class": "scenario-matrix", "justification": "ratchet snippets without applicable cells — burn-down backlog"},
     {"pattern": "(json parser|parsers?) not staged", "class": "staging", "justification": "requires built wasm staged locally"},
     {"pattern": "Parser entry-points not registered", "class": "staging", "justification": "requires a local editable install sync"},
@@ -31,7 +31,7 @@
     {"pattern": "FastAPI/httpx serve test dependencies unavailable", "class": "platform", "justification": "serve extra deps — CI installs [dev,serve] since de075c3"},
     {"pattern": "LLM call failed", "class": "env", "justification": "opt-in real-LLM benchmark needs key + network"},
     {"pattern": "Python oracle path retired for this contract", "class": "staging", "justification": "retired-oracle contracts skip the parity comparison"},
-    {"pattern": "native .*fell back", "class": "staging", "justification": "live tests tolerate native-chain fallback on unstaged parsers — scrutinize at release"},
+    {"pattern": "fell back \\(parser not staged\\)", "class": "staging", "justification": "skip-audit tightened: ONLY an unstaged parser excuses a native decline; any other decline now FAILS the parity tests"},
     {"pattern": "no position-bearing entities to anchor", "class": "scenario-matrix", "justification": "per-language position cells — burn-down backlog"},
     {"pattern": "example has no structural add/delete evidence", "class": "scenario-matrix", "justification": "per-language example gaps — burn-down backlog"}
   ]

@@ -493,17 +493,27 @@ EDIT_VERBS = {
 
 
 def run_verb(differ, language, filename, source, verb) -> tuple[str, str | None]:
-    """Return (status, detail): status in {ok, fail, skip}."""
+    """Return (status, detail): status in {ok, fail, skip}.
+
+    Tolerance boundary (skip-audit, 2026-07-28): DISCOVERY + DERIVATION on the exotic
+    snippet may skip on an exception (matrix sparsity — a parser gap on the unmutated
+    source). The MUTATION DIFF + VERIFICATION must never swallow a raise: an engine
+    exception there is a product bug and propagates to fail the suite loudly.
+    """
     derive, check, needs = EDIT_VERBS[verb]
-    entities, base = find_entities(differ, language, filename, source)
-    literals = find_literals(differ, language, filename, source)
-    pool = entities if needs == "entities" else literals
-    if not pool:
-        return "skip", f"no {needs} discoverable in the semantic tree"
-    derived = derive(source, pool, base) if needs == "entities" else derive(source, pool)
-    if derived is None:
-        return "skip", f"{verb} not derivable from this snippet"
-    mutated, ctx = derived
+    try:
+        entities, base = find_entities(differ, language, filename, source)
+        literals = find_literals(differ, language, filename, source)
+        pool = entities if needs == "entities" else literals
+        if not pool:
+            return "skip", f"no {needs} discoverable in the semantic tree"
+        derived = derive(source, pool, base) if needs == "entities" else derive(source, pool)
+        if derived is None:
+            return "skip", f"{verb} not derivable from this snippet"
+        mutated, ctx = derived
+    except Exception as exc:  # noqa: BLE001 - derivation must survive exotic snippets
+        return "skip", f"raised during mutation derivation: {exc}"
+    # Engine + verification phase — no exception tolerance past this point.
     diff = differ.diff_strings(source, mutated, filename=filename, language_hint=language)
     problem = check(diff, ctx)
     if problem is None:
@@ -514,10 +524,7 @@ def run_verb(differ, language, filename, source, verb) -> tuple[str, str | None]
 def build_manifest(differ, language, filename, source) -> dict:
     verbs: dict[str, dict] = {}
     for verb in EDIT_VERBS:
-        try:
-            status, detail = run_verb(differ, language, filename, source, verb)
-        except Exception as exc:  # noqa: BLE001 - generation must survive bad parsers
-            status, detail = "skip", f"raised: {exc}"
+        status, detail = run_verb(differ, language, filename, source, verb)
         if status == "ok":
             verbs[verb] = {"ok": True}
         elif status == "skip":

@@ -622,7 +622,10 @@ class TestNativeDiffHandler:
             str(tmp_path), filename, "HEAD", new, differ._config.model_dump_json(), _wasm_dir()
         )
         if "diff" not in native:
-            pytest.skip(f"native chain fell back for {filename}: {native.get('fallback')}")
+            fallback = str(native.get("fallback", ""))
+            if "staged" in fallback or "unsupported parser" in fallback:
+                pytest.skip(f"native chain for {filename} fell back (parser not staged): {fallback}")
+            pytest.fail(f"native chain for {filename} DECLINED unexpectedly: {fallback}")
         served = json.loads(SemanticDiff.model_validate(native["diff"]).model_dump_json())
         oracle = json.loads(differ.diff_strings(old, new, filename).model_dump_json())
         assert served["language"] == oracle["language"]
@@ -1028,7 +1031,10 @@ class TestNativeReviewHandler:
             str(tmp_path), "HEAD~1", "HEAD", differ._config.model_dump_json(), _wasm_dir()
         )
         if "commit_diff" not in native:
-            pytest.skip(f"native review fell back: {native.get('fallback')}")
+            fallback = str(native.get("fallback", ""))
+            if "staged" in fallback or "unsupported parser" in fallback:
+                pytest.skip(f"native review fell back (parser not staged): {fallback}")
+            pytest.fail(f"native review DECLINED unexpectedly: {fallback}")
         served = json.loads(CommitDiff.model_validate(native["commit_diff"]).model_dump_json())
         oracle = json.loads(
             CommitDiffer(config=differ._config, registry=differ._registry)
@@ -1103,7 +1109,10 @@ class TestNativeReviewHandler:
             str(tmp_path), "HEAD", "", differ._config.model_dump_json(), _wasm_dir()
         )
         if "commit_diff" not in native:
-            pytest.skip(f"native working-tree review fell back: {native.get('fallback')}")
+            fallback = str(native.get("fallback", ""))
+            if "staged" in fallback or "unsupported parser" in fallback:
+                pytest.skip(f"native working-tree review fell back (parser not staged): {fallback}")
+            pytest.fail(f"native working-tree review DECLINED unexpectedly: {fallback}")
         served = json.loads(CommitDiff.model_validate(native["commit_diff"]).model_dump_json())
         oracle = json.loads(
             CommitDiffer(config=differ._config, registry=differ._registry)
