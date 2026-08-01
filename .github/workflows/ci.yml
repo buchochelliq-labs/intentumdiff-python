@@ -46,6 +46,8 @@ jobs:
         # scoped to THIS repo only, so cargo/pip cannot fetch them without an org-scoped
         # token. Set the SPLIT_REPO_TOKEN secret (PAT or App token with read access to the
         # buchochelliq-labs repos); without it this step warns and the build fails clearly.
+        # windows-latest defaults to PowerShell; this step is POSIX shell.
+        shell: bash
         env:
           SPLIT_REPO_TOKEN: ${{ secrets.SPLIT_REPO_TOKEN }}
         run: |
