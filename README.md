@@ -1,5 +1,9 @@
 # intentdiff (Python)
 
+[![CI](https://github.com/buchochelliq-labs/intentdiff-python/actions/workflows/ci.yml/badge.svg)](https://github.com/buchochelliq-labs/intentdiff-python/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
+
 The **Python binding and `intentdiff` PyPI package** — a thin shell over the IntentDiff
 engine. Semantic code review: detect intent, moves, refactorings, and style changes.
 
