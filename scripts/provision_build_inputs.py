@@ -127,16 +127,22 @@ def stage_wasm_from_artifacts(token: str, org: str = "buchochelliq-labs") -> int
     WASM_DEST.mkdir(parents=True, exist_ok=True)
     staged, missing = 0, []
     for name in sorted(repos):
+        # Track which call failed: "HTTP 403" alone cannot distinguish a token missing
+        # the actions:read scope (list-runs) from blob storage rejecting a forwarded
+        # credential (download) — different fixes, one symptom.
+        stage = "list-runs"
         try:
             runs = _json.loads(get(
                 f"{api}/repos/{org}/{name}/actions/runs?status=success&per_page=1"))
             wr = runs.get("workflow_runs") or []
             if not wr:
                 missing.append((name, "no successful run")); continue
+            stage = "list-artifacts"
             arts = _json.loads(get(wr[0]["artifacts_url"]))
             art = next((a for a in arts.get("artifacts", []) if a["name"] == "parser-wasm"), None)
             if not art:
                 missing.append((name, "no parser-wasm artifact")); continue
+            stage = "download-artifact"
             blob = get(art["archive_download_url"])
             with zipfile.ZipFile(io.BytesIO(blob)) as z:
                 for member in z.namelist():
@@ -147,7 +153,7 @@ def stage_wasm_from_artifacts(token: str, org: str = "buchochelliq-labs") -> int
                         (WASM_DEST / out).write_bytes(z.read(member))
                         staged += 1
         except urllib.error.HTTPError as exc:
-            missing.append((name, f"HTTP {exc.code}"))
+            missing.append((name, f"HTTP {exc.code} at {stage} ({exc.reason})"))
     print(f"staged {staged} components into {WASM_DEST}")
     if missing:
         print(f"MISSING ({len(missing)}):")
