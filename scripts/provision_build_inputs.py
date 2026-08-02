@@ -80,6 +80,7 @@ def stage_wasm_from_artifacts(token: str, org: str = "buchochelliq-labs") -> int
     import io
     import json as _json
     import urllib.error
+    import urllib.parse
     import urllib.request
     import zipfile
 
@@ -87,9 +88,31 @@ def stage_wasm_from_artifacts(token: str, org: str = "buchochelliq-labs") -> int
     hdr = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json",
            "User-Agent": "intentdiff-provision"}
 
+    class _StripAuthOnRedirect(urllib.request.HTTPRedirectHandler):
+        """Drop the Authorization header when a redirect leaves the API host.
+
+        `artifacts/<id>/zip` 302s to Azure blob storage, which signs the request in the
+        URL and REJECTS a bearer token it did not issue (401 locally, 403 on a runner).
+        urllib re-sends every header across a redirect by default, so the naive fetch
+        fails for a reason that reads like a permissions problem and isn't one — it
+        staged 0 of 69 components and the suite then failed 594 tests on
+        PluginNotFoundError('unknown').
+        """
+
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            new = super().redirect_request(req, fp, code, msg, headers, newurl)
+            if new is not None and (
+                urllib.parse.urlsplit(newurl).netloc
+                != urllib.parse.urlsplit(req.full_url).netloc
+            ):
+                new.remove_header("Authorization")
+            return new
+
+    opener = urllib.request.build_opener(_StripAuthOnRedirect)
+
     def get(url: str) -> bytes:
         req = urllib.request.Request(url, headers=hdr)
-        with urllib.request.urlopen(req, timeout=120) as r:
+        with opener.open(req, timeout=120) as r:
             return r.read()
 
     repos, page = [], 1
@@ -128,7 +151,7 @@ def stage_wasm_from_artifacts(token: str, org: str = "buchochelliq-labs") -> int
     print(f"staged {staged} components into {WASM_DEST}")
     if missing:
         print(f"MISSING ({len(missing)}):")
-        for m in missing[:10]:
+        for m in missing:
             print("  ", m)
     return len(missing)
 
@@ -148,7 +171,12 @@ def main() -> None:
             sys.exit("--from-parser-artifacts needs GH_TOKEN or GITHUB_TOKEN")
         missing = stage_wasm_from_artifacts(token)
         if missing:
-            print(f"WARNING: {missing} parser repo(s) had no usable artifact")
+            # Fail closed. A partial (or empty) component staging does not surface as a
+            # provisioning error later — it surfaces as hundreds of
+            # PluginNotFoundError('unknown') test failures an hour into the suite, which
+            # reads like an engine regression. Stop here, where the cause is legible.
+            sys.exit(f"provisioning FAILED: {missing} parser repo(s) had no usable "
+                     f"component artifact (see MISSING above)")
     else:
         stage_wasm(args.wasm_dir)
     print("build inputs ready: `maturin build --release -b cffi` (or pip install -e .)")
