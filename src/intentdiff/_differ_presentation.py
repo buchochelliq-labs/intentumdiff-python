@@ -562,7 +562,8 @@ _NAMED_ENTITY_NODE_TYPES: frozenset[str] = frozenset(
     {
         # Tree-sitter common
         "function_definition", "async_function_def", "class_definition",
-        "method_declaration", "function_declaration", "constructor_declaration",
+        "method_declaration", "function_declaration", "async_function_declaration",
+        "constructor_declaration",
         "destructor_declaration", "property_declaration", "field_declaration",
         "variable_declaration", "lexical_declaration", "struct_definition",
         "interface_declaration", "enum_declaration", "enum_member_declaration",
