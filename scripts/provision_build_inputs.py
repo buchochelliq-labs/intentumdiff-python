@@ -69,13 +69,88 @@ def stage_wasm(wasm_dir: str | None) -> None:
     print(f"staged {count} components into {WASM_DEST}")
 
 
+# ── Parser components from sibling-repo CI artifacts (Phase D) ────────────────
+# The 69 intentdiff-<lang>-parser repos each publish their built component as a
+# `parser-wasm` artifact on every successful CI run. Without those components the
+# engine resolves every language to 'unknown', so the suite cannot run. This mode
+# pulls the latest successful artifact from each parser repo — the embryo of the
+# registry-pinned artifact flow (pinning by checksum lands with the registry wiring).
+
+def stage_wasm_from_artifacts(token: str, org: str = "buchochelliq-labs") -> int:
+    import io
+    import json as _json
+    import urllib.error
+    import urllib.request
+    import zipfile
+
+    api = "https://api.github.com"
+    hdr = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json",
+           "User-Agent": "intentdiff-provision"}
+
+    def get(url: str) -> bytes:
+        req = urllib.request.Request(url, headers=hdr)
+        with urllib.request.urlopen(req, timeout=120) as r:
+            return r.read()
+
+    repos, page = [], 1
+    while True:
+        batch = _json.loads(get(f"{api}/orgs/{org}/repos?per_page=100&page={page}"))
+        if not batch:
+            break
+        repos += [r["name"] for r in batch if r["name"].endswith("-parser")]
+        page += 1
+    print(f"parser repos: {len(repos)}")
+
+    WASM_DEST.mkdir(parents=True, exist_ok=True)
+    staged, missing = 0, []
+    for name in sorted(repos):
+        try:
+            runs = _json.loads(get(
+                f"{api}/repos/{org}/{name}/actions/runs?status=success&per_page=1"))
+            wr = runs.get("workflow_runs") or []
+            if not wr:
+                missing.append((name, "no successful run")); continue
+            arts = _json.loads(get(wr[0]["artifacts_url"]))
+            art = next((a for a in arts.get("artifacts", []) if a["name"] == "parser-wasm"), None)
+            if not art:
+                missing.append((name, "no parser-wasm artifact")); continue
+            blob = get(art["archive_download_url"])
+            with zipfile.ZipFile(io.BytesIO(blob)) as z:
+                for member in z.namelist():
+                    if member.endswith(".wasm"):
+                        # strip the intentdiff_ prefix: the host stages <lang>_parser.wasm
+                        out = Path(member).name
+                        out = out[len("intentdiff_"):] if out.startswith("intentdiff_") else out
+                        (WASM_DEST / out).write_bytes(z.read(member))
+                        staged += 1
+        except urllib.error.HTTPError as exc:
+            missing.append((name, f"HTTP {exc.code}"))
+    print(f"staged {staged} components into {WASM_DEST}")
+    if missing:
+        print(f"MISSING ({len(missing)}):")
+        for m in missing[:10]:
+            print("  ", m)
+    return len(missing)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--core-dir")
     ap.add_argument("--wasm-dir")
+    ap.add_argument("--from-parser-artifacts", action="store_true",
+                    help="stage components from the parser repos' latest CI artifacts "
+                         "(needs GH_TOKEN / GITHUB_TOKEN with read access)")
     args = ap.parse_args()
     stage_core(args.core_dir)
-    stage_wasm(args.wasm_dir)
+    if args.from_parser_artifacts:
+        token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN") or ""
+        if not token:
+            sys.exit("--from-parser-artifacts needs GH_TOKEN or GITHUB_TOKEN")
+        missing = stage_wasm_from_artifacts(token)
+        if missing:
+            print(f"WARNING: {missing} parser repo(s) had no usable artifact")
+    else:
+        stage_wasm(args.wasm_dir)
     print("build inputs ready: `maturin build --release -b cffi` (or pip install -e .)")
 
 

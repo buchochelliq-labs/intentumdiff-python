@@ -58,10 +58,13 @@ jobs:
             echo "::warning::SPLIT_REPO_TOKEN not set - private cross-repo dependencies will fail to fetch"
           fi
 
-      - name: Provision build inputs (engine checkout)
-        run: python scripts/provision_build_inputs.py
+      - name: Provision build inputs (engine + parser components)
+        # Components come from the parser repos' latest successful CI artifacts —
+        # without them every language resolves to 'unknown' and the suite cannot run.
+        run: python scripts/provision_build_inputs.py --from-parser-artifacts
         env:
           GIT_TERMINAL_PROMPT: "0"
+          GH_TOKEN: ${{ secrets.SPLIT_REPO_TOKEN }}
 
       - name: Install intentdiff + test dependencies
         # cffi first: the editable install is a maturin cffi-bindings build, which
