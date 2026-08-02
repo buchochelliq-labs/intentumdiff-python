@@ -77,6 +77,7 @@ def stage_wasm(wasm_dir: str | None) -> None:
 # registry-pinned artifact flow (pinning by checksum lands with the registry wiring).
 
 def stage_wasm_from_artifacts(token: str, org: str = "buchochelliq-labs") -> int:
+    import hashlib as _hashlib
     import io
     import json as _json
     import urllib.error
@@ -110,10 +111,28 @@ def stage_wasm_from_artifacts(token: str, org: str = "buchochelliq-labs") -> int
 
     opener = urllib.request.build_opener(_StripAuthOnRedirect)
 
-    def get(url: str) -> bytes:
-        req = urllib.request.Request(url, headers=hdr)
+    def get(url: str, accept: str = "application/vnd.github+json") -> bytes:
+        req = urllib.request.Request(url, headers={**hdr, "Accept": accept})
         with opener.open(req, timeout=120) as r:
             return r.read()
+
+    # The registry (#95) is the root of trust: it pins every official component by
+    # SHA-256. Verifying the downloaded artifact against that pin is what makes this a
+    # supply-chain control rather than "whatever the parser repo last built". Builds are
+    # reproducible, so a mismatch means the component genuinely changed and the fix is a
+    # registry PR through the vet gate — never a bypass here.
+    import yaml  # pyyaml is already a runtime dep (hub.py)
+
+    registry = yaml.safe_load(
+        get(f"{api}/repos/{org}/intentdiff-registry/contents/registry.yaml",
+            accept="application/vnd.github.raw").decode("utf-8")
+    )
+    pins: dict[str, str] = {}
+    for entry in (registry.get("plugins") or {}).values():
+        pins.update(entry.get("wasm_checksums") or {})
+    if not pins:
+        sys.exit("registry.yaml carries no wasm_checksums - refusing to 'verify' nothing")
+    print(f"registry pins: {len(pins)} component checksums")
 
     repos, page = [], 1
     while True:
@@ -150,7 +169,19 @@ def stage_wasm_from_artifacts(token: str, org: str = "buchochelliq-labs") -> int
                         # strip the intentdiff_ prefix: the host stages <lang>_parser.wasm
                         out = Path(member).name
                         out = out[len("intentdiff_"):] if out.startswith("intentdiff_") else out
-                        (WASM_DEST / out).write_bytes(z.read(member))
+                        payload = z.read(member)
+                        digest = _hashlib.sha256(payload).hexdigest()
+                        pinned = pins.get(out)
+                        # Write only what the registry vouches for — an unverified
+                        # component must never reach the staging dir.
+                        if pinned is None:
+                            missing.append((name, f"{out} is not pinned in the registry"))
+                            continue
+                        if pinned != digest:
+                            missing.append((name, f"{out} CHECKSUM MISMATCH (registry pins "
+                                                  f"{pinned[:16]}..., artifact is {digest[:16]}...)"))
+                            continue
+                        (WASM_DEST / out).write_bytes(payload)
                         staged += 1
         except urllib.error.HTTPError as exc:
             missing.append((name, f"HTTP {exc.code} at {stage} ({exc.reason})"))

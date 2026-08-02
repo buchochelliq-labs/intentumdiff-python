@@ -59,9 +59,14 @@ jobs:
           fi
 
       - name: Provision build inputs (engine + parser components)
-        # Components come from the parser repos' latest successful CI artifacts —
-        # without them every language resolves to 'unknown' and the suite cannot run.
-        run: python scripts/provision_build_inputs.py --from-parser-artifacts
+        # Components come from the parser repos' CI artifacts, each verified against the
+        # SHA-256 pinned in intentdiff-registry (#95) — without them every language
+        # resolves to 'unknown' and the suite cannot run. Fail-closed: a missing or
+        # unverified component stops the job here rather than an hour later as mass
+        # PluginNotFoundError failures.
+        run: |
+          pip install "pyyaml>=6.0"
+          python scripts/provision_build_inputs.py --from-parser-artifacts
         env:
           GIT_TERMINAL_PROMPT: "0"
           GH_TOKEN: ${{ secrets.SPLIT_REPO_TOKEN }}
