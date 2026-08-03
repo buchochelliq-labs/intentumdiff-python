@@ -6,11 +6,12 @@ requires = ["maturin>=1.14,<2"]
 build-backend = "maturin"
 
 [project]
-# Distribution name only - the import is still `import intentdiff`. The bare "intentdiff"
-# name on PyPI is held by an unrelated third party (github.com/harivilasp/intentdiff,
-# uploaded 2026-07-24), so the package publishes as intentdiff-python; Trusted Publishing
-# is registered under that project name. A PEP 541 claim on the bare name can be pursued
-# separately without blocking releases.
+# DELIBERATE, not a fallback: this is the Python BINDING of a polyglot core, and it is
+# named for that role alongside its siblings (intentdiff-go, intentdiff-java, ...) per
+# docs/TARGET_ARCHITECTURE.md. Do NOT "fix" this back to a bare `intentdiff` if that PyPI
+# name ever frees up - the per-language suffix is the convention, and renaming a published
+# distribution costs users an uninstall/reinstall for no benefit.
+# Distribution name only: the import is unchanged, `import intentdiff`.
 name = "intentdiff-python"
 version = "0.0.1b1"
 description = "Semantic code review: detect intent, moves, refactorings, and style changes"
