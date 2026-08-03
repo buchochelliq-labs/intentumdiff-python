@@ -121,6 +121,14 @@ jobs:
       - name: Install maturin
         run: uv tool install "maturin==1.14.1"
 
+      # `-b cffi` makes maturin shell out to the TARGET interpreter to generate the cffi
+      # declarations, so cffi must be importable there - by this python, not by maturin's
+      # isolated uv tool environment. Without it every wheel leg dies at
+      # "ModuleNotFoundError: No module named 'cffi'". ci.yml already does this; the
+      # release lane was the one place that did not.
+      - name: Install cffi for the wheel build
+        run: python -m pip install --upgrade pip cffi
+
       # PyO3-free release wheel (#82/B.6): a bare cdylib shipped as a data file that the Python
       # package loads via ctypes over the C ABI. `--no-default-features` drops the `python`/pyo3
       # feature; `-b cffi` builds + packages the cdylib (maturin embeds cbindgen to emit the C
