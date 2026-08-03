@@ -89,8 +89,34 @@ jobs:
           # cache-poisoning, issue #76).
           enable-cache: false
 
-      - name: Build and copy Wasm components
-        run: python build.py
+      # This repo does NOT build components from source - it has no build.py and no parser
+      # crates. It is the thin binding: the engine checkout and the parser components are
+      # PROVISIONED, each component verified against the SHA-256 pinned in
+      # intentdiff-registry. Mirrors the ci.yml sequence, which is the one that works.
+      - name: Authenticate cross-repo git deps
+        # Private sibling repos are git dependencies and GITHUB_TOKEN is repo-scoped, so
+        # the org-scoped token is what lets the engine checkout resolve.
+        # windows-latest defaults to PowerShell; this step is POSIX shell.
+        shell: bash
+        env:
+          SPLIT_REPO_TOKEN: ${{ secrets.SPLIT_REPO_TOKEN }}
+        run: |
+          if [ -n "$SPLIT_REPO_TOKEN" ]; then
+            git config --global url."https://x-access-token:${SPLIT_REPO_TOKEN}@github.com/".insteadOf "https://github.com/"
+            echo "cross-repo git auth configured"
+          else
+            echo "::warning::SPLIT_REPO_TOKEN not set - private cross-repo dependencies will fail to fetch"
+          fi
+
+      - name: Provision build inputs (engine + parser components)
+        # Fail-closed: a missing or checksum-unverified component stops the release here
+        # rather than shipping a wheel with languages that resolve to 'unknown'.
+        env:
+          GIT_TERMINAL_PROMPT: "0"
+          GH_TOKEN: ${{ secrets.SPLIT_REPO_TOKEN }}
+        run: |
+          pip install "pyyaml>=6.0"
+          python scripts/provision_build_inputs.py --from-parser-artifacts
 
       - name: Install maturin
         run: uv tool install "maturin==1.14.1"
