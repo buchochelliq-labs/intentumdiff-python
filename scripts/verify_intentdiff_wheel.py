@@ -64,7 +64,7 @@ DEFAULT_MAX_RELEASE_BYTES = 250 * BYTES_PER_MB
 # and the .dist-info prefix use the PEP 427 escaped form (`-` becomes `_`) — derived
 # via _filename_form() wherever a path is compared, so one flag serves both roles.
 EXPECTED_DISTRIBUTION = "intentdiff-python"
-EXPECTED_VERSION = "0.0.1b1"
+EXPECTED_VERSION = "0.0.1"
 
 
 def _filename_form(project_name: str) -> str:

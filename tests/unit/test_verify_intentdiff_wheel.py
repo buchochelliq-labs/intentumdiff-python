@@ -19,7 +19,7 @@ def _write_wheel(path: Path, names: list[str]) -> Path:
                     name,
                     "Metadata-Version: 2.3\n"
                     "Name: intentdiff-python\n"
-                    "Version: 0.0.1b1\n",
+                    "Version: 0.0.1\n",
                 )
             elif name.endswith(".dist-info/WHEEL"):
                 tag = "-".join(path.name.removesuffix(".whl").split("-")[-3:])
@@ -40,14 +40,14 @@ def _valid_names() -> list[str]:
         "intentdiff/__init__.py",
         "intentdiff/wasm/python_parser.wasm",
         "intentdiff/intentdiff_rust_core.cp312-win_amd64.pyd",
-        "intentdiff_python-0.0.1b1.dist-info/METADATA",
-        "intentdiff_python-0.0.1b1.dist-info/WHEEL",
+        "intentdiff_python-0.0.1.dist-info/METADATA",
+        "intentdiff_python-0.0.1.dist-info/WHEEL",
     ]
 
 
 def test_verify_wheel_accepts_native_intentdiff_wheel(tmp_path: Path) -> None:
     wheel = _write_wheel(
-        tmp_path / "intentdiff_python-0.0.1b1-cp312-cp312-win_amd64.whl",
+        tmp_path / "intentdiff_python-0.0.1-cp312-cp312-win_amd64.whl",
         _valid_names(),
     )
 
@@ -66,7 +66,7 @@ def test_verify_wheel_accepts_windows_arm64_wheel(tmp_path: Path) -> None:
         for name in _valid_names()
     ]
     wheel = _write_wheel(
-        tmp_path / "intentdiff_python-0.0.1b1-cp312-abi3-win_arm64.whl",
+        tmp_path / "intentdiff_python-0.0.1-cp312-abi3-win_arm64.whl",
         names,
     )
 
@@ -78,7 +78,7 @@ def test_verify_wheel_accepts_windows_arm64_wheel(tmp_path: Path) -> None:
 
 def test_verify_wheel_rejects_pure_python_wheel(tmp_path: Path) -> None:
     wheel = _write_wheel(
-        tmp_path / "intentdiff_python-0.0.1b1-py3-none-any.whl",
+        tmp_path / "intentdiff_python-0.0.1-py3-none-any.whl",
         _valid_names(),
     )
 
@@ -89,7 +89,7 @@ def test_verify_wheel_rejects_pure_python_wheel(tmp_path: Path) -> None:
 def test_verify_wheel_rejects_missing_rust_core(tmp_path: Path) -> None:
     names = [name for name in _valid_names() if "intentdiff_rust_core" not in name]
     wheel = _write_wheel(
-        tmp_path / "intentdiff_python-0.0.1b1-cp312-cp312-win_amd64.whl",
+        tmp_path / "intentdiff_python-0.0.1-cp312-cp312-win_amd64.whl",
         names,
     )
 
@@ -100,7 +100,7 @@ def test_verify_wheel_rejects_missing_rust_core(tmp_path: Path) -> None:
 def test_verify_wheel_rejects_missing_wasm_assets(tmp_path: Path) -> None:
     names = [name for name in _valid_names() if not name.endswith(".wasm")]
     wheel = _write_wheel(
-        tmp_path / "intentdiff_python-0.0.1b1-cp312-cp312-win_amd64.whl",
+        tmp_path / "intentdiff_python-0.0.1-cp312-cp312-win_amd64.whl",
         names,
     )
 
@@ -127,7 +127,7 @@ def test_verify_wheel_rejects_dangerous_extra_entries(
     message: str,
 ) -> None:
     wheel = _write_wheel(
-        tmp_path / "intentdiff_python-0.0.1b1-cp312-cp312-win_amd64.whl",
+        tmp_path / "intentdiff_python-0.0.1-cp312-cp312-win_amd64.whl",
         [*_valid_names(), entry],
     )
 
@@ -137,7 +137,7 @@ def test_verify_wheel_rejects_dangerous_extra_entries(
 
 def test_verify_wheel_rejects_oversized_single_wheel(tmp_path: Path) -> None:
     wheel = _write_wheel(
-        tmp_path / "intentdiff_python-0.0.1b1-cp312-cp312-win_amd64.whl",
+        tmp_path / "intentdiff_python-0.0.1-cp312-cp312-win_amd64.whl",
         _valid_names(),
     )
 
@@ -147,11 +147,11 @@ def test_verify_wheel_rejects_oversized_single_wheel(tmp_path: Path) -> None:
 
 def test_verify_wheels_rejects_oversized_release_set(tmp_path: Path) -> None:
     _write_wheel(
-        tmp_path / "intentdiff_python-0.0.1b1-cp312-cp312-win_amd64.whl",
+        tmp_path / "intentdiff_python-0.0.1-cp312-cp312-win_amd64.whl",
         _valid_names(),
     )
     _write_wheel(
-        tmp_path / "intentdiff_python-0.0.1b1-cp312-cp312-macosx_11_0_arm64.whl",
+        tmp_path / "intentdiff_python-0.0.1-cp312-cp312-macosx_11_0_arm64.whl",
         _valid_names(),
     )
 
@@ -161,7 +161,7 @@ def test_verify_wheels_rejects_oversized_release_set(tmp_path: Path) -> None:
 
 def test_verify_wheel_rejects_wrong_distribution_name(tmp_path: Path) -> None:
     wheel = _write_wheel(
-        tmp_path / "notintentdiff_python-0.0.1b1-cp312-cp312-win_amd64.whl",
+        tmp_path / "notintentdiff_python-0.0.1-cp312-cp312-win_amd64.whl",
         _valid_names(),
     )
 
@@ -180,11 +180,11 @@ def test_verify_wheel_rejects_wrong_version(tmp_path: Path) -> None:
 
 
 def test_verify_wheel_rejects_metadata_identity_mismatch(tmp_path: Path) -> None:
-    wheel = tmp_path / "intentdiff_python-0.0.1b1-cp312-cp312-win_amd64.whl"
+    wheel = tmp_path / "intentdiff_python-0.0.1-cp312-cp312-win_amd64.whl"
     with zipfile.ZipFile(wheel, "w") as zf:
         for name in _valid_names():
             if name.endswith(".dist-info/METADATA"):
-                zf.writestr(name, "Metadata-Version: 2.3\nName: other\nVersion: 0.0.1b1\n")
+                zf.writestr(name, "Metadata-Version: 2.3\nName: other\nVersion: 0.0.1\n")
             elif name.endswith(".dist-info/WHEEL"):
                 zf.writestr(
                     name,
@@ -199,7 +199,7 @@ def test_verify_wheel_rejects_metadata_identity_mismatch(tmp_path: Path) -> None
 
 def test_verify_wheels_rejects_unexpected_platform_set(tmp_path: Path) -> None:
     _write_wheel(
-        tmp_path / "intentdiff_python-0.0.1b1-cp312-cp312-win_amd64.whl",
+        tmp_path / "intentdiff_python-0.0.1-cp312-cp312-win_amd64.whl",
         _valid_names(),
     )
 
@@ -209,15 +209,15 @@ def test_verify_wheels_rejects_unexpected_platform_set(tmp_path: Path) -> None:
 
 def test_verify_wheels_accepts_expected_platform_patterns(tmp_path: Path) -> None:
     _write_wheel(
-        tmp_path / "intentdiff_python-0.0.1b1-cp312-cp312-win_amd64.whl",
+        tmp_path / "intentdiff_python-0.0.1-cp312-cp312-win_amd64.whl",
         _valid_names(),
     )
     _write_wheel(
-        tmp_path / "intentdiff_python-0.0.1b1-cp312-abi3-win_arm64.whl",
+        tmp_path / "intentdiff_python-0.0.1-cp312-abi3-win_arm64.whl",
         [name.replace("win_amd64", "win_arm64") for name in _valid_names()],
     )
     _write_wheel(
-        tmp_path / "intentdiff_python-0.0.1b1-cp312-cp312-macosx_11_0_arm64.whl",
+        tmp_path / "intentdiff_python-0.0.1-cp312-cp312-macosx_11_0_arm64.whl",
         _valid_names(),
     )
 
@@ -266,12 +266,12 @@ def _write_wheel_with_provenance(
                 _json.dumps({"schema_version": 1, "artifacts": manifest_artifacts}),
             )
         zf.writestr(
-            "intentdiff_python-0.0.1b1.dist-info/METADATA",
-            "Metadata-Version: 2.3\nName: intentdiff-python\nVersion: 0.0.1b1\n",
+            "intentdiff_python-0.0.1.dist-info/METADATA",
+            "Metadata-Version: 2.3\nName: intentdiff-python\nVersion: 0.0.1\n",
         )
         tag = "-".join(path.name.removesuffix(".whl").split("-")[-3:])
         zf.writestr(
-            "intentdiff_python-0.0.1b1.dist-info/WHEEL",
+            "intentdiff_python-0.0.1.dist-info/WHEEL",
             f"Wheel-Version: 1.0\nGenerator: test\nRoot-Is-Purelib: false\nTag: {tag}\n",
         )
     return path
@@ -285,7 +285,7 @@ def _artifacts(wasm: dict[str, bytes]) -> dict[str, dict]:
 
 
 def _prov_wheel_name(tmp_path: Path) -> Path:
-    return tmp_path / "intentdiff_python-0.0.1b1-cp312-cp312-win_amd64.whl"
+    return tmp_path / "intentdiff_python-0.0.1-cp312-cp312-win_amd64.whl"
 
 
 def test_provenance_absent_is_optional_this_slice(tmp_path: Path) -> None:

@@ -109,12 +109,18 @@ __all__ = [
 ]
 
 def _installed_version() -> str:
-    try:
-        from importlib import metadata as importlib_metadata
+    from importlib import metadata as importlib_metadata
 
-        return importlib_metadata.version("intentdiff")
-    except importlib_metadata.PackageNotFoundError:
-        return "0.0.1b1"
+    # The distribution is "intentdiff-python"; the import package is "intentdiff".
+    # Looking up the import name finds no metadata once this is installed from a release
+    # wheel, which silently pinned __version__ to the literal below. "intentdiff" is
+    # kept as a second candidate so pre-rename installs still report their real version.
+    for distribution in ("intentdiff-python", "intentdiff"):
+        try:
+            return importlib_metadata.version(distribution)
+        except importlib_metadata.PackageNotFoundError:
+            continue
+    return "0.0.1"
 
 
 __version__ = _installed_version()
