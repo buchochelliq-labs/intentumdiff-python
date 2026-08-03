@@ -32,7 +32,11 @@ jobs:
     permissions:
       contents: read
     env:
-      INTENTDIFF_EXPECTED_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_testpypi && inputs.testpypi_version || '0.0.1b1' }}
+      # Only the TestPyPI rehearsal carries its version as an input. A tag release
+      # derives it from the tag in the step below: a literal here silently goes stale the
+      # moment the project version moves, and the release then fails at the verify gate
+      # having already built every wheel correctly.
+      INTENTDIFF_EXPECTED_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_testpypi && inputs.testpypi_version || '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -90,6 +94,25 @@ jobs:
         if: github.event_name == 'workflow_dispatch' && inputs.publish_testpypi
         shell: bash
         run: python scripts/set_release_version.py "$INTENTDIFF_EXPECTED_VERSION"
+
+      # The tag is the release's identity, so take the expected version from it rather
+      # than a literal. Also assert it agrees with pyproject: if they disagree, the wheel
+      # filename and the tag tell different stories about what shipped, and PyPI keeps
+      # whichever got uploaded forever.
+      - name: Derive the expected version from the tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          GIT_TAG: ${{ github.ref_name }}
+        run: |
+          tag="${GIT_TAG#v}"
+          project=$(python -c "import pathlib,tomllib; print(tomllib.loads(pathlib.Path('pyproject.toml').read_text(encoding='utf-8'))['project']['version'])")
+          echo "tag=$tag  pyproject=$project"
+          if [ "$tag" != "$project" ]; then
+            echo "::error::tag $tag does not match the pyproject version $project" >&2
+            exit 1
+          fi
+          echo "INTENTDIFF_EXPECTED_VERSION=$tag" >> "$GITHUB_ENV"
 
       - name: Install uv
         uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
@@ -229,13 +252,21 @@ jobs:
             python scripts/verify_artifacts.py --root publish-dist --manifest "$manifest" verify
           done
 
+      # Same reasoning as the build job: derive from the tag, never a literal.
+      - name: Derive the expected version from the tag
+        shell: bash
+        env:
+          GIT_TAG: ${{ github.ref_name }}
+        run: echo "INTENTDIFF_EXPECTED_VERSION=${GIT_TAG#v}" >> "$GITHUB_ENV"
+
       - name: Verify downloaded wheels before publishing
+        shell: bash
         run: >
           python scripts/verify_intentdiff_wheel.py publish-dist
           --max-wheel-mb 75
           --max-release-mb 250
           --expected-name intentdiff-python
-          --expected-version 0.0.1
+          --expected-version "$INTENTDIFF_EXPECTED_VERSION"
           --expected-platform-pattern ".*manylinux.*x86_64.*"
           --expected-platform-pattern "macosx_.*"
           --expected-platform-pattern "win_amd64"

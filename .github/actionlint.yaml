@@ -1,0 +1,7 @@
+# windows-11-arm is a GitHub-hosted arm64 runner that actionlint's built-in label list
+# does not yet know about, so it reports it as an unknown self-hosted label. The arm64
+# wheel is built natively on it (cross-compiling could not produce a working cffi
+# cdylib), so the label is correct and the warning is the tool being out of date.
+self-hosted-runner:
+  labels:
+    - windows-11-arm
