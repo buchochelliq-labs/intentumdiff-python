@@ -1238,6 +1238,15 @@ def load_plugin(
     except (PluginLoadError, PluginSandboxViolation):
         raise
     except WasmtimeError as exc:
-        raise PluginLoadError(str(path), str(exc)) from exc
+        # Since the wasmtime 47 binding, INSTANTIATION charges fuel too, so a small
+        # budget can trap before the component ever parses anything. Classify that the
+        # same way _call_locked classifies a mid-parse trap: a typed PluginFuelExhausted,
+        # not a generic load failure. Left as PluginLoadError, the registry would skip
+        # the candidate and surface PluginNotFoundError('unknown') — reporting a fuel
+        # problem as a missing-plugin problem.
+        msg = str(exc)
+        if "fuel" in msg.lower():
+            raise PluginFuelExhausted(str(path), fuel, context="during instantiation") from exc
+        raise PluginLoadError(str(path), msg) from exc
     except Exception as exc:
         raise PluginLoadError(str(path), str(exc)) from exc

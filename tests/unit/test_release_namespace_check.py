@@ -122,7 +122,13 @@ def test_publish_workflow_has_testpypi_trusted_publisher_lane() -> None:
     assert "testpypi_version:" in workflow
     assert 'default: "0.0.1b1"' in workflow
     assert "python scripts/set_release_version.py" in workflow
-    assert "--expected-version ${{ env.INTENTDIFF_EXPECTED_VERSION }}" in workflow
+    # The version reaches the verifier through the ENVIRONMENT, not through a template
+    # expansion pasted into the shell command. It originates in a workflow_dispatch
+    # input, so the `${{ }}` form was a code-injection vector in the workflow that
+    # publishes to PyPI (zizmor template-injection). Assert both halves: the safe form
+    # is present, and the unsafe one has not crept back.
+    assert '--expected-version "$INTENTDIFF_EXPECTED_VERSION"' in workflow
+    assert "--expected-version ${{ env.INTENTDIFF_EXPECTED_VERSION }}" not in workflow
     assert "name: Publish to TestPyPI" in workflow
     assert "name: testpypi" in workflow
     assert "repository-url: https://test.pypi.org/legacy/" in workflow
@@ -131,7 +137,12 @@ def test_publish_workflow_has_testpypi_trusted_publisher_lane() -> None:
     assert "aarch64-pc-windows-msvc" in workflow
     assert '--expected-platform-pattern "win_arm64"' in workflow
     assert "dist-${{ matrix.artifact }}" in workflow
-    assert "artifacts-${{ matrix.artifact }}.sha256" in workflow
+    # Same reasoning as --expected-version above: the manifest path is built from an
+    # env var inside the shell, not from a template expansion spliced into the command.
+    # (`dist-${{ matrix.artifact }}` on the line above is fine - that is an action
+    # input, not a shell command, so there is nothing to inject into.)
+    assert 'artifacts-${ARTIFACT_NAME}.sha256' in workflow
+    assert "artifacts-${{ matrix.artifact }}.sha256" not in workflow
     assert "attest-build-provenance" not in workflow
     assert "attestations: write" not in workflow
     assert "attestations: true" not in workflow

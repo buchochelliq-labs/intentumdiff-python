@@ -19,6 +19,10 @@ on:
         default: "0.0.1b1"
         type: string
 
+# Deny by default (zizmor excessive-permissions); every job declares what it
+# needs (publish jobs add id-token:write for Trusted Publishing).
+permissions: {}
+
 jobs:
   build-wheels:
     name: Build ${{ matrix.artifact }} wheel
@@ -34,29 +38,29 @@ jobs:
           - os: ubuntu-latest
             artifact: Linux-x64
             rust_targets: wasm32-wasip2
-            maturin_target_args: ""
+            maturin_target: ""
           - os: macos-latest
             artifact: macOS
             rust_targets: wasm32-wasip2
-            maturin_target_args: ""
+            maturin_target: ""
           - os: windows-latest
             artifact: Windows-x64
             rust_targets: wasm32-wasip2
-            maturin_target_args: ""
+            maturin_target: ""
           - os: windows-latest
             artifact: Windows-arm64
             rust_targets: wasm32-wasip2,aarch64-pc-windows-msvc
-            maturin_target_args: "--target aarch64-pc-windows-msvc"
+            maturin_target: "aarch64-pc-windows-msvc"
 
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
 
-      - name: Install Rust 1.93.0
+      - name: Install Rust 1.95.0
         uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
         with:
-          toolchain: 1.93.0
+          toolchain: 1.95.0
           targets: ${{ matrix.rust_targets }}
 
       - name: Set up Python
@@ -66,7 +70,8 @@ jobs:
 
       - name: Stamp TestPyPI rehearsal version
         if: github.event_name == 'workflow_dispatch' && inputs.publish_testpypi
-        run: python scripts/set_release_version.py ${{ env.INTENTDIFF_EXPECTED_VERSION }}
+        shell: bash
+        run: python scripts/set_release_version.py "$INTENTDIFF_EXPECTED_VERSION"
 
       - name: Install uv
         uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
@@ -95,22 +100,34 @@ jobs:
           GIT_TERMINAL_PROMPT: "0"
 
       - name: Build native IntentDiff wheel (pyo3-free cdylib)
-        run: maturin build --release --no-default-features -b cffi --out dist --compatibility pypi ${{ matrix.maturin_target_args }}
+        shell: bash
+        run: |
+          target_args=()
+          if [ -n "$MATURIN_TARGET" ]; then
+            target_args=(--target "$MATURIN_TARGET")
+          fi
+          maturin build --release --no-default-features -b cffi \
+            --out dist --compatibility pypi "${target_args[@]}"
         env:
           CARGO_TARGET_DIR: ${{ github.workspace }}/target-intentdiff-rust-wheel
+          MATURIN_TARGET: ${{ matrix.maturin_target }}
 
       - name: Verify wheel contents and size budget
+        shell: bash
         run: >
           python scripts/verify_intentdiff_wheel.py dist
           --max-wheel-mb 75
           --max-release-mb 75
-          --expected-version ${{ env.INTENTDIFF_EXPECTED_VERSION }}
+          --expected-version "$INTENTDIFF_EXPECTED_VERSION"
 
       - name: Record artifact checksums
+        shell: bash
+        env:
+          ARTIFACT_NAME: ${{ matrix.artifact }}
         run: >
           python scripts/verify_artifacts.py
           --root dist
-          --manifest dist/artifacts-${{ matrix.artifact }}.sha256
+          --manifest "dist/artifacts-${ARTIFACT_NAME}.sha256"
           record
           --patterns "*.whl"
 
@@ -223,11 +240,12 @@ jobs:
           done
 
       - name: Verify downloaded wheels before TestPyPI publishing
+        shell: bash
         run: >
           python scripts/verify_intentdiff_wheel.py publish-dist
           --max-wheel-mb 75
           --max-release-mb 250
-          --expected-version ${{ env.INTENTDIFF_EXPECTED_VERSION }}
+          --expected-version "$INTENTDIFF_EXPECTED_VERSION"
 
       - uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # release/v1
         with:

@@ -44,7 +44,7 @@ from intentdiff.plugins.adapter import (
     ParserAdapter,
     RendererAdapter,
 )
-from intentdiff.plugins.exceptions import PluginNotFoundError
+from intentdiff.plugins.exceptions import PluginFuelExhausted, PluginNotFoundError
 from intentdiff.plugins.language_metadata import fallback_language_info
 from intentdiff.plugins.loader import LoadedPlugin, load_plugin
 
@@ -537,6 +537,14 @@ class PluginRegistry:
                         lang = parser.detect_language(filename, content[:2048])
                     if lang:
                         return parser, lang
+                except PluginFuelExhausted:
+                    # Terminal, never a skip. Fuel exhaustion (now possible during
+                    # instantiation since the wasmtime 47 binding) means THIS plugin hit
+                    # the user's CPU cap — trying the next candidate would either
+                    # mis-parse the file or dress the fuel problem up as
+                    # PluginNotFoundError('unknown'). The whole point of the fuel
+                    # contract is to fail explicitly rather than degrade silently.
+                    raise
                 except Exception as exc:
                     logger.debug(
                         "Skipping parser candidate %s after load failure: %s",
@@ -554,6 +562,14 @@ class PluginRegistry:
             ):
                 try:
                     parser = self._load_catalog_entry(entry, phase_recorder=phase_recorder)
+                except PluginFuelExhausted:
+                    # Terminal, never a skip. Fuel exhaustion (now possible during
+                    # instantiation since the wasmtime 47 binding) means THIS plugin hit
+                    # the user's CPU cap — trying the next candidate would either
+                    # mis-parse the file or dress the fuel problem up as
+                    # PluginNotFoundError('unknown'). The whole point of the fuel
+                    # contract is to fail explicitly rather than degrade silently.
+                    raise
                 except Exception as exc:
                     logger.debug(
                         "Skipping parser candidate %s after load failure: %s",
@@ -582,6 +598,14 @@ class PluginRegistry:
                 matched_paths.add(entry.resolved_path)
                 try:
                     parser = self._load_catalog_entry(entry, phase_recorder=phase_recorder)
+                except PluginFuelExhausted:
+                    # Terminal, never a skip. Fuel exhaustion (now possible during
+                    # instantiation since the wasmtime 47 binding) means THIS plugin hit
+                    # the user's CPU cap — trying the next candidate would either
+                    # mis-parse the file or dress the fuel problem up as
+                    # PluginNotFoundError('unknown'). The whole point of the fuel
+                    # contract is to fail explicitly rather than degrade silently.
+                    raise
                 except Exception as exc:
                     logger.debug(
                         "Skipping parser candidate %s after load failure: %s",
