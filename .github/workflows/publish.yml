@@ -49,10 +49,19 @@ jobs:
             artifact: Windows-x64
             rust_targets: wasm32-wasip2
             maturin_target: ""
-          - os: windows-latest
+          # NATIVE arm64 runner, not a cross-build from windows-latest. `-b cffi` makes
+          # maturin EXECUTE a target-matching interpreter to generate the cffi
+          # declarations, and an arm64 python.exe cannot run on an x64 host (the emulation
+          # only goes the other way), so cross-compiling this leg fails at:
+          #   'python.exe' reports a platform 'win-amd64' (architecture 'x86_64'),
+          #   while the Rust target is 'aarch64'. Skipping.
+          # No linker flag fixes that - `--zig` is for the Linux/macOS cross-builds and
+          # cannot target *-pc-windows-msvc anyway (zig ships the -gnu ABI). Building on
+          # the matching architecture removes the cross-compile entirely.
+          - os: windows-11-arm
             artifact: Windows-arm64
-            rust_targets: wasm32-wasip2,aarch64-pc-windows-msvc
-            maturin_target: "aarch64-pc-windows-msvc"
+            rust_targets: wasm32-wasip2
+            maturin_target: ""
 
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
