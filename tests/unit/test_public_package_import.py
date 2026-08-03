@@ -39,4 +39,4 @@ def test_public_package_import_does_not_require_pytest() -> None:
         text=True,
     )
 
-    assert result.stdout.splitlines() == ["0.0.1b1", "PluginTestHarness"]
+    assert result.stdout.splitlines() == ["0.0.1", "PluginTestHarness"]

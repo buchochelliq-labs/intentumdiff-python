@@ -130,7 +130,7 @@ def test_cli_primary_branding_is_intentdiff(capsys: pytest.CaptureFixture[str]) 
     with pytest.raises(SystemExit):
         parser.parse_args(["--version"])
 
-    assert "IntentDiff 0.0.1b1" in capsys.readouterr().out
+    assert "IntentDiff 0.0.1" in capsys.readouterr().out
 
 
 def test_click_main_version_uses_primary_branding(
@@ -138,7 +138,7 @@ def test_click_main_version_uses_primary_branding(
 ) -> None:
     assert _run("--version") == 0
 
-    assert "IntentDiff 0.0.1b1" in capsys.readouterr().out
+    assert "IntentDiff 0.0.1" in capsys.readouterr().out
 
 
 def test_click_main_delegates_command_help_to_compatible_parser(

@@ -134,7 +134,12 @@ def test_publish_workflow_has_testpypi_trusted_publisher_lane() -> None:
     assert "repository-url: https://test.pypi.org/legacy/" in workflow
     assert "if: github.event_name == 'workflow_dispatch' && inputs.publish_testpypi" in workflow
     assert "artifact: Windows-arm64" in workflow
-    assert "aarch64-pc-windows-msvc" in workflow
+    # The arm64 wheel is built on a native arm64 runner, not cross-compiled from x64:
+    # the cross build could not produce a working cffi cdylib. So the load-bearing fact
+    # is the runner label, and the '--target aarch64-pc-windows-msvc' flag is gone by
+    # design. Assert both halves so a silent revert to cross-compiling is caught.
+    assert "windows-11-arm" in workflow
+    assert "aarch64-pc-windows-msvc" not in workflow
     assert '--expected-platform-pattern "win_arm64"' in workflow
     assert "dist-${{ matrix.artifact }}" in workflow
     # Same reasoning as --expected-version above: the manifest path is built from an

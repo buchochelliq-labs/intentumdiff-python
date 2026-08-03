@@ -235,7 +235,7 @@ jobs:
           --max-wheel-mb 75
           --max-release-mb 250
           --expected-name intentdiff-python
-          --expected-version 0.0.1b1
+          --expected-version 0.0.1
           --expected-platform-pattern ".*manylinux.*x86_64.*"
           --expected-platform-pattern "macosx_.*"
           --expected-platform-pattern "win_amd64"
