@@ -128,11 +128,14 @@ def stage_wasm_from_artifacts(token: str, org: str = "buchochelliq-labs") -> int
             accept="application/vnd.github.raw").decode("utf-8")
     )
     pins: dict[str, str] = {}
-    for entry in (registry.get("plugins") or {}).values():
+    refs: dict[str, str] = {}
+    for plugin, entry in (registry.get("plugins") or {}).items():
         pins.update(entry.get("wasm_checksums") or {})
+        if entry.get("ref"):
+            refs[plugin] = entry["ref"]
     if not pins:
         sys.exit("registry.yaml carries no wasm_checksums - refusing to 'verify' nothing")
-    print(f"registry pins: {len(pins)} component checksums")
+    print(f"registry pins: {len(pins)} component checksums, {len(refs)} refs")
 
     repos, page = [], 1
     while True:
@@ -151,14 +154,30 @@ def stage_wasm_from_artifacts(token: str, org: str = "buchochelliq-labs") -> int
         # credential (download) — different fixes, one symptom.
         stage = "list-runs"
         try:
-            runs = _json.loads(get(
-                f"{api}/repos/{org}/{name}/actions/runs?status=success&per_page=1"))
+            # The registry pins BOTH a ref and a checksum. Asking for "the newest
+            # successful run" silently ignores half of that: any unrelated commit on a
+            # parser repo — a CI tweak, a dependabot.yml, a README badge — repoints this
+            # at a different build, and the checksum gate then fires for the wrong
+            # reason, reporting "the component changed" when only the commit did.
+            ref = refs.get(name)
+            query = (f"head_sha={ref}&status=success&per_page=20" if ref
+                     else "status=success&per_page=1")
+            runs = _json.loads(get(f"{api}/repos/{org}/{name}/actions/runs?{query}"))
             wr = runs.get("workflow_runs") or []
             if not wr:
-                missing.append((name, "no successful run")); continue
+                missing.append((name, f"no successful run at pinned ref {ref[:8]}" if ref
+                                else "no successful run")); continue
+
+            # Several workflows run on one commit (CI, CodeQL, Dependabot); only one
+            # publishes parser-wasm, so walk them rather than assuming the first.
             stage = "list-artifacts"
-            arts = _json.loads(get(wr[0]["artifacts_url"]))
-            art = next((a for a in arts.get("artifacts", []) if a["name"] == "parser-wasm"), None)
+            art = None
+            for run in wr:
+                arts = _json.loads(get(run["artifacts_url"]))
+                art = next((a for a in arts.get("artifacts", [])
+                            if a["name"] == "parser-wasm" and not a.get("expired")), None)
+                if art:
+                    break
             if not art:
                 missing.append((name, "no parser-wasm artifact")); continue
             stage = "download-artifact"
