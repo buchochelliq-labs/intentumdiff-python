@@ -59,10 +59,25 @@ BLOCKED_ARCHIVE_SUFFIXES = (
 BYTES_PER_MB = 1_000_000
 DEFAULT_MAX_WHEEL_BYTES = 75 * BYTES_PER_MB
 DEFAULT_MAX_RELEASE_BYTES = 250 * BYTES_PER_MB
-EXPECTED_DISTRIBUTION = "intentdiff"
+# The PROJECT name (what METADATA `Name:` carries and what PyPI shows). The bare
+# "intentdiff" PyPI name is held by a third party; see pyproject.toml. Wheel FILENAMES
+# and the .dist-info prefix use the PEP 427 escaped form (`-` becomes `_`) — derived
+# via _filename_form() wherever a path is compared, so one flag serves both roles.
+EXPECTED_DISTRIBUTION = "intentdiff-python"
 EXPECTED_VERSION = "0.0.1b1"
+
+
+def _filename_form(project_name: str) -> str:
+    """PEP 427 escaping: runs of ``-_.`` become a single ``_`` in wheel file components."""
+    return re.sub(r"[-_.]+", "_", project_name)
+
+
+# Anchored to the expected distribution ON PURPOSE: a foreign wheel name is "not the
+# IntentDiff release format" (fails the regex), while a right-name/wrong-version wheel
+# gets the more specific version error from the comparisons below.
 _WHEEL_NAME_RE = re.compile(
-    r"^(?P<name>intentdiff)-(?P<version>[^-]+)-(?P<python_tag>[^-]+)-"
+    rf"^(?P<name>{re.escape(_filename_form(EXPECTED_DISTRIBUTION))})-"
+    r"(?P<version>[^-]+)-(?P<python_tag>[^-]+)-"
     r"(?P<abi_tag>[^-]+)-(?P<platform_tag>[^-]+(?:\.[^-]+)*)\.whl$"
 )
 
@@ -105,7 +120,7 @@ def _validate_wheel_entries(
     expected_version: str,
 ) -> None:
     """Fail closed on unexpected or dangerous files in release wheels."""
-    dist_info_prefix = f"{expected_name}-{expected_version}.dist-info/"
+    dist_info_prefix = f"{_filename_form(expected_name)}-{expected_version}.dist-info/"
     allowed_prefixes = ("intentdiff/", dist_info_prefix)
     for name in names:
         _validate_archive_entry_name(name)
@@ -169,8 +184,10 @@ def verify_wheel(
     match = _WHEEL_NAME_RE.match(wheel.name)
     if match is None:
         raise ValueError(f"wheel name does not match IntentDiff release format: {wheel.name}")
-    if match.group("name") != expected_name:
-        raise ValueError(f"wheel name must be {expected_name!r}: {wheel.name}")
+    if match.group("name") != _filename_form(expected_name):
+        raise ValueError(
+            f"wheel name must be {_filename_form(expected_name)!r}: {wheel.name}"
+        )
     if match.group("version") != expected_version:
         raise ValueError(
             f"wheel version must be {expected_version!r}: {wheel.name}"

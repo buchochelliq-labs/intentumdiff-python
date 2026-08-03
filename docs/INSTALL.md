@@ -3,7 +3,7 @@
 ## From PyPI (the user path)
 
 ```bash
-pip install intentdiff
+pip install intentdiff-python
 ```
 
 Wheels are pre-built per platform and self-contained: the native engine and all parser

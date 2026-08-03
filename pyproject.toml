@@ -6,7 +6,12 @@ requires = ["maturin>=1.14,<2"]
 build-backend = "maturin"
 
 [project]
-name = "intentdiff"
+# Distribution name only - the import is still `import intentdiff`. The bare "intentdiff"
+# name on PyPI is held by an unrelated third party (github.com/harivilasp/intentdiff,
+# uploaded 2026-07-24), so the package publishes as intentdiff-python; Trusted Publishing
+# is registered under that project name. A PEP 541 claim on the bare name can be pursued
+# separately without blocking releases.
+name = "intentdiff-python"
 version = "0.0.1b1"
 description = "Semantic code review: detect intent, moves, refactorings, and style changes"
 readme = "README.md"
@@ -24,7 +29,7 @@ dependencies = [
     "unidiff>=0.7",
     "pygments>=2.17",
     "pyyaml>=6.0",
-    "wasmtime>=45.0",
+    "wasmtime>=47.0.1",
     "defusedxml>=0.7",
     "pathspec>=0.12",
     "watchdog>=3.0",
@@ -50,7 +55,7 @@ dev = [
     "pydantic[mypy]",
     "httpx>=0.27",
     # Test-harness only — the product shells to the git CLI, not GitPython (#98, A2.4).
-    "gitpython>=3.1",
+    "gitpython>=3.1.57",
     # Optional-feature packages required to run the full test suite
     "lsprotocol>=2023.0",
     "pygls>=1.3",
@@ -71,7 +76,7 @@ lsp-server = [
 ]
 serve = [
     "fastapi>=0.110",
-    "starlette>=1.0.1",
+    "starlette>=1.3.1",
     "uvicorn[standard]>=0.29",
 ]
 # Mercurial support needs only the `hg` CLI on PATH — the Rust core shells it directly

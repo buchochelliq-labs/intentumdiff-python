@@ -19,8 +19,10 @@ on:
         default: "0.0.1b1"
         type: string
 
-# Deny by default (zizmor excessive-permissions); every job declares what it
-# needs (publish jobs add id-token:write for Trusted Publishing).
+# Deny by default (zizmor excessive-permissions): with no workflow-level block, jobs
+# inherit the repository default, which can be read-write. Every job here declares the
+# permissions it actually needs (build-wheels: contents:read; publish/publish-testpypi
+# add id-token:write for Trusted Publishing), so nothing relies on the inherited grant.
 permissions: {}
 
 jobs:
@@ -68,6 +70,13 @@ jobs:
         with:
           python-version: "3.12"
 
+      # zizmor template-injection: every `${{ }}` below used to be expanded straight into
+      # the shell command, which splices the value into the script GitHub generates. The
+      # version ultimately comes from a workflow_dispatch input, so it is attacker-shaped
+      # (write-access-gated, but this workflow publishes to PyPI — the one place not to
+      # leave that open). Pass values through the environment instead, where the shell
+      # sees them as data. `shell: bash` because this job also runs the Windows matrix
+      # legs, whose default shell is pwsh and would not read $VAR.
       - name: Stamp TestPyPI rehearsal version
         if: github.event_name == 'workflow_dispatch' && inputs.publish_testpypi
         shell: bash
@@ -92,15 +101,16 @@ jobs:
       # header — restricted to functions by crates/rust-core-host/cbindgen.toml so cffi's macro
       # parser is happy — and its generated cffi wrapper is unused: rust_core.py ctypes-loads the
       # cdylib directly).
-      # #82 split: stage the engine checkout + parser components the wheel bundles.
-      # Cross-repo access to the private intentdiff-core needs the org token (Phase D).
-      - name: Provision build inputs (engine checkout)
-        run: python scripts/provision_build_inputs.py
-        env:
-          GIT_TERMINAL_PROMPT: "0"
-
       - name: Build native IntentDiff wheel (pyo3-free cdylib)
         shell: bash
+        # The matrix carries a TARGET TRIPLE, not a fragment of a command line, and the
+        # flag is assembled here into a quoted array. The previous version passed
+        # $MATURIN_TARGET_ARGS unquoted so the empty case would vanish rather than become
+        # a stray empty argument - but that is SC2086 (word splitting), which actionlint
+        # fails on. Putting the matrix value back into the command as a `${{ }}`
+        # expansion would clear SC2086 and reintroduce the zizmor template-injection
+        # instead. An array satisfies both: empty expands to nothing, non-empty stays a
+        # single argument.
         run: |
           target_args=()
           if [ -n "$MATURIN_TARGET" ]; then
@@ -145,7 +155,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: pypi
-      url: https://pypi.org/p/intentdiff
+      url: https://pypi.org/p/intentdiff-python
     permissions:
       contents: read
       id-token: write
@@ -184,7 +194,7 @@ jobs:
           python scripts/verify_intentdiff_wheel.py publish-dist
           --max-wheel-mb 75
           --max-release-mb 250
-          --expected-name intentdiff
+          --expected-name intentdiff-python
           --expected-version 0.0.1b1
           --expected-platform-pattern ".*manylinux.*x86_64.*"
           --expected-platform-pattern "macosx_.*"
@@ -203,7 +213,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: testpypi
-      url: https://test.pypi.org/project/intentdiff/
+      url: https://test.pypi.org/project/intentdiff-python/
     permissions:
       contents: read
       id-token: write
