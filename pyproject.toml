@@ -213,7 +213,7 @@ include = [
     { path = "src/intentumdiff/invariances/*.yaml", format = "wheel" },
     { path = "src/intentumdiff/invariances/*.json", format = "wheel" },
     # The published plugin-registry schema (#95) — loaded at runtime via resources.files.
-    { path = "src/intentumdiff/plugins/*.json", format = "wheel" },
+    { path = "src/intentdiff/plugins/*.json", format = "wheel" },
 ]
 
 # ── Ruff ─────────────────────────────────────────────────────────────────────

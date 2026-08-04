@@ -31,7 +31,7 @@ def _valid_registry() -> dict:
                 "description": "dbt SQL + schema semantics",
                 "trust_tier": "official",
                 "wasm_checksums": {"dbt_sql_parser.wasm": _SHA},
-                "capabilities": ["intentumdiff:plugin/parser"],
+                "capabilities": ["intentdiff:plugin/parser"],
                 "abi_target": "1.0.0",
                 "provenance_manifest_ref": "wasm_provenance.json",
             },
@@ -164,13 +164,13 @@ def test_cli_reports_unreadable_manifest(tmp_path: Path, capsys) -> None:
 
 
 def test_host_contract_version_matches_the_wit() -> None:
-    """Drift guard: HOST_CONTRACT_VERSION must equal `package intentumdiff:plugin@X` in the WIT,
+    """Drift guard: HOST_CONTRACT_VERSION must equal `package intentdiff:plugin@X` in the WIT,
     so a contract bump forces a conscious host bump (#94)."""
     wit = (
         Path(__file__).resolve().parents[2]
         / "src" / "intentumdiff" / "plugins" / "wit" / "plugin.wit"
     ).read_text(encoding="utf-8")
-    match = _re.search(r"package\s+intentumdiff:plugin@([0-9]+\.[0-9]+\.[0-9]+)", wit)
+    match = _re.search(r"package\s+intentdiff:plugin@([0-9]+\.[0-9]+\.[0-9]+)", wit)
     assert match is not None, "could not find the plugin-contract package version in the WIT"
     assert match.group(1) == HOST_CONTRACT_VERSION
 

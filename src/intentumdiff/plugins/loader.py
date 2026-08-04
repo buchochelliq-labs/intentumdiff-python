@@ -769,10 +769,10 @@ class LoadedPlugin:
     """
 
     # Qualified interface export names as emitted by wit-bindgen
-    _PARSER_IFACE = "intentumdiff:plugin/parser@1.0.0"
-    _RENDERER_IFACE = "intentumdiff:plugin/renderer@1.0.0"
-    _ENRICHER_IFACE = "intentumdiff:plugin/enricher@1.0.0"
-    _DIFF_ANALYZER_IFACE = "intentumdiff:plugin/diff-analyzer@1.0.0"
+    _PARSER_IFACE = "intentdiff:plugin/parser@1.0.0"
+    _RENDERER_IFACE = "intentdiff:plugin/renderer@1.0.0"
+    _ENRICHER_IFACE = "intentdiff:plugin/enricher@1.0.0"
+    _DIFF_ANALYZER_IFACE = "intentdiff:plugin/diff-analyzer@1.0.0"
 
     def __init__(
         self,
@@ -1183,7 +1183,7 @@ def load_plugin(
         # Register host-utils imports using add_instance context manager.
         # root must be closed before instantiate() is called.
         root = linker.root()
-        with root.add_instance("intentumdiff:plugin/host-utils") as host:
+        with root.add_instance("intentdiff:plugin/host-utils") as host:
             host.add_func(
                 "strip-trivia",
                 lambda store, args: _strip_trivia_impl(args[0], list(args[1])),

@@ -36,7 +36,7 @@ After installation, two checks are run (unless ``--skip-verify`` is passed):
 2. **Wasm capability scan** — the binary's import section is scanned for
    unexpected WASI imports (filesystem, sockets, network, HTTP, …).  The only
    permitted host import is the IntentumDiff WIT package
-   ``intentumdiff:plugin/host-utils@1.0.0``.
+   ``intentdiff:plugin/host-utils@1.0.0``.
    Any other import is flagged as a warning.
 
 When installing from the **official registry**, the registry manifest already
@@ -183,7 +183,7 @@ def _validate_dep_hashes(spec: "PluginSpec", install_target: str | None = None) 
 # will be flagged by the capability scanner.
 _ALLOWED_WASM_HOST_MODULES: frozenset[str] = frozenset(
     {
-        "intentumdiff:plugin/host-utils@1.0.0",
+        "intentdiff:plugin/host-utils@1.0.0",
     }
 )
 

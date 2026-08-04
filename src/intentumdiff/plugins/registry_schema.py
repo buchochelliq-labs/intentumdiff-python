@@ -28,7 +28,7 @@ _SOURCE_VALUES = frozenset({"git", "pypi"})
 _TRUST_TIERS = frozenset({"official", "community"})
 
 #: The plugin-contract ABI version this host implements. Mirrors ``package
-#: intentumdiff:plugin@X`` in ``plugins/wit/plugin.wit``; the drift-guard test
+#: intentdiff:plugin@X`` in ``plugins/wit/plugin.wit``; the drift-guard test
 #: ``test_host_contract_version_matches_the_wit`` pins them together so a WIT bump forces a
 #: conscious host bump (#94: the host must know which contract version it speaks).
 HOST_CONTRACT_VERSION = "1.0.0"
