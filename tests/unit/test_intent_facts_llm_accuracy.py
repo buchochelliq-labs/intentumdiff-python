@@ -34,7 +34,7 @@ from tests.unit.test_intent_facts_sufficiency import CASES, _added_entity_facts
 pytestmark = pytest.mark.benchmark
 
 _API_KEY = os.environ.get("ANTHROPIC_API_KEY")
-_MODEL = os.environ.get("INTENTDIFF_BENCH_MODEL", "claude-haiku-4-5-20251001")
+_MODEL = os.environ.get("INTENTUMDIFF_BENCH_MODEL", "claude-haiku-4-5-20251001")
 _ENDPOINT = "https://api.anthropic.com/v1/messages"
 
 

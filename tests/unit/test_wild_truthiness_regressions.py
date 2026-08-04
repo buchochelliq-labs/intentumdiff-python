@@ -2,7 +2,7 @@
 
 Each test captures the *essence* of a real user complaint — not the user's
 actual code — and locks down what the truthful semantic diff should be.
-The goal is to ensure IntentDiff's engine reports the truth (the real
+The goal is to ensure IntentumDiff's engine reports the truth (the real
 semantic change) rather than burying it under noise that clouds the
 message.
 
@@ -23,7 +23,7 @@ Dual-run contract
 -----------------
 Every truthiness test runs against **both** the Python oracle matcher
 (``core.engine._compute_matching``) and the Rust language-agnostic
-matcher (``intentdiff_rust_core.diff_semantic_tree_json``) via the
+matcher (``intentumdiff_rust_core.diff_semantic_tree_json``) via the
 ``matcher`` fixture. The Rust path must always pass; the Python path
 must pass unless it has been explicitly retired via
 ``_skip_python_because(...)`` because a Bucket 3 rule retirement made
@@ -37,8 +37,8 @@ from typing import Literal
 
 import pytest
 
-from intentdiff import SemanticDiffer
-from intentdiff.core.models import (
+from intentumdiff import SemanticDiffer
+from intentumdiff.core.models import (
     Change,
     ChangeGroupKind,
     ChangeType,

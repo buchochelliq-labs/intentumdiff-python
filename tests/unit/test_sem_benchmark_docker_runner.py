@@ -29,9 +29,9 @@ def test_docker_command_mounts_repo_and_uses_named_caches() -> None:
 
     assert command[:5] == ["docker", "run", "--rm", "--pull", "missing"]
     assert f"{benchmark_sem_docker.REPO_ROOT}:/workspace" in command
-    assert "intentdiff-sem-cargo-cache:/root/.cargo" in command
-    assert "intentdiff-sem-rustup-cache:/root/.rustup" in command
-    assert "intentdiff-sem-pip-cache:/root/.cache/pip" in command
+    assert "intentumdiff-sem-cargo-cache:/root/.cargo" in command
+    assert "intentumdiff-sem-rustup-cache:/root/.rustup" in command
+    assert "intentumdiff-sem-pip-cache:/root/.cache/pip" in command
 
 
 def test_container_script_runs_quick_before_full_by_default() -> None:

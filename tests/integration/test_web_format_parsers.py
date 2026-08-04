@@ -31,7 +31,7 @@ pytestmark = pytest.mark.integration
 
 from pathlib import Path
 
-_WASM_DIR = Path(__file__).parents[2] / "src" / "intentdiff" / "wasm"
+_WASM_DIR = Path(__file__).parents[2] / "src" / "intentumdiff" / "wasm"
 
 
 def _wasm_built(name: str) -> bool:
@@ -50,8 +50,8 @@ def _requires_wasm(*names: str):
 
 def _diff(old: str, new: str, filename: str):
     """Run the full differ pipeline, returning a SemanticDiff."""
-    from intentdiff import DiffConfig, SemanticDiffer
-    from intentdiff.sources.string_source import StringSource
+    from intentumdiff import DiffConfig, SemanticDiffer
+    from intentumdiff.sources.string_source import StringSource
 
     config = DiffConfig(plugin_fuel=500_000_000)
     differ = SemanticDiffer(config=config)

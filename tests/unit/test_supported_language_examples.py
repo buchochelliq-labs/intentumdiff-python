@@ -6,8 +6,8 @@ from typing import Any
 
 import pytest
 
-from intentdiff import SemanticDiffer
-from intentdiff.core.models import ChangeGroupKind, ChangeType
+from intentumdiff import SemanticDiffer
+from intentumdiff.core.models import ChangeGroupKind, ChangeType
 
 from tests.unit.diff_sanity import assert_no_identical_positioned_source_modifications
 
@@ -659,7 +659,7 @@ def test_asciidoc_parser_depth_extracts_review_landmarks(
     differ: SemanticDiffer,
 ) -> None:
     old = """\
-= IntentDiff
+= IntentumDiff
 :revnumber: 1.0
 [[install]]
 == Install
@@ -668,11 +668,11 @@ NOTE: See link:https://example.com/docs[docs].
 * Run setup
 image::screens/review.png[]
 ----
-intentdiff git main
+intentumdiff git main
 ----
 """
     new = """\
-= IntentDiff
+= IntentumDiff
 :revnumber: 1.1
 [[usage]]
 == Usage
@@ -681,7 +681,7 @@ NOTE: See link:https://example.com/docs[docs] and xref:#install[Install].
 * Run review
 image::screens/dashboard.png[]
 ----
-intentdiff git main --format json
+intentumdiff git main --format json
 ----
 """
 

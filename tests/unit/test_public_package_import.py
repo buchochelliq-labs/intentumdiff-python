@@ -21,10 +21,10 @@ def test_public_package_import_does_not_require_pytest() -> None:
 
         builtins.__import__ = guarded_import
 
-        import intentdiff
-        from intentdiff import PluginTestHarness
+        import intentumdiff
+        from intentumdiff import PluginTestHarness
 
-        print(intentdiff.__version__)
+        print(intentumdiff.__version__)
         print(PluginTestHarness.__name__)
         """
     )

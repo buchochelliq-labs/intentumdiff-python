@@ -8,7 +8,7 @@
    host - every outcome is a valid tree or a TYPED plugin error.
 
 No test performs network I/O. The full 60+-parser sweep is gated behind
-``INTENTDIFF_PARSER_FUZZ_FULL=1`` (it instantiates every component); the
+``INTENTUMDIFF_PARSER_FUZZ_FULL=1`` (it instantiates every component); the
 default subset keeps the unit suite fast while pinning the harness itself.
 """
 
@@ -20,13 +20,13 @@ from pathlib import Path
 
 import pytest
 
-from intentdiff.plugins.exceptions import (
+from intentumdiff.plugins.exceptions import (
     PluginFuelExhausted,
     PluginSandboxViolation,
 )
-from intentdiff.plugins.loader import _plugin_memory_limit_bytes, load_plugin
+from intentumdiff.plugins.loader import _plugin_memory_limit_bytes, load_plugin
 
-_WASM_DIR = Path(__file__).resolve().parents[2] / "src" / "intentdiff" / "wasm"
+_WASM_DIR = Path(__file__).resolve().parents[2] / "src" / "intentumdiff" / "wasm"
 
 _DEFAULT_SUBSET = (
     "python_parser.wasm",
@@ -45,7 +45,7 @@ _TYPED_PLUGIN_ERRORS = (PluginSandboxViolation, PluginFuelExhausted, ValueError)
 def _staged_parsers() -> list[Path]:
     if not _WASM_DIR.is_dir():
         return []
-    if os.environ.get("INTENTDIFF_PARSER_FUZZ_FULL") == "1":
+    if os.environ.get("INTENTUMDIFF_PARSER_FUZZ_FULL") == "1":
         return sorted(
             path
             for path in _WASM_DIR.glob("*_parser.wasm")
@@ -114,7 +114,7 @@ def test_memory_limiter_bails_during_parse(monkeypatch: pytest.MonkeyPatch) -> N
     """Issue #87 item 1: with a tight linear-memory cap, a repetitive input
     whose tree would balloon past the cap traps DURING parse as a typed
     sandbox violation (status 'memory_limit'), not after a giant allocation."""
-    monkeypatch.setenv("INTENTDIFF_PLUGIN_MEMORY_LIMIT_BYTES", str(28 * 1024 * 1024))
+    monkeypatch.setenv("INTENTUMDIFF_PLUGIN_MEMORY_LIMIT_BYTES", str(28 * 1024 * 1024))
     wasm = _WASM_DIR / "json_parser.wasm"
     if not wasm.exists():
         pytest.skip("json parser not staged")
@@ -129,16 +129,16 @@ def test_memory_limiter_bails_during_parse(monkeypatch: pytest.MonkeyPatch) -> N
 
 def test_memory_limit_env_override_and_default() -> None:
     assert _plugin_memory_limit_bytes() == 192 * 1024 * 1024
-    os.environ["INTENTDIFF_PLUGIN_MEMORY_LIMIT_BYTES"] = "1048576"
+    os.environ["INTENTUMDIFF_PLUGIN_MEMORY_LIMIT_BYTES"] = "1048576"
     try:
         assert _plugin_memory_limit_bytes() == 1048576
     finally:
-        del os.environ["INTENTDIFF_PLUGIN_MEMORY_LIMIT_BYTES"]
-    os.environ["INTENTDIFF_PLUGIN_MEMORY_LIMIT_BYTES"] = "not-a-number"
+        del os.environ["INTENTUMDIFF_PLUGIN_MEMORY_LIMIT_BYTES"]
+    os.environ["INTENTUMDIFF_PLUGIN_MEMORY_LIMIT_BYTES"] = "not-a-number"
     try:
         assert _plugin_memory_limit_bytes() == 192 * 1024 * 1024
     finally:
-        del os.environ["INTENTDIFF_PLUGIN_MEMORY_LIMIT_BYTES"]
+        del os.environ["INTENTUMDIFF_PLUGIN_MEMORY_LIMIT_BYTES"]
 
 
 def test_default_cap_does_not_break_normal_parses() -> None:

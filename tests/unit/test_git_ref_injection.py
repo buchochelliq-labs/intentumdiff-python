@@ -4,7 +4,7 @@ A git ref flows from ``diff_commit`` into ``git diff <ref>`` (Rust native path)
 and the ``cat-file --batch`` request. Without validation, a ref beginning with
 ``-`` is parsed by git as an option — ``--output=<path>`` turns the diff into an
 arbitrary file write — and a ref with a newline injects extra batch requests.
-The extension's ``intentdiff.ref`` setting is window-scoped (workspace-settable),
+The extension's ``intentumdiff.ref`` setting is window-scoped (workspace-settable),
 so a hostile repo's ``.vscode/settings.json`` is a plausible source of the ref.
 
 These pins assert the public ``diff_commit`` boundary rejects such refs before
@@ -16,8 +16,8 @@ from __future__ import annotations
 
 import pytest
 
-from intentdiff import SemanticDiffer
-from intentdiff._differ_gate import _validate_git_ref
+from intentumdiff import SemanticDiffer
+from intentumdiff._differ_gate import _validate_git_ref
 
 
 @pytest.mark.parametrize(

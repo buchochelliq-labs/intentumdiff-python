@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from difflib import SequenceMatcher
 
-from intentdiff.core.models import NodePosition, SemanticDiff
+from intentumdiff.core.models import NodePosition, SemanticDiff
 
 
 def changed_lines(old: str, new: str) -> tuple[set[int], set[int]]:

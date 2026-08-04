@@ -2,7 +2,7 @@
 tests/unit/test_commit_differ.py
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Unit tests for ``CommitDiffer`` (``intentdiff.core.commit_differ``).
+Unit tests for ``CommitDiffer`` (``intentumdiff.core.commit_differ``).
 
 All git interactions and the underlying ``SemanticDiffer._run_pipeline()`` are
 mocked so the tests run without a real repository.
@@ -22,9 +22,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from intentdiff.core.commit_differ import CommitDiffer
-from intentdiff.core.index import SemanticIndex
-from intentdiff.core.models import (
+from intentumdiff.core.commit_differ import CommitDiffer
+from intentumdiff.core.index import SemanticIndex
+from intentumdiff.core.models import (
     ChangeType,
     CommitDiff,
     DiffConfig,
@@ -32,9 +32,9 @@ from intentdiff.core.models import (
     SemanticDiff,
     SemanticNode,
 )
-from intentdiff.differ import SemanticDiffer
-from intentdiff.plugins.exceptions import PluginFuelExhausted
-from intentdiff.rust_core import RustCoreBatchDiffsAttempt, RustCoreCommitJsonAttempt
+from intentumdiff.differ import SemanticDiffer
+from intentumdiff.plugins.exceptions import PluginFuelExhausted
+from intentumdiff.rust_core import RustCoreBatchDiffsAttempt, RustCoreCommitJsonAttempt
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -113,11 +113,11 @@ class TestSemanticDifferParallelCommit:
         # git against the test's cwd.
         with (
             patch(
-                "intentdiff.sources.git_source.collect_working_tree_python_sources_fast",
+                "intentumdiff.sources.git_source.collect_working_tree_python_sources_fast",
                 return_value=None,
             ),
             patch(
-                "intentdiff.sources.git_source.iter_changed_sources",
+                "intentumdiff.sources.git_source.iter_changed_sources",
                 return_value=iter(changed_files),
             ),
         ):
@@ -188,7 +188,7 @@ class TestSemanticDifferParallelCommit:
         assert [result.new_filename for result in results] == ["a.py", "b.py"]
 
     def test_parallel_commit_skips_plugin_not_found_like_sequential(self):
-        from intentdiff.plugins.exceptions import PluginNotFoundError
+        from intentumdiff.plugins.exceptions import PluginNotFoundError
 
         differ = SemanticDiffer(DiffConfig(parallel=2, experimental_rust_core=False))
 
@@ -292,11 +292,11 @@ class TestSemanticDifferParallelCommit:
             repo_patch,
             sources_patch,
             patch(
-                "intentdiff.plugins.builtins.python_parser_entry",
+                "intentumdiff.plugins.builtins.python_parser_entry",
                 return_value="python_parser.wasm",
             ),
             patch(
-                "intentdiff.differ.try_rust_core_batch_diffs",
+                "intentumdiff.differ.try_rust_core_batch_diffs",
                 side_effect=fake_batch_diffs,
             ),
             patch.object(
@@ -363,11 +363,11 @@ class TestSemanticDifferParallelCommit:
             repo_patch,
             sources_patch,
             patch(
-                "intentdiff.plugins.builtins.python_parser_entry",
+                "intentumdiff.plugins.builtins.python_parser_entry",
                 return_value="python_parser.wasm",
             ),
             patch(
-                "intentdiff.differ.try_rust_core_batch_diffs",
+                "intentumdiff.differ.try_rust_core_batch_diffs",
                 side_effect=fake_batch_diffs,
             ),
             patch.object(
@@ -409,11 +409,11 @@ class TestSemanticDifferParallelCommit:
             repo_patch,
             sources_patch,
             patch(
-                "intentdiff.plugins.builtins.python_parser_entry",
+                "intentumdiff.plugins.builtins.python_parser_entry",
                 return_value="python_parser.wasm",
             ),
             patch(
-                "intentdiff.differ.try_rust_core_batch_diffs",
+                "intentumdiff.differ.try_rust_core_batch_diffs",
                 side_effect=fake_batch_diffs,
             ),
         ):
@@ -450,11 +450,11 @@ class TestSemanticDifferParallelCommit:
             repo_patch,
             sources_patch,
             patch(
-                "intentdiff.plugins.builtins.python_parser_entry",
+                "intentumdiff.plugins.builtins.python_parser_entry",
                 return_value="python_parser.wasm",
             ),
             patch(
-                "intentdiff.differ.try_rust_core_batch_diffs",
+                "intentumdiff.differ.try_rust_core_batch_diffs",
                 side_effect=fake_batch_diffs,
             ),
         ):
@@ -504,15 +504,15 @@ class TestSemanticDifferParallelCommit:
             repo_patch,
             sources_patch,
             patch(
-                "intentdiff.plugins.builtins.python_parser_entry",
+                "intentumdiff.plugins.builtins.python_parser_entry",
                 return_value="python_parser.wasm",
             ),
             patch(
-                "intentdiff.differ.try_rust_core_working_tree_commit_json",
+                "intentumdiff.differ.try_rust_core_working_tree_commit_json",
                 return_value=RustCoreCommitJsonAttempt(fallback_reason="unavailable: test"),
             ),
             patch(
-                "intentdiff.differ.try_rust_core_commit_json",
+                "intentumdiff.differ.try_rust_core_commit_json",
                 side_effect=fake_commit_json,
             ),
         ):
@@ -542,7 +542,7 @@ class TestSemanticDifferParallelCommit:
         # that strict behaviour is covered by
         # test_certified_commit_json_strict_rust_gate_blocks_unavailable_backend_fallback —
         # so pin this test to the non-strict mode regardless of the ambient suite env.
-        from intentdiff.differ import STRICT_RUST_GATE_ENV
+        from intentumdiff.differ import STRICT_RUST_GATE_ENV
 
         monkeypatch.delenv(STRICT_RUST_GATE_ENV, raising=False)
         differ = SemanticDiffer(DiffConfig(experimental_rust_core=True))
@@ -559,15 +559,15 @@ class TestSemanticDifferParallelCommit:
             repo_patch,
             sources_patch,
             patch(
-                "intentdiff.plugins.builtins.python_parser_entry",
+                "intentumdiff.plugins.builtins.python_parser_entry",
                 return_value="python_parser.wasm",
             ),
             patch(
-                "intentdiff.differ.try_rust_core_working_tree_commit_json",
+                "intentumdiff.differ.try_rust_core_working_tree_commit_json",
                 return_value=RustCoreCommitJsonAttempt(fallback_reason="unavailable: test"),
             ),
             patch(
-                "intentdiff.differ.try_rust_core_commit_json",
+                "intentumdiff.differ.try_rust_core_commit_json",
                 side_effect=fail_commit_json,
             ),
         ):
@@ -579,7 +579,7 @@ class TestSemanticDifferParallelCommit:
         )
 
     def test_certified_commit_json_strict_rust_gate_blocks_python_batch_skip(self, monkeypatch):
-        from intentdiff.differ import STRICT_RUST_GATE_ENV
+        from intentumdiff.differ import STRICT_RUST_GATE_ENV
 
         monkeypatch.setenv(STRICT_RUST_GATE_ENV, "1")
         differ = SemanticDiffer(
@@ -596,14 +596,14 @@ class TestSemanticDifferParallelCommit:
             differ._diff_commit_certified_json(".")
 
     def test_certified_commit_json_strict_rust_gate_blocks_working_tree_fallback(self, monkeypatch):
-        from intentdiff.differ import STRICT_RUST_GATE_ENV
+        from intentumdiff.differ import STRICT_RUST_GATE_ENV
 
         monkeypatch.setenv(STRICT_RUST_GATE_ENV, "1")
         differ = SemanticDiffer(DiffConfig(experimental_rust_core=True))
 
         with (
             patch(
-                "intentdiff.differ.try_rust_core_working_tree_commit_json",
+                "intentumdiff.differ.try_rust_core_working_tree_commit_json",
                 return_value=RustCoreCommitJsonAttempt(fallback_reason="backend unavailable"),
             ),
             pytest.raises(
@@ -616,22 +616,22 @@ class TestSemanticDifferParallelCommit:
     def test_certified_commit_json_strict_rust_gate_blocks_unavailable_backend_fallback(
         self, monkeypatch
     ):
-        from intentdiff.differ import STRICT_RUST_GATE_ENV
+        from intentumdiff.differ import STRICT_RUST_GATE_ENV
 
         monkeypatch.setenv(STRICT_RUST_GATE_ENV, "1")
         differ = SemanticDiffer(DiffConfig(experimental_rust_core=True))
 
         with (
             patch(
-                "intentdiff.differ.try_rust_core_working_tree_commit_json",
+                "intentumdiff.differ.try_rust_core_working_tree_commit_json",
                 return_value=RustCoreCommitJsonAttempt(fallback_reason="unavailable: test"),
             ),
             patch(
-                "intentdiff.plugins.builtins.python_parser_entry",
+                "intentumdiff.plugins.builtins.python_parser_entry",
                 return_value="python_parser.wasm",
             ),
             patch(
-                "intentdiff.sources.git_source.iter_changed_sources",
+                "intentumdiff.sources.git_source.iter_changed_sources",
                 return_value=iter(
                     [
                         ("old a", "new a", "a.py", "a.py", None),
@@ -640,7 +640,7 @@ class TestSemanticDifferParallelCommit:
                 ),
             ),
             patch(
-                "intentdiff.sources.git_source.collect_working_tree_python_sources_fast",
+                "intentumdiff.sources.git_source.collect_working_tree_python_sources_fast",
                 return_value=None,
             ),
             pytest.raises(
@@ -666,7 +666,7 @@ class TestDiffCommit:
     def _patch_iter_changed_sources(self, changed_files: list[tuple]):
         """Return a context manager that patches iter_changed_sources."""
         return patch(
-            "intentdiff.core.commit_differ.iter_changed_sources",
+            "intentumdiff.core.commit_differ.iter_changed_sources",
             return_value=iter(changed_files),
         )
 
@@ -744,7 +744,7 @@ class TestDiffCommit:
 
     def test_plugin_not_found_skips_file(self):
         cd = self._make_differ()
-        from intentdiff.plugins.exceptions import PluginNotFoundError
+        from intentumdiff.plugins.exceptions import PluginNotFoundError
 
         with self._patch_git_repo() as mock_git:
             mock_git.Repo.return_value = MagicMock()
@@ -759,7 +759,7 @@ class TestDiffCommit:
 
     def test_all_parser_load_failure_is_not_reported_as_clean_review(self):
         cd = self._make_differ()
-        from intentdiff.plugins.exceptions import PluginNotFoundError
+        from intentumdiff.plugins.exceptions import PluginNotFoundError
 
         cd._differ._registry = SimpleNamespace(
             parser_load_failure_summary=lambda: "No parser plugins could be loaded"
@@ -878,7 +878,7 @@ class TestDiffCommit:
                 cd._differ._run_pipeline = MagicMock(side_effect=[diff_a, diff_b])
                 streamed = list(cd.iter_file_diffs(".", "HEAD~1", "HEAD"))
 
-        from intentdiff.core.commit_differ import FileDiffResult
+        from intentumdiff.core.commit_differ import FileDiffResult
 
         results = [item for item in streamed if isinstance(item, FileDiffResult)]
         assert len(results) == 2
@@ -898,7 +898,7 @@ class TestDiffCommit:
                 cd._differ._run_pipeline = MagicMock(side_effect=ValueError("boom"))
                 streamed = list(cd.iter_file_diffs("."))
 
-        from intentdiff.core.commit_differ import FileDiffError
+        from intentumdiff.core.commit_differ import FileDiffError
 
         assert len(streamed) == 1
         assert isinstance(streamed[0], FileDiffError)
@@ -938,7 +938,7 @@ class TestDiffCommit:
 class TestParseToTree:
     def test_returns_none_for_unknown_extension(self):
         cd = CommitDiffer()
-        from intentdiff.plugins.exceptions import PluginNotFoundError
+        from intentumdiff.plugins.exceptions import PluginNotFoundError
 
         cd._differ._registry.detect_parser = MagicMock(side_effect=PluginNotFoundError("no parser"))
         result = cd._parse_to_tree("file.unknown", "unknown", "content")
@@ -1061,7 +1061,7 @@ class TestGitignoreExcluded:
 
     def _patch_iter_changed_sources(self, changed_files):
         return patch(
-            "intentdiff.core.commit_differ.iter_changed_sources",
+            "intentumdiff.core.commit_differ.iter_changed_sources",
             return_value=iter(changed_files),
         )
 

@@ -23,7 +23,7 @@ import pytest
 # Shared model helpers
 # ---------------------------------------------------------------------------
 
-from intentdiff.core.models import (
+from intentumdiff.core.models import (
     Change,
     ChangeType,
     NodePosition,
@@ -61,7 +61,7 @@ def _diff(*changes: Change, parse_errors: list[str] | None = None) -> SemanticDi
 # TestDiagnosticsTranslation
 # ===========================================================================
 
-from intentdiff.lsp_server._diagnostics import (
+from intentumdiff.lsp_server._diagnostics import (
     node_to_lsp_range,
     semantic_diff_to_diagnostics,
 )
@@ -86,7 +86,7 @@ class TestDiagnosticsTranslation:
 
         assert d.severity == lsp_types.DiagnosticSeverity.Hint
         assert "Style-only" in d.message
-        assert d.source == "intentdiff"
+        assert d.source == "intentumdiff"
         assert d.range.start.line == 3
         assert d.range.start.character == 4
         assert d.range.end.line == 5
@@ -128,7 +128,7 @@ class TestDiagnosticsTranslation:
 # TestCodeLensTranslation
 # ===========================================================================
 
-from intentdiff.lsp_server._codelens import semantic_diff_to_codelens
+from intentumdiff.lsp_server._codelens import semantic_diff_to_codelens
 
 
 class TestCodeLensTranslation:
@@ -207,7 +207,7 @@ class TestCodeLensTranslation:
 # TestUriToPath
 # ===========================================================================
 
-from intentdiff.lsp_server._handlers import uri_to_path
+from intentumdiff.lsp_server._handlers import uri_to_path
 
 
 class TestUriToPath:
@@ -253,14 +253,14 @@ class TestServerCreation:
         except ImportError:
             from pygls.server import LanguageServer  # type: ignore[assignment]
 
-        from intentdiff.lsp_server import create_server
+        from intentumdiff.lsp_server import create_server
 
         server = create_server()
         assert isinstance(server, LanguageServer)
 
     def test_create_server_accepts_custom_config(self):
-        from intentdiff.core.models import DiffConfig
-        from intentdiff.lsp_server import create_server
+        from intentumdiff.core.models import DiffConfig
+        from intentumdiff.lsp_server import create_server
 
         cfg = DiffConfig()
         server = create_server(config=cfg, ref="main", debounce=0.5)
@@ -278,9 +278,9 @@ def _get_semantic_diff_handler(server):
     pygls may store the handler directly or inside a list depending on the
     version; this helper normalises both cases.
     """
-    feat = server.protocol.fm._features.get("intentdiff/semanticDiff")
+    feat = server.protocol.fm._features.get("intentumdiff/semanticDiff")
     if feat is None:
-        raise KeyError("intentdiff/semanticDiff handler not registered")
+        raise KeyError("intentumdiff/semanticDiff handler not registered")
     # pygls 1.x: list of handlers; 2.x: may be the function directly
     if isinstance(feat, list):
         return feat[0]
@@ -288,7 +288,7 @@ def _get_semantic_diff_handler(server):
 
 
 class TestSemanticDiffContainment:
-    """Workspace-root containment guard in the intentdiff/semanticDiff handler.
+    """Workspace-root containment guard in the intentumdiff/semanticDiff handler.
 
     The handler must:
     - Return an error when ``server.workspace.root_uri`` is None.
@@ -301,7 +301,7 @@ class TestSemanticDiffContainment:
 
     @pytest.fixture()
     def _srv(self):
-        from intentdiff.lsp_server import create_server
+        from intentumdiff.lsp_server import create_server
 
         server = create_server()
         handler = _get_semantic_diff_handler(server)
@@ -399,7 +399,7 @@ class TestRustShapeParity:
         )
 
     def _backend_fn(self, name: str):
-        import intentdiff.rust_core as rust_core
+        import intentumdiff.rust_core as rust_core
 
         backend = rust_core._load_backend()
         fn = getattr(backend, name, None)

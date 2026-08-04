@@ -25,7 +25,7 @@ from pathlib import Path
 
 import pytest
 
-from intentdiff import SemanticDiffer
+from intentumdiff import SemanticDiffer
 
 from .construct_edit_matrix import detected_line_base, find_entities
 

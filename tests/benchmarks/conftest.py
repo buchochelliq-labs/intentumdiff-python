@@ -13,8 +13,8 @@ from pathlib import Path
 
 import pytest
 
-from intentdiff.core.models import Match, Matching
-from intentdiff.core.models import ChangeType
+from intentumdiff.core.models import Match, Matching
+from intentumdiff.core.models import ChangeType
 
 from tests.benchmarks.helpers import make_change, make_tree, make_tree_hetero
 

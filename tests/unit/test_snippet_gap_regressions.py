@@ -6,8 +6,8 @@ import json
 from collections.abc import Iterable
 from pathlib import Path
 
-from intentdiff import SemanticDiffer
-from intentdiff.core.models import (
+from intentumdiff import SemanticDiffer
+from intentumdiff.core.models import (
     Change,
     ChangeGroupKind,
     ChangeType,

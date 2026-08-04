@@ -7,7 +7,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from intentdiff.core.models import (
+from intentumdiff.core.models import (
     Change,
     ChangeGroup,
     ChangeGroupKind,
@@ -240,7 +240,7 @@ class TestSemanticDiff:
             language="yaml",
             semantic_path="server.host",
         )
-        metadata = {"policy": "intentdiff.yaml"}
+        metadata = {"policy": "intentumdiff.yaml"}
         result = GuardrailCheckResult(
             violations=[violation],
             violation_count=1,
@@ -253,8 +253,8 @@ class TestSemanticDiff:
 
         metadata["policy"] = "changed"
 
-        assert result.metadata["policy"] == "intentdiff.yaml"
-        assert result.model_dump(mode="json")["metadata"] == {"policy": "intentdiff.yaml"}
+        assert result.metadata["policy"] == "intentumdiff.yaml"
+        assert result.model_dump(mode="json")["metadata"] == {"policy": "intentumdiff.yaml"}
 
     def test_guardrail_check_result_derives_counts_from_violations(self):
         immutable = GuardrailViolation(
@@ -302,7 +302,7 @@ class TestDiffConfig:
             DiffConfig(plugin_fuel=0)
 
     def test_fuel_unlimited_accepted(self):
-        from intentdiff.core.models import FUEL_UNLIMITED
+        from intentumdiff.core.models import FUEL_UNLIMITED
         cfg = DiffConfig(plugin_fuel=FUEL_UNLIMITED)
         assert cfg.plugin_fuel == -1
 

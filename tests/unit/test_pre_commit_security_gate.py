@@ -20,7 +20,7 @@ def test_python_source_plans_ruff_compile_and_security_tests() -> None:
     gate = _load_pre_commit_gate()
 
     plan = gate.plan_for_paths([
-        "src/intentdiff/live_server.py",
+        "src/intentumdiff/live_server.py",
         "docs/README.md",
     ])
 

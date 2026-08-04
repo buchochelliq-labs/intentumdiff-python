@@ -33,7 +33,7 @@ class TestBuiltinEntryFunctions:
         ],
     )
     def test_entry_function_returns_correct_filename(self, fn_name, expected_stem):
-        from intentdiff.plugins import builtins
+        from intentumdiff.plugins import builtins
 
         fn = getattr(builtins, fn_name)
         path = Path(fn())
@@ -42,7 +42,7 @@ class TestBuiltinEntryFunctions:
         assert path.suffix == ".wasm"
 
     def test_all_wasm_paths_share_same_directory(self):
-        from intentdiff.plugins import builtins
+        from intentumdiff.plugins import builtins
 
         fns = [
             builtins.java_parser_entry,
@@ -61,7 +61,7 @@ class TestBuiltinEntryFunctions:
         assert next(iter(dirs)).name == "wasm"
 
     def test_cpp_entry_also_used_for_c(self):
-        from intentdiff.plugins import builtins
+        from intentumdiff.plugins import builtins
 
         assert Path(builtins.cpp_parser_entry()).name == "cpp_parser.wasm"
 
@@ -70,7 +70,7 @@ class TestFullParseBoundary:
     """The Python shell no longer hosts Tree-sitter parsing."""
 
     def test_full_parse_parser_receives_raw_source(self):
-        from intentdiff.differ import SemanticDiffer
+        from intentumdiff.differ import SemanticDiffer
 
         class Parser:
             grammar_id = "example"
@@ -80,8 +80,8 @@ class TestFullParseBoundary:
         assert differ._parse("let x = 1", Parser(), "javascript", "x.js") == "let x = 1"
 
     def test_interpret_cst_parser_is_rejected_actionably(self):
-        from intentdiff.differ import SemanticDiffer
-        from intentdiff.plugins.exceptions import PluginNotFoundError
+        from intentumdiff.differ import SemanticDiffer
+        from intentumdiff.plugins.exceptions import PluginNotFoundError
 
         class Parser:
             grammar_id = "legacy"
@@ -103,15 +103,15 @@ class TestExtensionMapping:
     @pytest.fixture(autouse=True)
     def _check_installed(self):
         try:
-            importlib.metadata.distribution("intentdiff")
+            importlib.metadata.distribution("intentumdiff")
         except importlib.metadata.PackageNotFoundError:
-            pytest.skip("intentdiff not installed; skipping entry-point tests")
-        eps = {ep.name for ep in importlib.metadata.entry_points(group="intentdiff.parsers")}
+            pytest.skip("intentumdiff not installed; skipping entry-point tests")
+        eps = {ep.name for ep in importlib.metadata.entry_points(group="intentumdiff.parsers")}
         if "java" not in eps:
             pytest.skip("Parser entry-points not registered; run local sync first")
 
     def test_all_core_grammars_registered(self):
-        eps = importlib.metadata.entry_points(group="intentdiff.parsers")
+        eps = importlib.metadata.entry_points(group="intentumdiff.parsers")
         names = {ep.name for ep in eps}
         expected = {
             "java",
@@ -132,7 +132,7 @@ class TestExtensionMapping:
     def test_c_and_cpp_point_to_same_entry(self):
         eps = {
             ep.name: ep
-            for ep in importlib.metadata.entry_points(group="intentdiff.parsers")
+            for ep in importlib.metadata.entry_points(group="intentumdiff.parsers")
         }
         assert "c" in eps
         assert "cpp" in eps

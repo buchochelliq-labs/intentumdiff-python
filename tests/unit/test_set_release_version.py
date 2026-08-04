@@ -13,7 +13,7 @@ def test_set_project_version_updates_only_first_project_version(tmp_path: Path) 
         "[tool.before]\n"
         'version = "leave-alone-too"\n\n'
         "[project]\n"
-        'name = "intentdiff"\n'
+        'name = "intentumdiff"\n'
         'version = "0.0.1b1"\n\n'
         "[tool.other]\n"
         'version = "leave-alone"\n',
@@ -26,7 +26,7 @@ def test_set_project_version_updates_only_first_project_version(tmp_path: Path) 
         "[tool.before]\n"
         'version = "leave-alone-too"\n\n'
         "[project]\n"
-        'name = "intentdiff"\n'
+        'name = "intentumdiff"\n'
         'version = "0.0.1b2"\n\n'
         "[tool.other]\n"
         'version = "leave-alone"\n'

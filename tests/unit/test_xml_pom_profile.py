@@ -8,8 +8,8 @@ concurrent version bump entirely (gumtree paired subtrees positionally and the
 
 from __future__ import annotations
 
-from intentdiff import SemanticDiffer
-from intentdiff.core.models import ChangeType
+from intentumdiff import SemanticDiffer
+from intentumdiff.core.models import ChangeType
 
 _DEP = "<dependency><groupId>{g}</groupId><artifactId>{a}</artifactId><version>{v}</version></dependency>"
 

@@ -16,7 +16,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from intentdiff.core.models import (
+from intentumdiff.core.models import (
     Change,
     ChangeType,
     DiffConfig,
@@ -25,7 +25,7 @@ from intentdiff.core.models import (
     SemanticDiff,
     SemanticNode,
 )
-from intentdiff.differ import SemanticDiffer
+from intentumdiff.differ import SemanticDiffer
 
 
 # ---------------------------------------------------------------------------

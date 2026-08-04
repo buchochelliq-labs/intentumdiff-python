@@ -10,8 +10,8 @@ from pathlib import Path
 
 import pytest
 
-from intentdiff.plugins import loader
-from intentdiff.plugins.exceptions import PluginLoadError
+from intentumdiff.plugins import loader
+from intentumdiff.plugins.exceptions import PluginLoadError
 
 _ENFORCE = loader._ENFORCE_PROVENANCE_ENV
 

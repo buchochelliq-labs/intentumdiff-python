@@ -15,9 +15,9 @@ from pathlib import Path
 import git
 import pytest
 
-from intentdiff.core.models import ChangeType
-from intentdiff.differ import SemanticDiffer
-from intentdiff.sources.git_source import (
+from intentumdiff.core.models import ChangeType
+from intentumdiff.differ import SemanticDiffer
+from intentumdiff.sources.git_source import (
     collect_working_tree_python_sources_fast,
     iter_changed_sources,
 )
@@ -307,8 +307,8 @@ class TestIterChangedSources:
         self,
         tmp_path,
     ):
-        from intentdiff.core.models import ChangeType
-        from intentdiff.differ import SemanticDiffer
+        from intentumdiff.core.models import ChangeType
+        from intentumdiff.differ import SemanticDiffer
 
         repo = _make_repo(tmp_path)
         _commit_file(repo, "base.py", "base = True\n", "init")
@@ -329,7 +329,7 @@ class TestIterChangedSources:
         assert any(change.change_type == ChangeType.ADDITION for change in diff.changes)
 
     def test_competitor_unsupported_file_fallback_is_visible_generic_evidence(self):
-        from intentdiff.differ import SemanticDiffer
+        from intentumdiff.differ import SemanticDiffer
 
         differ = SemanticDiffer()
         diff = differ.diff_strings(
@@ -368,7 +368,7 @@ class TestIterChangedSources:
 
 class TestDiffCommit:
     def test_diff_commit_returns_list_of_diffs(self, tmp_path):
-        from intentdiff.differ import SemanticDiffer
+        from intentumdiff.differ import SemanticDiffer
 
         repo = _make_repo(tmp_path)
         _commit_file(repo, "calc.py", "def add(a, b):\n    return a + b\n", "v1")
@@ -384,7 +384,7 @@ class TestDiffCommit:
 
     def test_diff_commit_style_only_change(self, tmp_path):
         """Adding a comment only → style-only diff."""
-        from intentdiff.differ import SemanticDiffer
+        from intentumdiff.differ import SemanticDiffer
 
         repo = _make_repo(tmp_path)
         _commit_file(repo, "mod.py", "x = 1\n", "v1")
@@ -398,7 +398,7 @@ class TestDiffCommit:
 
     def test_diff_commit_skips_unparseable_files(self, tmp_path):
         """Binary or unknown-language files must be silently skipped."""
-        from intentdiff.differ import SemanticDiffer
+        from intentumdiff.differ import SemanticDiffer
 
         repo = _make_repo(tmp_path)
         _commit_file(repo, "data.csv", "a,b\n1,2\n", "v1")
@@ -414,7 +414,7 @@ class TestDiffCommit:
 
         Make a change on disk (not committed) so the working-tree diff finds it.
         """
-        from intentdiff.differ import SemanticDiffer
+        from intentumdiff.differ import SemanticDiffer
 
         repo = _make_repo(tmp_path)
         _commit_file(repo, "fn.py", "def f(): pass\n", "v1")
@@ -430,7 +430,7 @@ class TestDiffCommit:
 
     def test_diff_commit_includes_untracked_file(self, tmp_path):
         """Untracked working-tree files are treated as additions."""
-        from intentdiff.differ import SemanticDiffer
+        from intentumdiff.differ import SemanticDiffer
 
         repo = _make_repo(tmp_path)
         _commit_file(repo, "base.py", "base = True\n", "init")
@@ -449,7 +449,7 @@ class TestDiffCommit:
 
     def test_diff_commit_accepts_subdirectory(self, tmp_path):
         """repo_path can be any directory inside the repo."""
-        from intentdiff.differ import SemanticDiffer
+        from intentumdiff.differ import SemanticDiffer
 
         repo = _make_repo(tmp_path)
         _commit_file(repo, "pkg/util.py", "A = 1\n", "v1")
@@ -510,11 +510,11 @@ class TestDiffCommit:
         assert "validateOrder" in _semantic_labels(api_diff, ChangeType.ADDITION)
         assert "validateOrder" not in _semantic_labels(api_diff, ChangeType.MOVE)
 
-        from intentdiff.cli import _build_parser, _cmd_git
+        from intentumdiff.cli import _build_parser, _cmd_git
 
         captured = []
         monkeypatch.setattr(
-            "intentdiff.cli._shared._render",
+            "intentumdiff.cli._shared._render",
             lambda diff, fmt, output, fuel=None: captured.append(diff),
         )
         parser = _build_parser()
@@ -665,7 +665,7 @@ class TestDiffCommit:
         assert {"Invoke-Format", "Invoke-Parse"} & moved_powershell
 
     def test_commit_wide_cross_file_move_uses_real_local_git_history(self, tmp_path):
-        from intentdiff.core.commit_differ import CommitDiffer
+        from intentumdiff.core.commit_differ import CommitDiffer
 
         repo = _make_repo(tmp_path)
         _commit_file(
@@ -746,11 +746,11 @@ class TestCliGitCommitWide:
 
         monkeypatch.chdir(tmp_path)
 
-        from intentdiff.cli import _build_parser, _cmd_git
+        from intentumdiff.cli import _build_parser, _cmd_git
 
         captured = []
         monkeypatch.setattr(
-            "intentdiff.cli._shared._render",
+            "intentumdiff.cli._shared._render",
             lambda diff, fmt, output, fuel=None: captured.append(diff),
         )
 
@@ -767,7 +767,7 @@ class TestCliGitCommitWide:
         """When REPO looks like a branch name, the error hints about --new."""
         import sys
 
-        from intentdiff.cli import _build_parser, _cmd_git
+        from intentumdiff.cli import _build_parser, _cmd_git
 
         parser = _build_parser()
         # Simulate: git --old HEAD -- main   (user typo: '-- main' not '--new main')
@@ -784,7 +784,7 @@ class TestCliGitCommitWide:
         """'git new main' → error mentions --new hint when 'new' is a non-path word."""
         import sys
 
-        from intentdiff.cli import _build_parser, _cmd_git
+        from intentumdiff.cli import _build_parser, _cmd_git
 
         parser = _build_parser()
         # Two positionals: repo="new", file="main"

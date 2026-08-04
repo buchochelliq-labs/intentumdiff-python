@@ -17,8 +17,8 @@ from unittest.mock import patch
 
 import pytest
 
-from intentdiff.plugins.registry import PluginRegistry
-from intentdiff.core.models import DiffConfig
+from intentumdiff.plugins.registry import PluginRegistry
+from intentumdiff.core.models import DiffConfig
 
 
 # ---------------------------------------------------------------------------
@@ -69,7 +69,7 @@ class TestRegistryThreadSafety:
                 errors.append(exc)
 
         with patch(
-            "intentdiff.plugins.registry._load_parsers",
+            "intentumdiff.plugins.registry._load_parsers",
             side_effect=fake_load_parsers,
         ):
             threads = [threading.Thread(target=worker, args=(i,)) for i in range(N)]
@@ -112,7 +112,7 @@ class TestRegistryThreadSafety:
                 errors.append(exc)
 
         with patch(
-            "intentdiff.plugins.registry._load_renderers",
+            "intentumdiff.plugins.registry._load_renderers",
             side_effect=fake_load_renderers,
         ):
             threads = [threading.Thread(target=worker, args=(i,)) for i in range(N)]
@@ -153,8 +153,8 @@ class TestRegistryThreadSafety:
                 errors.append(exc)
 
         with (
-            patch("intentdiff.plugins.registry._load_parsers", return_value=[]),
-            patch("intentdiff.plugins.registry._load_renderers", return_value=[]),
+            patch("intentumdiff.plugins.registry._load_parsers", return_value=[]),
+            patch("intentumdiff.plugins.registry._load_renderers", return_value=[]),
         ):
             threads = (
                 [threading.Thread(target=parser_worker, args=(i,)) for i in range(N)]

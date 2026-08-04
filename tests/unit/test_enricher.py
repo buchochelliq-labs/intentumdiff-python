@@ -15,8 +15,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from intentdiff.plugins.adapter import EnricherAdapter
-from intentdiff.core.models import SemanticNode, NodePosition
+from intentumdiff.plugins.adapter import EnricherAdapter
+from intentumdiff.core.models import SemanticNode, NodePosition
 
 
 # ---------------------------------------------------------------------------

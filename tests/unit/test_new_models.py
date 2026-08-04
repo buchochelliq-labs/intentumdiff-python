@@ -12,7 +12,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from intentdiff.core.models import (
+from intentumdiff.core.models import (
     ChangeType,
     CommitDiff,
     CrossFileChange,

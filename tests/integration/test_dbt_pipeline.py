@@ -24,7 +24,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from intentdiff.core.models import (
+from intentumdiff.core.models import (
     ChangeType,
     DiffConfig,
     SemanticNode,

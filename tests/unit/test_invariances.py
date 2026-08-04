@@ -8,14 +8,14 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from intentdiff import ChangeGroupKind, SemanticDiffer
-from intentdiff.analysis.invariances import (
+from intentumdiff import ChangeGroupKind, SemanticDiffer
+from intentumdiff.analysis.invariances import (
     InvarianceRuleDefinition,
     InvarianceRuleSet,
     apply_invariances,
     load_builtin_invariance_rules,
 )
-from intentdiff.core.models import Change, ChangeType, NodePosition, SemanticNode
+from intentumdiff.core.models import Change, ChangeType, NodePosition, SemanticNode
 
 ROOT = Path(__file__).parents[2]
 
@@ -26,11 +26,11 @@ def _diff_css(old: str, new: str):
 
 def _parser_language_ids() -> set[str]:
     data = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-    return set(data["project"]["entry-points"]["intentdiff.parsers"])
+    return set(data["project"]["entry-points"]["intentumdiff.parsers"])
 
 
 def _rules_schema() -> dict:
-    schema_path = ROOT / "src" / "intentdiff" / "invariances" / "rules.schema.json"
+    schema_path = ROOT / "src" / "intentumdiff" / "invariances" / "rules.schema.json"
     return json.loads(schema_path.read_text(encoding="utf-8"))
 
 
@@ -45,7 +45,7 @@ def _node(node_id: str, node_type: str, label: str, start: int, end: int) -> Sem
 
 
 def test_packaged_yaml_rules_load_from_package_resources():
-    rule_path = resources.files("intentdiff.invariances").joinpath("rules.yaml")
+    rule_path = resources.files("intentumdiff.invariances").joinpath("rules.yaml")
 
     assert rule_path.is_file()
     rules = load_builtin_invariance_rules()
@@ -53,7 +53,7 @@ def test_packaged_yaml_rules_load_from_package_resources():
 
 
 def test_packaged_json_schema_loads_from_package_resources():
-    schema_path = resources.files("intentdiff.invariances").joinpath(
+    schema_path = resources.files("intentumdiff.invariances").joinpath(
         "rules.schema.json"
     )
 
@@ -204,10 +204,10 @@ def test_pyproject_entry_points_match_source_tree_fallback_map():
     class of breakage the gitignore/markdown additions repeatedly risked. Guard that the two
     stay in lockstep on BOTH the language-id keys and the entry-function names.
     """
-    from intentdiff.plugins.registry import _FIRST_PARTY_PARSER_ENTRYPOINT_FALLBACKS
+    from intentumdiff.plugins.registry import _FIRST_PARTY_PARSER_ENTRYPOINT_FALLBACKS
 
     data = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-    pyproject_entries = data["project"]["entry-points"]["intentdiff.parsers"]
+    pyproject_entries = data["project"]["entry-points"]["intentumdiff.parsers"]
 
     pyproject_keys = set(pyproject_entries)
     fallback_keys = set(_FIRST_PARTY_PARSER_ENTRYPOINT_FALLBACKS)

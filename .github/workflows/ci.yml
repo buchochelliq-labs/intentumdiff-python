@@ -37,7 +37,7 @@ jobs:
         with:
           python-version: "3.12"
 
-      # Phase D note: cross-repo checkout of the private intentdiff-core needs an
+      # Phase D note: cross-repo checkout of the private intentumdiff-core needs an
       # org token (GITHUB_TOKEN is repo-scoped); until that secret is wired this
       # job documents the seam. Component staging additionally needs built parser
       # wasm (parser-repo artifacts / the registry-pinned set).
@@ -60,7 +60,7 @@ jobs:
 
       - name: Provision build inputs (engine + parser components)
         # Components come from the parser repos' CI artifacts, each verified against the
-        # SHA-256 pinned in intentdiff-registry (#95) — without them every language
+        # SHA-256 pinned in intentumdiff-registry (#95) — without them every language
         # resolves to 'unknown' and the suite cannot run. Fail-closed: a missing or
         # unverified component stops the job here rather than an hour later as mass
         # PluginNotFoundError failures.
@@ -71,7 +71,7 @@ jobs:
           GIT_TERMINAL_PROMPT: "0"
           GH_TOKEN: ${{ secrets.SPLIT_REPO_TOKEN }}
 
-      - name: Install intentdiff + test dependencies
+      - name: Install intentumdiff + test dependencies
         # cffi first: the editable install is a maturin cffi-bindings build, which
         # requires the cffi module importable by the TARGET interpreter at build time.
         run: |

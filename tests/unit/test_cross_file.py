@@ -3,16 +3,16 @@ tests/unit/test_cross_file.py
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Unit tests for ``detect_cross_file_changes()``
-(``intentdiff.analysis.cross_file``).
+(``intentumdiff.analysis.cross_file``).
 """
 
 from __future__ import annotations
 
 import pytest
 
-from intentdiff.analysis.cross_file import detect_cross_file_changes
-from intentdiff.core.index import SemanticIndex
-from intentdiff.core.models import ChangeType, NodePosition, SemanticNode
+from intentumdiff.analysis.cross_file import detect_cross_file_changes
+from intentumdiff.core.index import SemanticIndex
+from intentumdiff.core.models import ChangeType, NodePosition, SemanticNode
 
 
 # ---------------------------------------------------------------------------

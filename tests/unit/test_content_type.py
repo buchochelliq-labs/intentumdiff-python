@@ -6,8 +6,8 @@ assert precise MIME types, not just the NUL-byte fallback).
 
 from __future__ import annotations
 
-from intentdiff.content_type import detect_content_type, is_text_bytes
-from intentdiff.sources.git_source import _decode_text_or_none
+from intentumdiff.content_type import detect_content_type, is_text_bytes
+from intentumdiff.sources.git_source import _decode_text_or_none
 
 _PNG = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
 
@@ -31,7 +31,7 @@ def test_nul_bytes_are_binary() -> None:
 
 
 def test_diff_metadata_includes_content_type() -> None:
-    from intentdiff.differ import SemanticDiffer
+    from intentumdiff.differ import SemanticDiffer
 
     diff = SemanticDiffer().diff_strings(
         "def a():\n    return 1\n", "def a():\n    return 2\n", "x.py"

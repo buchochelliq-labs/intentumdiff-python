@@ -8,15 +8,15 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from intentdiff.core.models import DiffConfig
-from intentdiff.plugins.exceptions import PluginNotFoundError
-from intentdiff.plugins.registry import PluginRegistry, _wasm_path_from_ep
+from intentumdiff.core.models import DiffConfig
+from intentumdiff.plugins.exceptions import PluginNotFoundError
+from intentumdiff.plugins.registry import PluginRegistry, _wasm_path_from_ep
 
 
 class _FakeDist:
     def __init__(
         self,
-        name: str = "intentdiff",
+        name: str = "intentumdiff",
         *,
         metadata: dict[str, str] | None = None,
         files: list[PurePosixPath] | None = None,
@@ -33,7 +33,7 @@ class _FakeDist:
         return self._root / str(file)
 
 
-def _entry(name: str, *, dist_name: str = "intentdiff") -> SimpleNamespace:
+def _entry(name: str, *, dist_name: str = "intentumdiff") -> SimpleNamespace:
     return SimpleNamespace(name=name, dist=_FakeDist(dist_name))
 
 
@@ -56,18 +56,18 @@ def _wasm_path(ep: SimpleNamespace) -> str:
     return f"C:/tmp/{ep.name}_parser.wasm"
 
 
-def test_third_party_wasm_path_uses_intentdiff_metadata_field(tmp_path) -> None:
+def test_third_party_wasm_path_uses_intentumdiff_metadata_field(tmp_path) -> None:
     wasm_rel = PurePosixPath("pkg/wasm/my_parser.wasm")
     wasm_path = tmp_path / str(wasm_rel)
     wasm_path.parent.mkdir(parents=True)
     wasm_path.write_bytes(b"\0asm")
     dist = _FakeDist(
-        "intentdiff-third-party",
+        "intentumdiff-third-party",
         metadata={
-            "Name": "intentdiff-third-party",
+            "Name": "intentumdiff-third-party",
             "Version": "1.0.0",
             "Author": "Tests",
-            "IntentDiff-Wasm-Path": str(wasm_rel),
+            "IntentumDiff-Wasm-Path": str(wasm_rel),
         },
         files=[wasm_rel],
         root=tmp_path,
@@ -80,9 +80,9 @@ def test_third_party_wasm_path_uses_intentdiff_metadata_field(tmp_path) -> None:
 def test_third_party_legacy_pysd_wasm_path_field_is_rejected(tmp_path) -> None:
     legacy_field = "Py" + "sd" + "-Wasm-Path"
     dist = _FakeDist(
-        "intentdiff-third-party",
+        "intentumdiff-third-party",
         metadata={
-            "Name": "intentdiff-third-party",
+            "Name": "intentumdiff-third-party",
             "Version": "1.0.0",
             "Author": "Tests",
             legacy_field: "pkg/wasm/my_parser.wasm",
@@ -92,7 +92,7 @@ def test_third_party_legacy_pysd_wasm_path_field_is_rejected(tmp_path) -> None:
     )
     ep = SimpleNamespace(name="third-party", dist=dist)
 
-    with pytest.raises(ValueError, match="IntentDiff-Wasm-Path"):
+    with pytest.raises(ValueError, match="IntentumDiff-Wasm-Path"):
         _wasm_path_from_ep(ep)
 
 
@@ -101,11 +101,11 @@ def test_catalog_discovery_does_not_instantiate_plugins() -> None:
 
     with (
         patch(
-            "intentdiff.plugins.registry.importlib.metadata.entry_points",
+            "intentumdiff.plugins.registry.importlib.metadata.entry_points",
             return_value=[_entry("python"), _entry("sql")],
         ),
-        patch("intentdiff.plugins.registry._wasm_path_from_ep", side_effect=_wasm_path),
-        patch("intentdiff.plugins.registry.load_plugin") as load_plugin,
+        patch("intentumdiff.plugins.registry._wasm_path_from_ep", side_effect=_wasm_path),
+        patch("intentumdiff.plugins.registry.load_plugin") as load_plugin,
     ):
         catalog = registry._catalog()
 
@@ -123,11 +123,11 @@ def test_filename_selection_loads_only_matching_candidate() -> None:
 
     with (
         patch(
-            "intentdiff.plugins.registry.importlib.metadata.entry_points",
+            "intentumdiff.plugins.registry.importlib.metadata.entry_points",
             return_value=[_entry("python"), _entry("sql")],
         ),
-        patch("intentdiff.plugins.registry._wasm_path_from_ep", side_effect=_wasm_path),
-        patch("intentdiff.plugins.registry.load_plugin", side_effect=load) as load_plugin,
+        patch("intentumdiff.plugins.registry._wasm_path_from_ep", side_effect=_wasm_path),
+        patch("intentumdiff.plugins.registry.load_plugin", side_effect=load) as load_plugin,
     ):
         phases: list[str] = []
         parser, language = registry.detect_parser(
@@ -151,12 +151,12 @@ def test_duplicate_entry_points_sharing_wasm_load_once() -> None:
 
     with (
         patch(
-            "intentdiff.plugins.registry.importlib.metadata.entry_points",
+            "intentumdiff.plugins.registry.importlib.metadata.entry_points",
             return_value=[_entry("c"), _entry("cpp")],
         ),
-        patch("intentdiff.plugins.registry._wasm_path_from_ep", side_effect=_wasm_path),
+        patch("intentumdiff.plugins.registry._wasm_path_from_ep", side_effect=_wasm_path),
         patch(
-            "intentdiff.plugins.registry.load_plugin",
+            "intentumdiff.plugins.registry.load_plugin",
             return_value=_plugin("cpp", ["c", "cpp"], "cpp"),
         ) as load_plugin,
     ):
@@ -173,10 +173,10 @@ def test_disabled_first_party_entry_point_is_not_cataloged() -> None:
 
     with (
         patch(
-            "intentdiff.plugins.registry.importlib.metadata.entry_points",
+            "intentumdiff.plugins.registry.importlib.metadata.entry_points",
             return_value=[_entry("freebasic")],
         ),
-        patch("intentdiff.plugins.registry._wasm_path_from_ep") as wasm_path,
+        patch("intentumdiff.plugins.registry._wasm_path_from_ep") as wasm_path,
     ):
         assert registry._catalog() == []
 
@@ -188,11 +188,11 @@ def test_relevant_parser_load_failure_is_reported() -> None:
 
     with (
         patch(
-            "intentdiff.plugins.registry.importlib.metadata.entry_points",
+            "intentumdiff.plugins.registry.importlib.metadata.entry_points",
             return_value=[_entry("python")],
         ),
-        patch("intentdiff.plugins.registry._wasm_path_from_ep", side_effect=_wasm_path),
-        patch("intentdiff.plugins.registry.load_plugin", side_effect=RuntimeError("boom")),
+        patch("intentumdiff.plugins.registry._wasm_path_from_ep", side_effect=_wasm_path),
+        patch("intentumdiff.plugins.registry.load_plugin", side_effect=RuntimeError("boom")),
     ):
         with pytest.raises(PluginNotFoundError):
             registry.detect_parser("example.py", "def f(): pass")

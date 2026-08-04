@@ -9,10 +9,10 @@ from typing import Any
 
 import pytest
 
-import intentdiff.differ as differ_module
-import intentdiff.rust_core as rust_core
-from intentdiff import DiffConfig, SemanticDiffer
-from intentdiff.core.models import (
+import intentumdiff.differ as differ_module
+import intentumdiff.rust_core as rust_core
+from intentumdiff import DiffConfig, SemanticDiffer
+from intentumdiff.core.models import (
     ChangeType,
     CommitDiff,
     NodePosition,
@@ -22,7 +22,7 @@ from intentdiff.core.models import (
 
 # The RUST_ONLY gate forbids the coarse token-level fallback. Tests that deliberately
 # drive a synthetic backend into that fallback are skipped in that mode.
-_RUST_ONLY = os.getenv("INTENTDIFF_ENFORCE_RUST_ONLY_ENGINE") == "1"
+_RUST_ONLY = os.getenv("INTENTUMDIFF_ENFORCE_RUST_ONLY_ENGINE") == "1"
 
 
 def _python_fallback(
@@ -53,18 +53,18 @@ def _empty_scope_trails_json(request_json: str) -> str:
 
 
 def test_rust_core_defaults_to_native_first_and_can_be_disabled(monkeypatch: Any) -> None:
-    monkeypatch.delenv("INTENTDIFF_RUST_CORE", raising=False)
-    monkeypatch.delenv("INTENTDIFF_EXPERIMENTAL_RUST_CORE", raising=False)
+    monkeypatch.delenv("INTENTUMDIFF_RUST_CORE", raising=False)
+    monkeypatch.delenv("INTENTUMDIFF_EXPERIMENTAL_RUST_CORE", raising=False)
     assert DiffConfig().experimental_rust_core is True
 
-    monkeypatch.setenv("INTENTDIFF_RUST_CORE", "0")
+    monkeypatch.setenv("INTENTUMDIFF_RUST_CORE", "0")
     assert DiffConfig().experimental_rust_core is False
 
-    monkeypatch.delenv("INTENTDIFF_RUST_CORE", raising=False)
-    monkeypatch.setenv("INTENTDIFF_EXPERIMENTAL_RUST_CORE", "0")
+    monkeypatch.delenv("INTENTUMDIFF_RUST_CORE", raising=False)
+    monkeypatch.setenv("INTENTUMDIFF_EXPERIMENTAL_RUST_CORE", "0")
     assert DiffConfig().experimental_rust_core is False
 
-    monkeypatch.setenv("INTENTDIFF_EXPERIMENTAL_RUST_CORE", "1")
+    monkeypatch.setenv("INTENTUMDIFF_EXPERIMENTAL_RUST_CORE", "1")
     assert DiffConfig().experimental_rust_core is True
 
 
@@ -72,7 +72,7 @@ def test_rust_core_unavailable_falls_back_to_python(monkeypatch: Any) -> None:
     monkeypatch.setattr(SemanticDiffer, "_run_stages_1_to_11", _python_fallback)
 
     def missing_backend() -> Any:
-        raise ModuleNotFoundError("intentdiff_rust_core")
+        raise ModuleNotFoundError("intentumdiff_rust_core")
 
     monkeypatch.setattr(rust_core, "_load_backend", missing_backend)
 
@@ -312,12 +312,12 @@ def test_rust_core_batch_accepts_canonical_python_parser_id(
         new_filename="example.py",
         parser_wasm_path="python_parser.wasm",
         language="python",
-        parser_plugin_id="intentdiff:python:python",
+        parser_plugin_id="intentumdiff:python:python",
         config=DiffConfig(experimental_rust_core=True),
     )
 
     assert attempt.used is True
-    assert captured_request["files"][0]["parser_plugin_id"] == "intentdiff:python:python"
+    assert captured_request["files"][0]["parser_plugin_id"] == "intentumdiff:python:python"
 
 
 def test_rust_core_batch_fallback_item_is_not_used(monkeypatch: Any) -> None:
@@ -889,7 +889,7 @@ def test_semantic_differ_uses_rust_batch_for_changed_complete_output(
 def test_rust_core_commit_json_adapter_keeps_commit_bytes_lazy(
     monkeypatch: Any,
 ) -> None:
-    monkeypatch.delenv("INTENTDIFF_RUST_CORE_VALIDATE_JSON", raising=False)
+    monkeypatch.delenv("INTENTUMDIFF_RUST_CORE_VALIDATE_JSON", raising=False)
     diff_payload = SemanticDiff(
         old_filename="example.py",
         new_filename="example.py",

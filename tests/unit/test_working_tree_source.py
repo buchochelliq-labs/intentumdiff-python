@@ -12,7 +12,7 @@ from pathlib import Path
 import git
 import pytest
 
-from intentdiff.sources.git_source import GitSource, WorkingTreeSource
+from intentumdiff.sources.git_source import GitSource, WorkingTreeSource
 
 
 # ---------------------------------------------------------------------------

@@ -5,7 +5,7 @@ from pathlib import Path
 
 
 def test_diff_image_assets_is_thin_native_bridge(monkeypatch) -> None:
-    from intentdiff import assets
+    from intentumdiff import assets
 
     calls: list[tuple[str, str, str, str]] = []
 
@@ -34,7 +34,7 @@ def test_diff_image_assets_is_thin_native_bridge(monkeypatch) -> None:
 
 
 def test_diff_git_assets_is_thin_native_bridge(monkeypatch) -> None:
-    from intentdiff import assets
+    from intentumdiff import assets
 
     calls: list[tuple[str, str, str, str, str]] = []
 

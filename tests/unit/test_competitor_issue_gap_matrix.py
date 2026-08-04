@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from intentdiff.plugins.registry import PluginRegistry
+from intentumdiff.plugins.registry import PluginRegistry
 import pytest
 
 pytestmark = pytest.mark.skipif(
@@ -86,7 +86,7 @@ def test_competitor_backlog_completion_audit_tracks_every_matrix_row() -> None:
     assert "Matrix Status" in audit
     assert "Audit Status" in audit
     assert "Required To Close" in audit
-    assert "matrix tracks whether a competitor issue has a mapped IntentDiff response" in audit
+    assert "matrix tracks whether a competitor issue has a mapped IntentumDiff response" in audit
 
     for entry in matrix["entries"]:
       assert f"`{entry['id']}`" in audit, entry["id"]
@@ -149,7 +149,7 @@ def test_competitor_gap_matrix_entries_are_actionable() -> None:
         assert entry["beta_policy"] in _BETA_POLICIES
         statuses_seen.add(entry["status"])
         assert entry["theme"]
-        assert entry["intentdiff_position"]
+        assert entry["intentumdiff_position"]
         assert entry["next_action"]
         assert entry["proof_strength"] in _PROOF_STRENGTHS
         assert entry["proof_target"]
@@ -266,7 +266,7 @@ def test_rust_owned_competitor_rows_have_core_or_parser_proof_paths() -> None:
 
         if owner == "rust_core":
             assert any(path.startswith("crates/rust-core-host/") for path in implementation_paths), entry["id"]
-            assert any(path.startswith("src/intentdiff/rust_core.py") for path in implementation_paths), entry["id"]
+            assert any(path.startswith("src/intentumdiff/rust_core.py") for path in implementation_paths), entry["id"]
         elif owner == "rust_wasm_parser":
             assert any(path.startswith("crates/parsers/") or path == "crates/parsers" for path in implementation_paths), entry["id"]
             assert any(
@@ -298,7 +298,7 @@ def test_competitor_gap_matrix_tracks_windows_arm64_as_release_edge() -> None:
 
     assert arm64["status"] == "covered"
     assert arm64["semanticdiff_issue_numbers"] == [94]
-    assert "win_arm64" in arm64["intentdiff_position"]
+    assert "win_arm64" in arm64["intentumdiff_position"]
     assert any("arm64" in test.lower() for test in arm64["regression_tests"])
 
 

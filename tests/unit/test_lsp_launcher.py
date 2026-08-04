@@ -5,10 +5,10 @@ import socket
 
 import pytest
 
-import intentdiff.lsp.launcher as launcher_mod
-from intentdiff.lsp.exceptions import LspConnectionError
-from intentdiff.lsp.launcher import LspServerProcess, _reserve_port
-from intentdiff.lsp.servers import KNOWN_SERVER_SPECS, LspServerEntry, LspServerSpec
+import intentumdiff.lsp.launcher as launcher_mod
+from intentumdiff.lsp.exceptions import LspConnectionError
+from intentumdiff.lsp.launcher import LspServerProcess, _reserve_port
+from intentumdiff.lsp.servers import KNOWN_SERVER_SPECS, LspServerEntry, LspServerSpec
 
 
 def test_reserved_lsp_port_cannot_be_co_bound_with_reuseaddr() -> None:

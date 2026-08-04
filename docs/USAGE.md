@@ -1,9 +1,9 @@
-# Using intentdiff
+# Using intentumdiff
 
 ## Python API
 
 ```python
-from intentdiff import SemanticDiffer
+from intentumdiff import SemanticDiffer
 
 differ = SemanticDiffer()
 
@@ -22,20 +22,20 @@ filename; pass `language_hint=` to override.
 ## CLI
 
 ```bash
-intentdiff git HEAD~1 HEAD          # semantic diff of a commit range
-intentdiff file old.py new.py       # two files
-intentdiff string "$OLD" "$NEW" --filename x.py
-intentdiff review                   # working-tree review
-intentdiff cache stats              # cache admin
-intentdiff plugins list             # discovered parsers
-intentdiff serve                    # local HTTP playground ([serve] extra)
+intentumdiff git HEAD~1 HEAD          # semantic diff of a commit range
+intentumdiff file old.py new.py       # two files
+intentumdiff string "$OLD" "$NEW" --filename x.py
+intentumdiff review                   # working-tree review
+intentumdiff cache stats              # cache admin
+intentumdiff plugins list             # discovered parsers
+intentumdiff serve                    # local HTTP playground ([serve] extra)
 ```
 
 `--json` on diff commands emits the full `SemanticDiff` for tooling.
 
 ## Configuration
 
-Project settings live in `intentdiff.yaml` (see the sample at the repo root): ignore rules,
+Project settings live in `intentumdiff.yaml` (see the sample at the repo root): ignore rules,
 guardrail-protected paths, cache location, and per-language options.
 
 ## Privacy

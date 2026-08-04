@@ -2,7 +2,7 @@
 tests/unit/test_semantic_index.py
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Unit tests for ``SemanticIndex`` (``intentdiff.core.index``).
+Unit tests for ``SemanticIndex`` (``intentumdiff.core.index``).
 """
 
 from __future__ import annotations
@@ -11,8 +11,8 @@ import json
 
 import pytest
 
-from intentdiff.core.index import SemanticIndex
-from intentdiff.core.models import NodePosition, ReferenceKind, SemanticNode, SymbolDefinition
+from intentumdiff.core.index import SemanticIndex
+from intentumdiff.core.models import NodePosition, ReferenceKind, SemanticNode, SymbolDefinition
 
 
 # ---------------------------------------------------------------------------
@@ -454,7 +454,7 @@ class TestFindReferences:
         assert idx.find_references("IO.puts")[0].reference_kind == ReferenceKind.CALL
 
     def test_end_to_end_newer_language_examples_populate_index(self):
-        from intentdiff import SemanticDiffer
+        from intentumdiff import SemanticDiffer
 
         differ = SemanticDiffer()
         cases = {

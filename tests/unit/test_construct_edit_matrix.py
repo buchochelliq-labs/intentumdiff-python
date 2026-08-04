@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from intentdiff import SemanticDiffer
+from intentumdiff import SemanticDiffer
 from tests.unit.construct_edit_matrix import EDIT_VERBS, run_verb
 
 _CORPUS_ROOT = Path(__file__).resolve().parents[1] / "fixtures" / "corpus"

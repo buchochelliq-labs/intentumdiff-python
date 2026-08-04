@@ -19,11 +19,11 @@ from unittest.mock import patch
 import git
 import pytest
 
-from intentdiff.vcs.base import ChangedFile, VcsBackend
-from intentdiff.vcs.git_backend import GitVcsBackend, _safe_path
-from intentdiff.vcs.hg_backend import HgVcsBackend
-from intentdiff.vcs.perforce_backend import PerforceVcsBackend
-from intentdiff.vcs.svn_backend import SvnVcsBackend
+from intentumdiff.vcs.base import ChangedFile, VcsBackend
+from intentumdiff.vcs.git_backend import GitVcsBackend, _safe_path
+from intentumdiff.vcs.hg_backend import HgVcsBackend
+from intentumdiff.vcs.perforce_backend import PerforceVcsBackend
+from intentumdiff.vcs.svn_backend import SvnVcsBackend
 
 # ===========================================================================
 # Helpers
@@ -250,7 +250,7 @@ class TestSvnVcsBackend:
     def test_get_blob_delegates_with_repo_url(self) -> None:
         backend = SvnVcsBackend("/wc", repo_url="svn://example.com/repo")
         with patch(
-            "intentdiff.rust_core.vcs_backend_get_blob", return_value="print('hello')\n"
+            "intentumdiff.rust_core.vcs_backend_get_blob", return_value="print('hello')\n"
         ) as m:
             result = backend.get_blob("src/foo.py", "42")
         assert "hello" in result
@@ -261,7 +261,7 @@ class TestSvnVcsBackend:
 
     def test_get_blob_without_repo_url_passes_none(self) -> None:
         backend = SvnVcsBackend("/wc")
-        with patch("intentdiff.rust_core.vcs_backend_get_blob", return_value="") as m:
+        with patch("intentumdiff.rust_core.vcs_backend_get_blob", return_value="") as m:
             backend.get_blob("missing.py", "HEAD")
         assert m.call_args.args[4] is None
 
@@ -272,7 +272,7 @@ class TestSvnVcsBackend:
              "change_type": "modified", "is_binary": False},
         ]
         with patch(
-            "intentdiff.rust_core.vcs_backend_changed_files", return_value=rows
+            "intentumdiff.rust_core.vcs_backend_changed_files", return_value=rows
         ) as m:
             result = backend.list_changed_files("10", "20")
         assert result[0].change_type == "modified"
@@ -285,7 +285,7 @@ class TestSvnVcsBackend:
              "change_type": "added", "is_binary": False},
         ]
         with patch(
-            "intentdiff.rust_core.vcs_backend_working_tree_changes", return_value=rows
+            "intentumdiff.rust_core.vcs_backend_working_tree_changes", return_value=rows
         ):
             result = backend.list_working_tree_changes()
         assert result[0].change_type == "added"
@@ -294,7 +294,7 @@ class TestSvnVcsBackend:
     def test_resolve_root_delegates(self) -> None:
         backend = SvnVcsBackend("/wc")
         with patch(
-            "intentdiff.rust_core.vcs_backend_resolve_root", return_value="/srv/svn/wc"
+            "intentumdiff.rust_core.vcs_backend_resolve_root", return_value="/srv/svn/wc"
         ) as m:
             root = backend.resolve_root()
         assert root == Path("/srv/svn/wc")
@@ -318,12 +318,12 @@ class TestHgVcsBackend:
 
     @staticmethod
     def _backend(root: str = "/repo") -> HgVcsBackend:
-        with patch("intentdiff.rust_core.vcs_backend_resolve_root", return_value=root):
+        with patch("intentumdiff.rust_core.vcs_backend_resolve_root", return_value=root):
             return HgVcsBackend(root)
 
     def test_init_resolves_root_via_core(self) -> None:
         with patch(
-            "intentdiff.rust_core.vcs_backend_resolve_root", return_value="/hg/root"
+            "intentumdiff.rust_core.vcs_backend_resolve_root", return_value="/hg/root"
         ) as m:
             backend = HgVcsBackend("/anywhere/inside")
         m.assert_called_once_with("hg", "/anywhere/inside")
@@ -332,7 +332,7 @@ class TestHgVcsBackend:
     def test_get_blob_delegates(self) -> None:
         backend = self._backend()
         with patch(
-            "intentdiff.rust_core.vcs_backend_get_blob", return_value="x = 1\n"
+            "intentumdiff.rust_core.vcs_backend_get_blob", return_value="x = 1\n"
         ) as m:
             result = backend.get_blob("src/foo.py", "tip")
         assert "x = 1" in result
@@ -346,7 +346,7 @@ class TestHgVcsBackend:
             {"old_path": None, "new_path": "src/bar.py",
              "change_type": "added", "is_binary": False},
         ]
-        with patch("intentdiff.rust_core.vcs_backend_changed_files", return_value=rows):
+        with patch("intentumdiff.rust_core.vcs_backend_changed_files", return_value=rows):
             result = backend.list_changed_files("0", "1")
         assert [type(cf) for cf in result] == [ChangedFile, ChangedFile]
         assert {cf.change_type for cf in result} == {"modified", "added"}
@@ -360,7 +360,7 @@ class TestHgVcsBackend:
              "change_type": "modified", "is_binary": False},
         ]
         with patch(
-            "intentdiff.rust_core.vcs_backend_working_tree_changes", return_value=rows
+            "intentumdiff.rust_core.vcs_backend_working_tree_changes", return_value=rows
         ) as m:
             result = backend.list_working_tree_changes()
         assert result[0].change_type == "modified"
@@ -388,12 +388,12 @@ class TestPerforceVcsBackend:
 
     @staticmethod
     def _backend(root: str = "/ws") -> PerforceVcsBackend:
-        with patch("intentdiff.rust_core.vcs_backend_resolve_root", return_value=root):
+        with patch("intentumdiff.rust_core.vcs_backend_resolve_root", return_value=root):
             return PerforceVcsBackend("/ws")
 
     def test_init_resolves_client_root_via_core(self) -> None:
         with patch(
-            "intentdiff.rust_core.vcs_backend_resolve_root", return_value="/client"
+            "intentumdiff.rust_core.vcs_backend_resolve_root", return_value="/client"
         ) as m:
             backend = PerforceVcsBackend("/ws/sub")
         m.assert_called_once_with("p4", "/ws/sub")
@@ -407,7 +407,7 @@ class TestPerforceVcsBackend:
     def test_get_blob_delegates(self) -> None:
         backend = self._backend()
         with patch(
-            "intentdiff.rust_core.vcs_backend_get_blob", return_value="x = 1\n"
+            "intentumdiff.rust_core.vcs_backend_get_blob", return_value="x = 1\n"
         ) as m:
             result = backend.get_blob("//depot/main/foo.py", "12345")
         assert "x = 1" in result
@@ -419,7 +419,7 @@ class TestPerforceVcsBackend:
             {"old_path": "//depot/a.py", "new_path": "//depot/a.py",
              "change_type": "modified", "is_binary": False},
         ]
-        with patch("intentdiff.rust_core.vcs_backend_changed_files", return_value=rows):
+        with patch("intentumdiff.rust_core.vcs_backend_changed_files", return_value=rows):
             result = backend.list_changed_files("1", "2")
         assert result[0].change_type == "modified"
 
@@ -430,7 +430,7 @@ class TestPerforceVcsBackend:
              "change_type": "added", "is_binary": False},
         ]
         with patch(
-            "intentdiff.rust_core.vcs_backend_working_tree_changes", return_value=rows
+            "intentumdiff.rust_core.vcs_backend_working_tree_changes", return_value=rows
         ) as m:
             result = backend.list_working_tree_changes()
         assert result[0].change_type == "added"
@@ -449,7 +449,7 @@ class TestRefValidation:
 
     @staticmethod
     def _hg_backend() -> HgVcsBackend:
-        with patch("intentdiff.rust_core.vcs_backend_resolve_root", return_value="/fake"):
+        with patch("intentumdiff.rust_core.vcs_backend_resolve_root", return_value="/fake"):
             return HgVcsBackend("/fake")
 
     def test_hg_get_blob_rejects_revset_expression(self) -> None:
@@ -482,7 +482,7 @@ class TestRefValidation:
 
     @staticmethod
     def _p4_backend() -> PerforceVcsBackend:
-        with patch("intentdiff.rust_core.vcs_backend_resolve_root", return_value="/ws"):
+        with patch("intentumdiff.rust_core.vcs_backend_resolve_root", return_value="/ws"):
             return PerforceVcsBackend("/ws")
 
     def test_p4_ref_rejects_at_injection(self) -> None:

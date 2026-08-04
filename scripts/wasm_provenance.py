@@ -1,6 +1,6 @@
 """Package-time Wasm artifact provenance manifest (issue #89 — supply-chain hardening).
 
-The staged Wasm parsers in ``src/intentdiff/wasm/`` are gitignored build output. The #87
+The staged Wasm parsers in ``src/intentumdiff/wasm/`` are gitignored build output. The #87
 parity/fuzz sweep proved stale artifacts linger there (30 pre-rebrand ``py_semantic_diff_*``
 parsers exporting a retired WIT world). Packaging must not trust whatever happens to be staged.
 
@@ -151,7 +151,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
 
-    default_wasm = Path(__file__).resolve().parent.parent / "src" / "intentdiff" / "wasm"
+    default_wasm = Path(__file__).resolve().parent.parent / "src" / "intentumdiff" / "wasm"
 
     gen = sub.add_parser("generate", help="write the provenance manifest for a wasm dir")
     gen.add_argument("--wasm-dir", type=Path, default=default_wasm)

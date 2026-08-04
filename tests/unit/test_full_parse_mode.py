@@ -20,25 +20,25 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from intentdiff.core.models import (
+from intentumdiff.core.models import (
     ChangeType,
     DiffConfig,
     NodePosition,
     SemanticDiff,
     SemanticNode,
 )
-from intentdiff.differ import SemanticDiffer
-from intentdiff.plugins.adapter import ParserAdapter
-from intentdiff.plugins.registry import PluginRegistry
+from intentumdiff.differ import SemanticDiffer
+from intentumdiff.plugins.adapter import ParserAdapter
+from intentumdiff.plugins.registry import PluginRegistry
 
 # Every test in this module drives a fully MOCKED ParserAdapter (see module docstring —
 # "the plugin is fully mocked"): `process()` returns hand-built trees and no real Rust
-# engine runs. Under INTENTDIFF_ENFORCE_RUST_ONLY_ENGINE the gate requires the native
+# engine runs. Under INTENTUMDIFF_ENFORCE_RUST_ONLY_ENGINE the gate requires the native
 # Rust path, which a mock cannot satisfy, so these plumbing tests (raw-source handling,
 # CST size-guard, no-crash) are skipped in that mode. Real full-parse Wasm parsers route
 # through the Rust finalize path and are covered by their own per-language suites.
 pytestmark = pytest.mark.skipif(
-    os.getenv("INTENTDIFF_ENFORCE_RUST_ONLY_ENGINE") == "1",
+    os.getenv("INTENTUMDIFF_ENFORCE_RUST_ONLY_ENGINE") == "1",
     reason="full-parse plumbing tests use a mocked parser; RUST_ONLY requires the native Rust path",
 )
 

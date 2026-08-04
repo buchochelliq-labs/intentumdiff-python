@@ -1,10 +1,10 @@
-"""Unit tests for :mod:`intentdiff.lsp.config`."""
+"""Unit tests for :mod:`intentumdiff.lsp.config`."""
 
 from __future__ import annotations
 
 import pytest
 
-from intentdiff.lsp.config import LspServerConfig
+from intentumdiff.lsp.config import LspServerConfig
 
 
 class TestLspServerConfigFromString:

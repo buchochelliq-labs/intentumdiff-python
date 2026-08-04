@@ -8,7 +8,7 @@ import textwrap
 
 import pytest
 
-from intentdiff.sources.string_source import StringSource
+from intentumdiff.sources.string_source import StringSource
 
 
 class TestStringSource:
@@ -28,7 +28,7 @@ class TestStringSource:
 
 class TestPatchSource:
     def test_unified_diff_apply(self):
-        from intentdiff.sources.patch_source import PatchSource
+        from intentumdiff.sources.patch_source import PatchSource
 
         original = textwrap.dedent("""\
             line1
@@ -53,7 +53,7 @@ class TestPatchSource:
         assert fname == "test.py"
 
     def test_filename_extracted_from_patch(self):
-        from intentdiff.sources.patch_source import PatchSource
+        from intentumdiff.sources.patch_source import PatchSource
 
         patch = textwrap.dedent("""\
             --- a/src/main.py
@@ -69,7 +69,7 @@ class TestPatchSource:
 
 class TestFileSource:
     def test_reads_two_files(self, tmp_path):
-        from intentdiff.sources.file_source import FileSource
+        from intentumdiff.sources.file_source import FileSource
 
         f1 = tmp_path / "old.py"
         f2 = tmp_path / "new.py"

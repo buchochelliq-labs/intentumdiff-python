@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import json
 
-from intentdiff.analysis.guardrail_reports import (
+from intentumdiff.analysis.guardrail_reports import (
     build_guardrail_check_result,
     render_guardrail_annotations,
     render_guardrail_sarif,
 )
-from intentdiff.core.models import (
+from intentumdiff.core.models import (
     GuardrailSeverity,
     GuardrailViolation,
     NodePosition,
@@ -101,7 +101,7 @@ def test_sarif_output_contains_rule_result_and_region() -> None:
     location = sarif_result["locations"][0]["physicalLocation"]
 
     assert sarif["version"] == "2.1.0"
-    assert run["tool"]["driver"]["name"] == "IntentDiff"
+    assert run["tool"]["driver"]["name"] == "IntentumDiff"
     assert run["tool"]["driver"]["rules"][0]["id"] == "prod-host"
     assert sarif_result["level"] == "error"
     assert sarif_result["ruleId"] == "prod-host"

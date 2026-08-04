@@ -1,5 +1,5 @@
 """
-Unit tests for the intentdiff CLI layer.
+Unit tests for the intentumdiff CLI layer.
 
 Tests cover argument parsing and command-function behaviour.  All external
 I/O (git, Wasm, SQLite on-disk) is either mocked or redirected to a
@@ -19,7 +19,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from rich.console import Console
 
-from intentdiff.cli import (
+from intentumdiff.cli import (
     _build_parser,
     _cmd_assets_diff,
     _cmd_assets_git,
@@ -43,13 +43,13 @@ from intentdiff.cli import (
     _run_shell_line,
     _should_show_cli_banner,
 )
-from intentdiff.core.models import (
+from intentumdiff.core.models import (
     GuardrailSeverity,
     GuardrailViolation,
     SemanticDiff,
 )
-from intentdiff.core.config import load_project_diff_config
-from intentdiff.core.indexer import IndexResult
+from intentumdiff.core.config import load_project_diff_config
+from intentumdiff.core.indexer import IndexResult
 
 
 # ---------------------------------------------------------------------------
@@ -63,7 +63,7 @@ def _parse(*args: str) -> argparse.Namespace:
 
 def _run(*args: str) -> int:
     """Call main() and return the captured exit code."""
-    from intentdiff.cli import main
+    from intentumdiff.cli import main
 
     with pytest.raises(SystemExit) as exc_info:
         main(list(args))
@@ -72,7 +72,7 @@ def _run(*args: str) -> int:
 
 def _make_result(**kwargs) -> IndexResult:
     """Build a minimal IndexResult for use in tests."""
-    from intentdiff.core.index import SemanticIndex
+    from intentumdiff.core.index import SemanticIndex
 
     sem = SemanticIndex()
     sem.build()
@@ -113,24 +113,24 @@ def _guardrail_diff() -> SemanticDiff:
     )
 
 
-def test_intentdiff_import_alias_exports_public_api() -> None:
-    from intentdiff import DiffConfig, SemanticDiffer
-    from intentdiff import DiffConfig as LegacyDiffConfig
-    from intentdiff import SemanticDiffer as LegacySemanticDiffer
+def test_intentumdiff_import_alias_exports_public_api() -> None:
+    from intentumdiff import DiffConfig, SemanticDiffer
+    from intentumdiff import DiffConfig as LegacyDiffConfig
+    from intentumdiff import SemanticDiffer as LegacySemanticDiffer
 
     assert DiffConfig is LegacyDiffConfig
     assert SemanticDiffer is LegacySemanticDiffer
 
 
-def test_cli_primary_branding_is_intentdiff(capsys: pytest.CaptureFixture[str]) -> None:
+def test_cli_primary_branding_is_intentumdiff(capsys: pytest.CaptureFixture[str]) -> None:
     parser = _build_parser()
 
-    assert parser.prog == "intentdiff"
+    assert parser.prog == "intentumdiff"
 
     with pytest.raises(SystemExit):
         parser.parse_args(["--version"])
 
-    assert "IntentDiff 0.0.1" in capsys.readouterr().out
+    assert "IntentumDiff 0.0.1" in capsys.readouterr().out
 
 
 def test_click_main_version_uses_primary_branding(
@@ -138,7 +138,7 @@ def test_click_main_version_uses_primary_branding(
 ) -> None:
     assert _run("--version") == 0
 
-    assert "IntentDiff 0.0.1" in capsys.readouterr().out
+    assert "IntentumDiff 0.0.1" in capsys.readouterr().out
 
 
 def test_click_main_delegates_command_help_to_compatible_parser(
@@ -147,7 +147,7 @@ def test_click_main_delegates_command_help_to_compatible_parser(
     assert _run("git", "--help") == 0
 
     captured = capsys.readouterr().out
-    assert "usage: intentdiff git" in captured
+    assert "usage: intentumdiff git" in captured
     assert "--staged" in captured
 
 
@@ -159,7 +159,7 @@ def test_shell_command_and_no_banner_flag_parse() -> None:
 
 
 def test_assets_commands_parse_and_json_is_machine_output() -> None:
-    from intentdiff.cli import _is_machine_output
+    from intentumdiff.cli import _is_machine_output
 
     diff_args = _parse(
         "assets",
@@ -243,7 +243,7 @@ def test_github_pr_cli_emits_deterministic_review_payload(
         "owner": "owner",
         "repo": "repo",
         "number": 42,
-        "review_command": "intentdiff-github-app review-pr --owner owner --repo repo --number 42",
+        "review_command": "intentumdiff-github-app review-pr --owner owner --repo repo --number 42",
     }
 
 
@@ -263,7 +263,7 @@ def test_gist_diff_cli_emits_deterministic_review_payload(
         "kind": "gist_diff",
         "gist_id": "abcdef",
         "revision": "file-demo-py",
-        "review_command": "intentdiff gist-diff 'https://gist.github.com/owner/abcdef#file-demo-py' --format html",
+        "review_command": "intentumdiff gist-diff 'https://gist.github.com/owner/abcdef#file-demo-py' --format html",
     }
 
 
@@ -276,7 +276,7 @@ def test_gist_diff_cli_quotes_shell_sensitive_urls(
 
     assert payload["gist_id"] == "abc'def"
     assert payload["review_command"] == (
-        "intentdiff gist-diff 'https://gist.github.com/owner/abc'\"'\"'def' --format html"
+        "intentumdiff gist-diff 'https://gist.github.com/owner/abc'\"'\"'def' --format html"
     )
 
 
@@ -287,7 +287,7 @@ def test_cli_banner_contains_branding() -> None:
     _render_cli_banner(console=console)
 
     output = stream.getvalue()
-    assert "IntentDiff" in output
+    assert "IntentumDiff" in output
     assert "Semantic review shell" in output
     assert "Diff with meaning." in output
 
@@ -295,8 +295,8 @@ def test_cli_banner_contains_branding() -> None:
 def test_terminal_render_uses_rich_summary_table(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from intentdiff import cli
-    from intentdiff.core.models import Change, ChangeType
+    from intentumdiff import cli
+    from intentumdiff.core.models import Change, ChangeType
 
     stream = io.StringIO()
     console = Console(file=stream, force_terminal=False, color_system=None, width=100)
@@ -334,7 +334,7 @@ def test_cli_banner_gate_keeps_machine_output_clean(
     assert _should_show_cli_banner(_parse("live-server"), is_terminal=True) is False
     assert _should_show_cli_banner(_parse("git"), is_terminal=False) is False
 
-    monkeypatch.setenv("INTENTDIFF_NO_BANNER", "1")
+    monkeypatch.setenv("INTENTUMDIFF_NO_BANNER", "1")
     assert _should_show_cli_banner(_parse("git"), is_terminal=True) is False
 
 
@@ -347,7 +347,7 @@ def test_shell_line_dispatches_through_existing_parser(
     def fake_run(args: argparse.Namespace, *, show_banner: bool = True) -> None:
         dispatched.append(args)
 
-    monkeypatch.setattr("intentdiff.cli._shared._run_parsed_command", fake_run)
+    monkeypatch.setattr("intentumdiff.cli._shared._run_parsed_command", fake_run)
 
     assert _run_shell_line("string old new --lang python", parser) is True
 
@@ -369,7 +369,7 @@ def test_shell_builtins_and_errors_keep_loop_alive(
     assert _run_shell_line("quit", parser) is False
 
     captured = capsys.readouterr()
-    assert "usage: intentdiff git" in captured.out
+    assert "usage: intentumdiff git" in captured.out
     assert "Parse error" in captured.err
 
 
@@ -383,17 +383,17 @@ def test_shell_command_prints_full_banner_and_exits(
     _cmd_shell(_parse("shell"))
 
     captured = capsys.readouterr()
-    assert "IntentDiff" in captured.out
+    assert "IntentumDiff" in captured.out
     assert "Semantic review shell" in captured.out
     assert "Diff with meaning." in captured.out
 
 
-def test_pyproject_exposes_intentdiff_cli() -> None:
+def test_pyproject_exposes_intentumdiff_cli() -> None:
     pyproject = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
     scripts = pyproject["project"]["scripts"]
 
-    assert scripts["intentdiff"] == "intentdiff.cli:main"
-    assert set(scripts) == {"intentdiff"}
+    assert scripts["intentumdiff"] == "intentumdiff.cli:main"
+    assert set(scripts) == {"intentumdiff"}
 
 
 def test_profile_phases_flag_is_available_on_diff_commands() -> None:
@@ -438,7 +438,7 @@ def test_index_defaults():
     ns = _parse("index")
     assert ns.repo == "."
     assert ns.ref == "HEAD"
-    assert ns.cache_path == ".intentdiff-cache"
+    assert ns.cache_path == ".intentumdiff-cache"
     assert ns.force is False
 
 
@@ -507,7 +507,7 @@ def test_diagnostics_commands_parse() -> None:
     query = _parse("diagnostics", "query", "select * from diagnostic_runs")
 
     assert summary.func is _cmd_diagnostics_summary
-    assert summary.db == ".intentdiff/diagnostics.duckdb"
+    assert summary.db == ".intentumdiff/diagnostics.duckdb"
     assert summary.limit == 3
     assert hotspots.func is _cmd_diagnostics_hotspots
     assert hotspots.limit == 4
@@ -516,7 +516,7 @@ def test_diagnostics_commands_parse() -> None:
 
 
 def test_diagnostics_json_output_is_machine_output() -> None:
-    from intentdiff.cli import _is_machine_output
+    from intentumdiff.cli import _is_machine_output
 
     assert _is_machine_output(_parse("diagnostics", "summary", "--format", "json")) is True
     assert _is_machine_output(_parse("diagnostics", "hotspots")) is False
@@ -541,7 +541,7 @@ def test_diagnostics_summary_uses_query_store(
             assert limit == 2
             return [{"language": "typescript", "total_fuel": 25_000_000}]
 
-    monkeypatch.setattr("intentdiff.cli._commands._diagnostics_store", lambda _args: FakeStore())
+    monkeypatch.setattr("intentumdiff.cli._commands._diagnostics_store", lambda _args: FakeStore())
 
     _cmd_diagnostics_summary(
         argparse.Namespace(db="diagnostics.duckdb", limit=2, format="json", output=None)
@@ -618,8 +618,8 @@ def test_patch_command_uses_current_patch_source_interface(tmp_path: Path) -> No
     mock_differ.diff.return_value = diff
 
     with (
-        patch("intentdiff.cli._commands._differ", return_value=mock_differ),
-        patch("intentdiff.cli._shared._render") as render,
+        patch("intentumdiff.cli._commands._differ", return_value=mock_differ),
+        patch("intentumdiff.cli._shared._render") as render,
     ):
         _cmd_patch(ns)
 
@@ -703,7 +703,7 @@ def test_guardrails_check_writes_json_report(tmp_path: Path) -> None:
     mock = MagicMock()
     mock.diff_commit.return_value = [_guardrail_diff()]
 
-    with patch("intentdiff.cli._shared.SemanticDiffer", return_value=mock):
+    with patch("intentumdiff.cli._shared.SemanticDiffer", return_value=mock):
         _cmd_guardrails_check(ns)
 
     payload = json.loads(output.read_text(encoding="utf-8"))
@@ -727,7 +727,7 @@ def test_guardrails_check_exits_two_for_strict_immutable(tmp_path: Path) -> None
     mock = MagicMock()
     mock.diff_commit.return_value = [_guardrail_diff()]
 
-    with patch("intentdiff.cli._shared.SemanticDiffer", return_value=mock):
+    with patch("intentumdiff.cli._shared.SemanticDiffer", return_value=mock):
         with pytest.raises(SystemExit) as exc_info:
             _cmd_guardrails_check(ns)
 
@@ -735,8 +735,8 @@ def test_guardrails_check_exits_two_for_strict_immutable(tmp_path: Path) -> None
     assert json.loads(output.read_text(encoding="utf-8"))["version"] == "2.1.0"
 
 
-def test_guardrails_check_fuel_overrides_intentdiff_yaml(tmp_path: Path) -> None:
-    (tmp_path / "intentdiff.yaml").write_text(
+def test_guardrails_check_fuel_overrides_intentumdiff_yaml(tmp_path: Path) -> None:
+    (tmp_path / "intentumdiff.yaml").write_text(
         """
 config:
   plugin_fuel: 111
@@ -758,14 +758,14 @@ config:
         seen_configs.append(config)
         return mock
 
-    with patch("intentdiff.cli._shared.SemanticDiffer", side_effect=_factory):
+    with patch("intentumdiff.cli._shared.SemanticDiffer", side_effect=_factory):
         _cmd_guardrails_check(ns)
 
     assert seen_configs[0].plugin_fuel == 222
 
 
-def test_project_config_loads_from_intentdiff_yaml(tmp_path: Path) -> None:
-    (tmp_path / "intentdiff.yaml").write_text(
+def test_project_config_loads_from_intentumdiff_yaml(tmp_path: Path) -> None:
+    (tmp_path / "intentumdiff.yaml").write_text(
         """
 config:
   min_similarity: 0.7
@@ -793,7 +793,7 @@ config:
 
 
 def test_project_config_rejects_unknown_keys(tmp_path: Path) -> None:
-    (tmp_path / "intentdiff.yaml").write_text(
+    (tmp_path / "intentumdiff.yaml").write_text(
         """
 config:
   min_similarity: 0.7
@@ -806,8 +806,8 @@ config:
         load_project_diff_config(tmp_path)
 
 
-def test_differ_helper_uses_intentdiff_yaml_config(tmp_path: Path) -> None:
-    (tmp_path / "intentdiff.yaml").write_text(
+def test_differ_helper_uses_intentumdiff_yaml_config(tmp_path: Path) -> None:
+    (tmp_path / "intentumdiff.yaml").write_text(
         """
 config:
   plugin_fuel: 12_345_678
@@ -822,8 +822,8 @@ config:
     assert differ._config.min_similarity == 0.65
 
 
-def test_differ_helper_cli_fuel_overrides_intentdiff_yaml(tmp_path: Path) -> None:
-    (tmp_path / "intentdiff.yaml").write_text(
+def test_differ_helper_cli_fuel_overrides_intentumdiff_yaml(tmp_path: Path) -> None:
+    (tmp_path / "intentumdiff.yaml").write_text(
         """
 config:
   plugin_fuel: 12_345_678
@@ -838,7 +838,7 @@ config:
 
 def test_cache_stats_defaults():
     ns = _parse("cache", "stats")
-    assert ns.cache_path == ".intentdiff-cache"
+    assert ns.cache_path == ".intentumdiff-cache"
     assert ns.func.__name__ == "_cmd_cache_stats"
 
 
@@ -879,8 +879,8 @@ def test_cache_clear_combined_flags():
 # ---------------------------------------------------------------------------
 
 
-@patch("intentdiff.cli._commands.SemanticDiffer")
-@patch("intentdiff.core.indexer.Indexer")
+@patch("intentumdiff.cli._commands.SemanticDiffer")
+@patch("intentumdiff.core.indexer.Indexer")
 def test_cmd_index_success(MockIndexer, MockDiffer, tmp_path):
     MockDiffer.return_value = _make_mock_differ()
     MockIndexer.return_value.index_repo.return_value = _make_result(
@@ -897,8 +897,8 @@ def test_cmd_index_success(MockIndexer, MockDiffer, tmp_path):
     assert callable(call_args[1]["on_progress"])
 
 
-@patch("intentdiff.cli._commands.SemanticDiffer")
-@patch("intentdiff.core.indexer.Indexer")
+@patch("intentumdiff.cli._commands.SemanticDiffer")
+@patch("intentumdiff.core.indexer.Indexer")
 def test_cmd_index_from_cache(MockIndexer, MockDiffer, tmp_path):
     MockDiffer.return_value = _make_mock_differ()
     MockIndexer.return_value.index_repo.return_value = _make_result(from_cache=True)
@@ -908,8 +908,8 @@ def test_cmd_index_from_cache(MockIndexer, MockDiffer, tmp_path):
     _cmd_index(args)  # should not raise
 
 
-@patch("intentdiff.cli._commands.SemanticDiffer")
-@patch("intentdiff.core.indexer.Indexer")
+@patch("intentumdiff.cli._commands.SemanticDiffer")
+@patch("intentumdiff.core.indexer.Indexer")
 def test_cmd_index_with_few_errors(MockIndexer, MockDiffer, tmp_path):
     errors = [(f"file_{i}.py", f"error {i}") for i in range(5)]
     MockDiffer.return_value = _make_mock_differ()
@@ -922,8 +922,8 @@ def test_cmd_index_with_few_errors(MockIndexer, MockDiffer, tmp_path):
     _cmd_index(args)  # parse errors are shown but do not raise
 
 
-@patch("intentdiff.cli._commands.SemanticDiffer")
-@patch("intentdiff.core.indexer.Indexer")
+@patch("intentumdiff.cli._commands.SemanticDiffer")
+@patch("intentumdiff.core.indexer.Indexer")
 def test_cmd_index_with_many_errors_truncates(MockIndexer, MockDiffer, tmp_path):
     errors = [(f"file_{i}.py", f"error {i}") for i in range(15)]
     MockDiffer.return_value = _make_mock_differ()
@@ -936,8 +936,8 @@ def test_cmd_index_with_many_errors_truncates(MockIndexer, MockDiffer, tmp_path)
     _cmd_index(args)  # "…and 5 more" is printed; should not raise
 
 
-@patch("intentdiff.cli._commands.SemanticDiffer")
-@patch("intentdiff.core.indexer.Indexer")
+@patch("intentumdiff.cli._commands.SemanticDiffer")
+@patch("intentumdiff.core.indexer.Indexer")
 def test_cmd_index_force_passed_through(MockIndexer, MockDiffer, tmp_path):
     MockDiffer.return_value = _make_mock_differ()
     MockIndexer.return_value.index_repo.return_value = _make_result()
@@ -954,8 +954,8 @@ def test_cmd_index_force_passed_through(MockIndexer, MockDiffer, tmp_path):
 # ---------------------------------------------------------------------------
 
 
-@patch("intentdiff.cli._commands.SemanticDiffer")
-@patch("intentdiff.core.indexer.Indexer")
+@patch("intentumdiff.cli._commands.SemanticDiffer")
+@patch("intentumdiff.core.indexer.Indexer")
 def test_cmd_index_exception_exits_1(MockIndexer, MockDiffer, tmp_path):
     MockDiffer.return_value = _make_mock_differ()
     MockIndexer.return_value.index_repo.side_effect = RuntimeError("git not found")
@@ -967,8 +967,8 @@ def test_cmd_index_exception_exits_1(MockIndexer, MockDiffer, tmp_path):
     assert exc_info.value.code == 1
 
 
-@patch("intentdiff.cli._commands.SemanticDiffer")
-@patch("intentdiff.core.indexer.Indexer")
+@patch("intentumdiff.cli._commands.SemanticDiffer")
+@patch("intentumdiff.core.indexer.Indexer")
 def test_cmd_index_cache_closed_on_success(MockIndexer, MockDiffer, tmp_path):
     mock_cache = MagicMock()
     mock_differ = _make_mock_differ()
@@ -982,8 +982,8 @@ def test_cmd_index_cache_closed_on_success(MockIndexer, MockDiffer, tmp_path):
     mock_cache.close.assert_called_once()
 
 
-@patch("intentdiff.cli._commands.SemanticDiffer")
-@patch("intentdiff.core.indexer.Indexer")
+@patch("intentumdiff.cli._commands.SemanticDiffer")
+@patch("intentumdiff.core.indexer.Indexer")
 def test_cmd_index_cache_closed_on_error(MockIndexer, MockDiffer, tmp_path):
     """Cache must be closed even when indexing raises."""
     mock_cache = MagicMock()
@@ -1010,7 +1010,7 @@ def test_cache_stats_missing_db(tmp_path):
 
 
 def test_cache_stats_with_data(tmp_path):
-    from intentdiff.cache.sqlite_store import SqliteCacheStore
+    from intentumdiff.cache.sqlite_store import SqliteCacheStore
 
     db = tmp_path / "cache.db"
     store = SqliteCacheStore(db)
@@ -1033,7 +1033,7 @@ def test_cache_stats_via_main_missing_db(tmp_path):
 
 def test_cache_clear_no_flags_exits_1(tmp_path):
     db = tmp_path / "cache.db"
-    from intentdiff.cache.sqlite_store import SqliteCacheStore
+    from intentumdiff.cache.sqlite_store import SqliteCacheStore
     SqliteCacheStore(db).close()
 
     args = argparse.Namespace(
@@ -1050,7 +1050,7 @@ def test_cache_clear_missing_db(tmp_path):
 
 
 def test_cache_clear_all_removes_entries(tmp_path):
-    from intentdiff.cache.sqlite_store import SqliteCacheStore
+    from intentumdiff.cache.sqlite_store import SqliteCacheStore
 
     db = tmp_path / "cache.db"
     store = SqliteCacheStore(db)
@@ -1071,7 +1071,7 @@ def test_cache_clear_all_removes_entries(tmp_path):
 
 
 def test_cache_clear_parse_only_leaves_index(tmp_path):
-    from intentdiff.cache.sqlite_store import SqliteCacheStore
+    from intentumdiff.cache.sqlite_store import SqliteCacheStore
 
     db = tmp_path / "cache.db"
     store = SqliteCacheStore(db)
@@ -1092,7 +1092,7 @@ def test_cache_clear_parse_only_leaves_index(tmp_path):
 
 
 def test_cache_clear_via_main_all(tmp_path):
-    from intentdiff.cache.sqlite_store import SqliteCacheStore
+    from intentumdiff.cache.sqlite_store import SqliteCacheStore
 
     db = tmp_path / "cache.db"
     SqliteCacheStore(db).close()
@@ -1102,7 +1102,7 @@ def test_cache_clear_via_main_all(tmp_path):
 
 
 def test_cache_clear_via_main_no_flags(tmp_path):
-    from intentdiff.cache.sqlite_store import SqliteCacheStore
+    from intentumdiff.cache.sqlite_store import SqliteCacheStore
 
     db = tmp_path / "cache.db"
     SqliteCacheStore(db).close()

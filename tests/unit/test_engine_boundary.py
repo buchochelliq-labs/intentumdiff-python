@@ -7,17 +7,17 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from intentdiff import SemanticDiffer
-from intentdiff.core.models import DiffConfig
+from intentumdiff import SemanticDiffer
+from intentumdiff.core.models import DiffConfig
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-STRICT_GATE_ENV = "INTENTDIFF_ENFORCE_RUST_ONLY_ENGINE"
+STRICT_GATE_ENV = "INTENTUMDIFF_ENFORCE_RUST_ONLY_ENGINE"
 
 _PYTHON_ENGINE_IMPORT_RE = re.compile(
     r"(^|\s)(from|import)\s+("
-    r"intentdiff\.analysis"
-    r"|intentdiff\.core\.engine"
-    r"|intentdiff\.core\.cst_serializer"
+    r"intentumdiff\.analysis"
+    r"|intentumdiff\.core\.engine"
+    r"|intentumdiff\.core\.cst_serializer"
     r"|tree_sitter"
     r"|tree-sitter"
     r")\b",
@@ -25,7 +25,7 @@ _PYTHON_ENGINE_IMPORT_RE = re.compile(
 )
 
 # The #92 shell-vs-engine classification, encoded as the ratchet ceiling. Every path below
-# is flagged ONLY because it imports an `intentdiff.analysis.*` submodule (or, for
+# is flagged ONLY because it imports an `intentumdiff.analysis.*` submodule (or, for
 # cst_serializer, `tree_sitter`) — and each such import is provably SHELL, not engine: the
 # transitional refinement/presentation layer and core/engine.py (the Python GumTree) were
 # deleted at the #57 payoff, so nothing here runs matching/diff/refine/finalize in Python.
@@ -34,35 +34,35 @@ _PYTHON_ENGINE_IMPORT_RE = re.compile(
 # it here — the scanner self-verifies the ceiling can only tighten.
 _KNOWN_PYTHON_ENGINE_DEBT_PATHS = {
     # Schema detection/registration/descriptor-validation shell (issue #63): the resolver and
-    # the user-schema registry cross-import within intentdiff.analysis. No matching-engine
+    # the user-schema registry cross-import within intentumdiff.analysis. No matching-engine
     # logic — identity fields are marshaled into the Rust core's keyed matching.
-    "src/intentdiff/analysis/schema_resolver.py",
-    "src/intentdiff/analysis/user_schemas.py",
+    "src/intentumdiff/analysis/schema_resolver.py",
+    "src/intentumdiff/analysis/user_schemas.py",
     # differ.py's DTO/presentation + telemetry helper families (issue #81 split):
     # _differ_presentation imports analysis.text_review (line-review presentation assembly;
     # the review compute itself is Rust — text_review_generic.rs); _differ_runtime imports
     # analysis.diagnostics (the DiagnosticsRecorder telemetry sink).
-    "src/intentdiff/_differ_presentation.py",
-    "src/intentdiff/_differ_runtime.py",
+    "src/intentumdiff/_differ_presentation.py",
+    "src/intentumdiff/_differ_runtime.py",
     # Guardrail orchestration/reporting: the RULE EVALUATION is Rust (A1.3,
     # evaluate_guardrail_rules); this marshals trees + reads the keyed_profiles /
     # resource_profiles language-set CONSTANTS and builds the report DTOs.
-    "src/intentdiff/analysis/guardrails.py",
+    "src/intentumdiff/analysis/guardrails.py",
     # CLI package (issue #80 split): imports analysis.guardrail_reports (report formatting).
-    "src/intentdiff/cli/_commands.py",
-    "src/intentdiff/cli/_shared.py",
+    "src/intentumdiff/cli/_commands.py",
+    "src/intentumdiff/cli/_shared.py",
     # Commit orchestration: imports analysis.cross_file, whose detect_cross_file_changes is a
     # thin marshal into the Rust core (try_rust_diff_symbol_tables) — no Python engine.
-    "src/intentdiff/core/commit_differ.py",
+    "src/intentumdiff/core/commit_differ.py",
     # CST serialization: imports `tree_sitter.Node` as a TYPE to shape the filtered-CST JSON
     # the Rust core ingests. Parse-adjacency IO, not diff/match logic. The remaining genuine
     # engine-adjacency here (the tree_sitter dependency) is tracked for the Phase-B parse-side
     # consolidation, not a Python-engine violation.
-    "src/intentdiff/core/cst_serializer.py",
+    "src/intentumdiff/core/cst_serializer.py",
     # The public API / VCS / config / orchestration facade — imports the analysis SHELL
     # submodules above (compile_commands metadata, diagnostics, guardrails, schema_resolver,
     # text_review, user_schemas). Every processing call inside routes to the Rust core.
-    "src/intentdiff/differ.py",
+    "src/intentumdiff/differ.py",
 }
 
 _KNOWN_PYTHON_TREE_SITTER_DEPS: set[str] = set()
@@ -72,8 +72,8 @@ _KNOWN_INTERPRET_CST_CRATES: set[str] = set()
 
 def test_issue_specific_engine_helpers_stay_out_of_python_layer() -> None:
     banned_helpers = [
-        REPO_ROOT / "src" / "intentdiff" / "analysis" / "cpp_preprocessor.py",
-        REPO_ROOT / "src" / "intentdiff" / "analysis" / "scopes.py",
+        REPO_ROOT / "src" / "intentumdiff" / "analysis" / "cpp_preprocessor.py",
+        REPO_ROOT / "src" / "intentumdiff" / "analysis" / "scopes.py",
     ]
 
     assert [path for path in banned_helpers if path.exists()] == []
@@ -81,13 +81,13 @@ def test_issue_specific_engine_helpers_stay_out_of_python_layer() -> None:
 
 def test_public_paths_do_not_execute_python_invariance_module() -> None:
     public_paths = [
-        REPO_ROOT / "src" / "intentdiff" / "differ.py",
+        REPO_ROOT / "src" / "intentumdiff" / "differ.py",
     ]
 
     offenders = [
         _relative(path)
         for path in public_paths
-        if "intentdiff.analysis.invariances" in path.read_text(encoding="utf8")
+        if "intentumdiff.analysis.invariances" in path.read_text(encoding="utf8")
     ]
 
     assert offenders == []
@@ -104,7 +104,7 @@ def test_certified_python_public_path_uses_rust_finalizer_not_python_engine(
     diff = SemanticDiffer(
         DiffConfig(
             experimental_rust_core=True,
-            extra_trivia_types=["__intentdiff_test_noop__"],
+            extra_trivia_types=["__intentumdiff_test_noop__"],
         )
     ).diff_strings(
         "def answer():\n    return 1\n",
@@ -149,8 +149,8 @@ def test_strict_rust_gate_allows_batch_decline_to_native_finalize(monkeypatch) -
     # single-file path falls through to the native per-stage Rust finalize routing, which
     # serves the diff. The RUST_ONLY gate must NOT fire on a batch decline — it fires only
     # at a genuine token-level fallback (see test_strict_rust_gate_blocks_token_fallback).
-    import intentdiff.differ as differ_module
-    from intentdiff.rust_core import RustCoreBatchAttempt
+    import intentumdiff.differ as differ_module
+    from intentumdiff.rust_core import RustCoreBatchAttempt
 
     monkeypatch.setenv(STRICT_GATE_ENV, "1")
     monkeypatch.setattr(
@@ -179,7 +179,7 @@ def test_strict_rust_gate_blocks_commit_token_fallback(monkeypatch) -> None:
     # Rust core disabled (kill switch) that path reaches the token-level fallback, which the
     # RUST_ONLY gate blocks — and the fan-out re-raises the RustOnlyGateError instead of
     # swallowing it as an ordinary per-file error (a swallow would silently drop the file).
-    import intentdiff.differ as differ_module
+    import intentumdiff.differ as differ_module
 
     monkeypatch.setenv(STRICT_GATE_ENV, "1")
     changed_files = [
@@ -189,7 +189,7 @@ def test_strict_rust_gate_blocks_commit_token_fallback(monkeypatch) -> None:
     with (
         patch("git.Repo", return_value=MagicMock()),
         patch(
-            "intentdiff.sources.git_source.iter_changed_sources",
+            "intentumdiff.sources.git_source.iter_changed_sources",
             return_value=iter(changed_files),
         ),
         pytest.raises(
@@ -206,7 +206,7 @@ def test_strict_rust_gate_allows_commit_batch_decline_to_native(monkeypatch) -> 
     # A commit whose per-file certified-batch attempts decline re-runs each source through
     # the native per-stage Rust finalize path. That is Rust->Rust, not a Python fallback, so
     # the RUST_ONLY gate does NOT fire: the commit completes with every file served natively.
-    import intentdiff.differ as differ_module
+    import intentumdiff.differ as differ_module
 
     monkeypatch.setenv(STRICT_GATE_ENV, "1")
     changed_files = [
@@ -217,7 +217,7 @@ def test_strict_rust_gate_allows_commit_batch_decline_to_native(monkeypatch) -> 
     with (
         patch("git.Repo", return_value=MagicMock()),
         patch(
-            "intentdiff.sources.git_source.iter_changed_sources",
+            "intentumdiff.sources.git_source.iter_changed_sources",
             return_value=iter(changed_files),
         ),
     ):
@@ -271,8 +271,8 @@ def test_engine_boundary_docs_are_the_release_source_of_truth() -> None:
     assert "ENGINE_BOUNDARY_AUDIT.md" in architecture
     assert "Engine boundary note" in main_architecture
     assert "ENGINE_BOUNDARY_AUDIT.md" in main_architecture
-    assert "INTENTDIFF_ENFORCE_RUST_ONLY_ENGINE=1" in audit
-    assert "INTENTDIFF_ENFORCE_RUST_ONLY_ENGINE=1" in backlog
+    assert "INTENTUMDIFF_ENFORCE_RUST_ONLY_ENGINE=1" in audit
+    assert "INTENTUMDIFF_ENFORCE_RUST_ONLY_ENGINE=1" in backlog
     assert "Python remains the correctness oracle" not in architecture
     assert "Rust must remain opt-in" not in architecture
 
@@ -280,16 +280,16 @@ def test_engine_boundary_docs_are_the_release_source_of_truth() -> None:
 def test_python_engine_dependency_debt_is_ratcheted() -> None:
     current_debt = {
         _relative(path)
-        for path in (REPO_ROOT / "src" / "intentdiff").rglob("*.py")
+        for path in (REPO_ROOT / "src" / "intentumdiff").rglob("*.py")
         if _PYTHON_ENGINE_IMPORT_RE.search(path.read_text(encoding="utf8"))
     }
 
     # The strict gate does NOT tighten this ratchet to the empty set. Every remaining path
-    # imports an `intentdiff.analysis` submodule (or, for cst_serializer, `tree_sitter`) for
+    # imports an `intentumdiff.analysis` submodule (or, for cst_serializer, `tree_sitter`) for
     # SHELL reasons only — guardrail reporting, diagnostics, text-review presentation, schema
     # resolution, CST marshalling — while the Python GumTree ENGINE itself was deleted at the
     # #57 payoff (see the classification table above and docs/ENGINE_BOUNDARY_AUDIT.md).
-    # Emptying the ceiling means physically removing/relocating `intentdiff.analysis`, which
+    # Emptying the ceiling means physically removing/relocating `intentumdiff.analysis`, which
     # is Phase-C (repo-split) work tracked in docs/BACKLOG.md, not part of retiring the engine
     # fallback (#90/#91). Both modes therefore assert the same monotonic, can-only-tighten
     # ceiling; the ratchet still fails loudly if a NEW engine-adjacent import creeps in.

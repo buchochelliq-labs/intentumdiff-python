@@ -1,4 +1,4 @@
-"""Unit tests for :mod:`intentdiff.lsp.enricher`."""
+"""Unit tests for :mod:`intentumdiff.lsp.enricher`."""
 
 from __future__ import annotations
 
@@ -8,9 +8,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from intentdiff.core.models import NodePosition, SemanticNode
-from intentdiff.lsp.enricher import TypeEnricher
-from intentdiff.lsp.exceptions import LspConnectionError, LspTimeoutError
+from intentumdiff.core.models import NodePosition, SemanticNode
+from intentumdiff.lsp.enricher import TypeEnricher
+from intentumdiff.lsp.exceptions import LspConnectionError, LspTimeoutError
 
 
 # ---------------------------------------------------------------------------
@@ -189,7 +189,7 @@ def test_rust_hover_target_collection_matches_python_walk() -> None:
     (excluded), declarations/parameters (first-name-leaf position under the DECL id),
     a declaration without a name leaf (skipped), a non-leaf name type (skipped), and
     duplicate ids (first pre-order occurrence wins)."""
-    from intentdiff.rust_core import try_rust_collect_hover_targets
+    from intentumdiff.rust_core import try_rust_collect_hover_targets
 
     root = _node(
         "root",
@@ -235,7 +235,7 @@ def test_rust_hover_target_collection_matches_python_walk() -> None:
 def test_enricher_query_all_prefers_rust_triples(monkeypatch: pytest.MonkeyPatch) -> None:
     """`_query_all` consumes the Rust triples when the core serves them — the Python walk
     is the fallback/oracle only."""
-    import intentdiff.rust_core as rust_core
+    import intentumdiff.rust_core as rust_core
 
     calls: list[str] = []
     monkeypatch.setattr(

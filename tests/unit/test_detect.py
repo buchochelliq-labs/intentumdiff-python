@@ -13,8 +13,8 @@ from unittest.mock import MagicMock, PropertyMock
 
 import pytest
 
-from intentdiff.core.models import DetectionResult
-from intentdiff.differ import SemanticDiffer
+from intentumdiff.core.models import DetectionResult
+from intentumdiff.differ import SemanticDiffer
 
 
 # ---------------------------------------------------------------------------
@@ -46,7 +46,7 @@ def _fake_parser(
 
 def _differ_with_parsers(*parsers) -> SemanticDiffer:
     """Return a SemanticDiffer whose registry is pre-populated with mocks."""
-    from intentdiff.plugins.registry import PluginRegistry as _PR
+    from intentumdiff.plugins.registry import PluginRegistry as _PR
 
     registry = MagicMock(spec=_PR)
     registry._config = MagicMock()
@@ -85,7 +85,7 @@ def _differ_with_parsers(*parsers) -> SemanticDiffer:
 
 class TestCanParse:
     def test_returns_true_when_detect_language_non_empty(self):
-        from intentdiff.plugins.adapter import ParserAdapter
+        from intentumdiff.plugins.adapter import ParserAdapter
 
         plugin = MagicMock()
         plugin.call_detect_language.return_value = "python"
@@ -94,7 +94,7 @@ class TestCanParse:
         plugin.call_detect_language.assert_called_once_with("", "def foo(): pass")
 
     def test_returns_false_when_detect_language_empty(self):
-        from intentdiff.plugins.adapter import ParserAdapter
+        from intentumdiff.plugins.adapter import ParserAdapter
 
         plugin = MagicMock()
         plugin.call_detect_language.return_value = ""
@@ -102,7 +102,7 @@ class TestCanParse:
         assert adapter.can_parse("SELECT 1") is False
 
     def test_content_is_truncated_to_4096(self):
-        from intentdiff.plugins.adapter import ParserAdapter
+        from intentumdiff.plugins.adapter import ParserAdapter
 
         plugin = MagicMock()
         plugin.call_detect_language.return_value = ""
@@ -113,7 +113,7 @@ class TestCanParse:
         assert len(called_content) == 4096
 
     def test_language_info_uses_plugin_export_with_host_fields(self):
-        from intentdiff.plugins.adapter import ParserAdapter
+        from intentumdiff.plugins.adapter import ParserAdapter
 
         plugin = MagicMock()
         plugin.trusted = True
@@ -147,7 +147,7 @@ class TestCanParse:
         assert info.default_filename == "example.py"
 
     def test_language_info_falls_back_when_export_missing(self):
-        from intentdiff.plugins.adapter import ParserAdapter
+        from intentumdiff.plugins.adapter import ParserAdapter
 
         plugin = MagicMock()
         plugin.trusted = False
@@ -231,7 +231,7 @@ class TestDetectByContent:
         high.detect_language.assert_not_called()
 
     def test_explicit_plugin_id_must_claim_content(self):
-        from intentdiff.plugins.exceptions import PluginNotFoundError
+        from intentumdiff.plugins.exceptions import PluginNotFoundError
 
         parser = _fake_parser("python-parser", ["python"], detects_as="", plugin_id="py")
         differ = _differ_with_parsers(parser)

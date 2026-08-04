@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from intentdiff import SemanticDiffer
-from intentdiff.analysis.diagnostics import DiagnosticsRecorder
-from intentdiff.core.models import DiffConfig
-from intentdiff.differ import (
+from intentumdiff import SemanticDiffer
+from intentumdiff.analysis.diagnostics import DiagnosticsRecorder
+from intentumdiff.core.models import DiffConfig
+from intentumdiff.differ import (
     _fuel_budget,
     _record_engine_telemetry,
     _summarize_engine_telemetry,
@@ -116,7 +116,7 @@ def test_engine_telemetry_classifies_excessive_fuel_hotspots() -> None:
 def test_engine_telemetry_hotspots_identify_language_method_and_file() -> None:
     records = [
         {
-            "plugin": "src/intentdiff/wasm/js_ts_parser.wasm",
+            "plugin": "src/intentumdiff/wasm/js_ts_parser.wasm",
             "function": "process",
             "engine_owner": "python",
             "engine": "python_wasmtime_plugin_host",
@@ -157,7 +157,7 @@ def test_engine_telemetry_hotspots_identify_language_method_and_file() -> None:
 def test_engine_telemetry_does_not_flag_large_linear_file_as_hotspot() -> None:
     records = [
         {
-            "plugin": "src/intentdiff/wasm/rust_parser.wasm",
+            "plugin": "src/intentumdiff/wasm/rust_parser.wasm",
             "function": "process",
             "engine_owner": "python",
             "engine": "python_wasmtime_plugin_host",

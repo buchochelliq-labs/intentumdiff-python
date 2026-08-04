@@ -2,7 +2,7 @@
 tests/unit/test_serve.py
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
-Unit tests for the intentdiff HTTP playground API (``intentdiff serve``).
+Unit tests for the intentumdiff HTTP playground API (``intentumdiff serve``).
 
 All tests use a mock SemanticDiffer injected via ``create_app(differ=...)``,
 so no Wasm plugins or git repositories are required.
@@ -19,8 +19,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from intentdiff.core.models import LanguageInfoGroup, LanguagePluginInfo, SemanticDiff
-from intentdiff.plugins.exceptions import PluginNotFoundError
+from intentumdiff.core.models import LanguageInfoGroup, LanguagePluginInfo, SemanticDiff
+from intentumdiff.plugins.exceptions import PluginNotFoundError
 
 TestClient: Any
 create_app: Any
@@ -31,8 +31,8 @@ try:
     import httpx  # noqa: F401
     from fastapi.testclient import TestClient
 
-    from intentdiff.serve import create_app
-    from intentdiff.serve._app import _MAX_REQUEST_BODY_BYTES
+    from intentumdiff.serve import create_app
+    from intentumdiff.serve._app import _MAX_REQUEST_BODY_BYTES
 
     _SERVE_IMPORT_ERROR: ImportError | None = None
 except ImportError as exc:
@@ -108,7 +108,7 @@ class TestGetIndex:
         html_path = (
             Path(__file__).parents[2]
             / "src"
-            / "intentdiff"
+            / "intentumdiff"
             / "serve"
             / "_static"
             / "index.html"
@@ -134,7 +134,7 @@ class TestGetIndex:
         js_path = (
             Path(__file__).parents[2]
             / "src"
-            / "intentdiff"
+            / "intentumdiff"
             / "serve"
             / "_static"
             / "playground.js"
@@ -157,7 +157,7 @@ class TestGetIndex:
         js_path = (
             Path(__file__).parents[2]
             / "src"
-            / "intentdiff"
+            / "intentumdiff"
             / "serve"
             / "_static"
             / "playground.js"
@@ -237,7 +237,7 @@ class TestGetLanguageInfo:
                         grammar_id="python",
                         priority=0,
                         is_trusted=True,
-                        provenance="IntentDiff 0.0.1 beta",
+                        provenance="IntentumDiff 0.0.1 beta",
                     )
                 ],
             )
@@ -435,7 +435,7 @@ class TestPostDiff:
 class TestPostDetect:
     def test_detect_delegates_to_library(self):
         """POST /detect calls differ.detect_all and returns its result."""
-        from intentdiff.core.models import DetectionResult
+        from intentumdiff.core.models import DetectionResult
 
         differ = _mock_differ()
         differ.detect_all.return_value = [
@@ -460,7 +460,7 @@ class TestPostDetect:
         assert resp.json()["candidates"] == []
 
     def test_detect_candidates_forwarded_to_library(self):
-        from intentdiff.core.models import DetectionResult
+        from intentumdiff.core.models import DetectionResult
 
         differ = _mock_differ()
         differ.detect_all.return_value = [
@@ -478,7 +478,7 @@ class TestPostDetect:
         )
 
     def test_detect_preferred_plugins_forwarded_to_library(self):
-        from intentdiff.core.models import DetectionResult
+        from intentumdiff.core.models import DetectionResult
 
         differ = _mock_differ()
         differ.detect_all.return_value = [
@@ -501,7 +501,7 @@ class TestPostDetect:
         )
 
     def test_detect_plugin_id_forwards_to_library(self):
-        from intentdiff.core.models import DetectionResult
+        from intentumdiff.core.models import DetectionResult
 
         differ = _mock_differ()
         differ.detect_all.return_value = [
@@ -668,7 +668,7 @@ class TestDetectCandidatesValidation:
         assert resp.status_code == 422
 
     def test_exactly_50_candidates_accepted(self):
-        from intentdiff.core.models import DetectionResult
+        from intentumdiff.core.models import DetectionResult
         differ = _mock_differ()
         differ.detect_all.return_value = [
             DetectionResult(language="python", grammar_id="python-parser", confidence=1.0),

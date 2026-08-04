@@ -10,8 +10,8 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from intentdiff import SemanticDiffer
-from intentdiff.core.models import (
+from intentumdiff import SemanticDiffer
+from intentumdiff.core.models import (
     Change,
     ChangeType,
     RefactoringKind,

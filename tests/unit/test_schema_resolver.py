@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from intentdiff import SemanticDiffer
-from intentdiff.analysis.schema_resolver import (
+from intentumdiff import SemanticDiffer
+from intentumdiff.analysis.schema_resolver import (
     ADVISORY_ADF_NO_RAW_SCHEMA_URL,
     AZURE_PIPELINES_SCHEMA_URL,
     DATABRICKS_BUNDLE_SCHEMA_URL,
@@ -26,8 +26,8 @@ from intentdiff.analysis.schema_resolver import (
 
 def _env(**overrides: str) -> dict[str, str]:
     return {
-        "INTENTDIFF_SCHEMA_FETCH": "auto",
-        "INTENTDIFF_SCHEMA_ALLOW_PRIVATE_HOSTS": "1",
+        "INTENTUMDIFF_SCHEMA_FETCH": "auto",
+        "INTENTUMDIFF_SCHEMA_ALLOW_PRIVATE_HOSTS": "1",
         **overrides,
     }
 
@@ -192,8 +192,8 @@ def test_semantic_differ_reports_domain_schema_provider_without_fetch(
     identity_field: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("INTENTDIFF_SCHEMA_FETCH", "off")
-    changed = content + "\nx-intentdiff-proof: true\n"
+    monkeypatch.setenv("INTENTUMDIFF_SCHEMA_FETCH", "off")
+    changed = content + "\nx-intentumdiff-proof: true\n"
 
     diff = SemanticDiffer().diff_strings(
         content,
@@ -258,7 +258,7 @@ def test_stale_cache_uses_conditional_get_and_304(tmp_path: Path) -> None:
         content=content,
         filename="data.json",
         language="json",
-        env=_env(INTENTDIFF_SCHEMA_CACHE_TTL_SECONDS="1"),
+        env=_env(INTENTUMDIFF_SCHEMA_CACHE_TTL_SECONDS="1"),
         cache_dir=tmp_path,
         fetcher=first_fetcher,
         now=1000,
@@ -274,7 +274,7 @@ def test_stale_cache_uses_conditional_get_and_304(tmp_path: Path) -> None:
         content=content,
         filename="data.json",
         language="json",
-        env=_env(INTENTDIFF_SCHEMA_CACHE_TTL_SECONDS="1"),
+        env=_env(INTENTUMDIFF_SCHEMA_CACHE_TTL_SECONDS="1"),
         cache_dir=tmp_path,
         fetcher=second_fetcher,
         now=1002,
@@ -291,7 +291,7 @@ def test_failed_refresh_uses_stale_cache(tmp_path: Path) -> None:
         content=content,
         filename="data.json",
         language="json",
-        env=_env(INTENTDIFF_SCHEMA_CACHE_TTL_SECONDS="1"),
+        env=_env(INTENTUMDIFF_SCHEMA_CACHE_TTL_SECONDS="1"),
         cache_dir=tmp_path,
         fetcher=lambda url, headers: FetchResponse(body=_schema("id"), final_url=url),
         now=1000,
@@ -304,7 +304,7 @@ def test_failed_refresh_uses_stale_cache(tmp_path: Path) -> None:
         content=content,
         filename="data.json",
         language="json",
-        env=_env(INTENTDIFF_SCHEMA_CACHE_TTL_SECONDS="1"),
+        env=_env(INTENTUMDIFF_SCHEMA_CACHE_TTL_SECONDS="1"),
         cache_dir=tmp_path,
         fetcher=failing_fetcher,
         now=1002,
@@ -324,7 +324,7 @@ def test_cache_only_and_off_modes_suppress_fetch(tmp_path: Path) -> None:
         content=content,
         filename="data.json",
         language="json",
-        env=_env(INTENTDIFF_SCHEMA_FETCH="cache-only"),
+        env=_env(INTENTUMDIFF_SCHEMA_FETCH="cache-only"),
         cache_dir=tmp_path,
         fetcher=fail_if_called,
     )
@@ -332,7 +332,7 @@ def test_cache_only_and_off_modes_suppress_fetch(tmp_path: Path) -> None:
         content=content,
         filename="data.json",
         language="json",
-        env=_env(INTENTDIFF_SCHEMA_FETCH="off"),
+        env=_env(INTENTUMDIFF_SCHEMA_FETCH="off"),
         cache_dir=tmp_path,
         fetcher=fail_if_called,
     )
@@ -349,7 +349,7 @@ def test_schema_metadata_marks_detected_available_and_missing(
         content='{"$schema":"https://example.test/schema.json"}',
         filename="data.json",
         language="json",
-        env=_env(INTENTDIFF_SCHEMA_FETCH="cache-only"),
+        env=_env(INTENTUMDIFF_SCHEMA_FETCH="cache-only"),
         cache_dir=tmp_path,
     )
     metadata = schema_resolution_metadata(resolved)
@@ -407,7 +407,7 @@ def test_diff_metadata_includes_detected_schema_status(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    monkeypatch.setenv("INTENTDIFF_SCHEMA_FETCH", "cache-only")
+    monkeypatch.setenv("INTENTUMDIFF_SCHEMA_FETCH", "cache-only")
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
     diff = SemanticDiffer().diff_strings(
         '{"$schema":"https://example.test/schema.json","name":"old"}',
@@ -430,7 +430,7 @@ def test_diff_metadata_omits_schema_for_plain_json(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    monkeypatch.setenv("INTENTDIFF_SCHEMA_FETCH", "cache-only")
+    monkeypatch.setenv("INTENTUMDIFF_SCHEMA_FETCH", "cache-only")
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
     diff = SemanticDiffer().diff_strings(
         '{"name":"old"}',
@@ -452,7 +452,7 @@ def test_default_fetch_mode_is_cache_only(tmp_path: Path) -> None:
         content=content,
         filename="data.json",
         language="json",
-        env={"INTENTDIFF_SCHEMA_ALLOW_PRIVATE_HOSTS": "1"},
+        env={"INTENTUMDIFF_SCHEMA_ALLOW_PRIVATE_HOSTS": "1"},
         cache_dir=tmp_path,
         fetcher=fail_if_called,
     )
@@ -479,7 +479,7 @@ def test_rejects_private_schema_hosts_by_default(tmp_path: Path) -> None:
         content='{"$schema":"https://127.0.0.1/schema.json"}',
         filename="data.json",
         language="json",
-        env={"INTENTDIFF_SCHEMA_FETCH": "auto"},
+        env={"INTENTUMDIFF_SCHEMA_FETCH": "auto"},
         cache_dir=tmp_path,
         fetcher=lambda url, headers: FetchResponse(body=_schema("id"), final_url=url),
     )
@@ -493,7 +493,7 @@ def test_databricks_prefers_local_bundle_schema_command() -> None:
         content="resources: {}\n",
         filename="databricks.yml",
         language="yaml",
-        env=_env(INTENTDIFF_SCHEMA_ALLOW_COMMANDS="1"),
+        env=_env(INTENTUMDIFF_SCHEMA_ALLOW_COMMANDS="1"),
         command_runner=lambda command: _schema("job_cluster_key").decode("utf-8"),
     )
 

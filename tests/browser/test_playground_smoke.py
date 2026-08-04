@@ -12,7 +12,7 @@ from types import ModuleType
 
 import pytest
 
-from intentdiff.core.models import (  # noqa: E402
+from intentumdiff.core.models import (  # noqa: E402
     DetectionResult,
     LanguageInfoGroup,
     LanguagePluginInfo,
@@ -21,7 +21,7 @@ from intentdiff.core.models import (  # noqa: E402
 
 pytestmark = pytest.mark.browser
 
-CORE_PLUGIN_ID = "intentdiff:python:python"
+CORE_PLUGIN_ID = "intentumdiff:python:python"
 ALT_PLUGIN_ID = "trusted-extra:python:python"
 
 _BROWSER_DEPS: tuple[ModuleType, ModuleType, ModuleType] | None = None
@@ -83,7 +83,7 @@ class _BrowserDiffer:
                         grammar_id="python",
                         priority=0,
                         is_trusted=True,
-                        provenance="IntentDiff 1.0.0",
+                        provenance="IntentumDiff 1.0.0",
                     ),
                     LanguagePluginInfo(
                         language_id="python",
@@ -164,7 +164,7 @@ def _free_port() -> int:
 @pytest.fixture
 def playground_server() -> Iterator[tuple[str, _BrowserDiffer]]:
     _, uvicorn, _ = _load_browser_deps()
-    from intentdiff.serve import create_app
+    from intentumdiff.serve import create_app
 
     differ = _BrowserDiffer()
     app = create_app(differ=differ)
@@ -230,7 +230,7 @@ def test_playground_csp_and_api_integration(playground_server: tuple[str, _Brows
         expect(page.locator("#old-wrap textarea")).to_have_value("old alt")
         expect(page.locator("#new-wrap textarea")).to_have_value("new alt")
 
-        stored = page.evaluate("localStorage.getItem('intentdiff.preferredPlugins.v1')")
+        stored = page.evaluate("localStorage.getItem('intentumdiff.preferredPlugins.v1')")
         assert json.loads(stored) == {"python": ALT_PLUGIN_ID}
         assert ("python", ALT_PLUGIN_ID) in differ.examples
 

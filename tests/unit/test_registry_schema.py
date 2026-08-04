@@ -6,15 +6,15 @@ import json
 import re as _re
 from pathlib import Path
 
-from intentdiff.plugins.hub import RegistryEntry, parse_registry_manifest
-from intentdiff.plugins.registry_schema import (
+from intentumdiff.plugins.hub import RegistryEntry, parse_registry_manifest
+from intentumdiff.plugins.registry_schema import (
     HOST_CONTRACT_VERSION,
     abi_compatible,
     load_schema,
     render_catalog_markdown,
     validate_registry,
 )
-from intentdiff.plugins.registry_schema import (
+from intentumdiff.plugins.registry_schema import (
     main as _registry_cli,
 )
 
@@ -31,7 +31,7 @@ def _valid_registry() -> dict:
                 "description": "dbt SQL + schema semantics",
                 "trust_tier": "official",
                 "wasm_checksums": {"dbt_sql_parser.wasm": _SHA},
-                "capabilities": ["intentdiff:plugin/parser"],
+                "capabilities": ["intentumdiff:plugin/parser"],
                 "abi_target": "1.0.0",
                 "provenance_manifest_ref": "wasm_provenance.json",
             },
@@ -39,12 +39,12 @@ def _valid_registry() -> dict:
                 "source": "git",
                 "ref": "v0.2.0",
                 "wasm_checksums": {"terraform_parser.wasm": _SHA},
-                "dep_hashes": {"intentdiff-terraform==0.2.0": f"sha256:{_SHA}"},
+                "dep_hashes": {"intentumdiff-terraform==0.2.0": f"sha256:{_SHA}"},
                 "allowed_dependencies": ["some-reviewed-dep"],
             },
             "community-thing": {
                 "source": "git",
-                "repo": "https://github.com/someone/intentdiff-community-thing",
+                "repo": "https://github.com/someone/intentumdiff-community-thing",
                 "trust_tier": "community",
             },
         },
@@ -105,7 +105,7 @@ def test_bad_checksum_and_dep_hash_shapes_are_rejected() -> None:
     reg["plugins"]["dbt"]["wasm_checksums"]["dbt_sql_parser.wasm"] = "NOTAHASH"
     reg["plugins"]["dbt"]["wasm_checksums"]["not-a-wasm.txt"] = _SHA
     reg["plugins"]["terraform"]["dep_hashes"]["bad key"] = f"sha256:{_SHA}"
-    reg["plugins"]["terraform"]["dep_hashes"]["intentdiff-terraform==0.2.0"] = "md5:xyz"
+    reg["plugins"]["terraform"]["dep_hashes"]["intentumdiff-terraform==0.2.0"] = "md5:xyz"
     errors = validate_registry(reg)
     assert any("not a lowercase SHA-256" in e for e in errors)
     assert any("not a .wasm filename" in e for e in errors)
@@ -123,10 +123,10 @@ def test_invalid_plugin_name_is_rejected() -> None:
 def test_schema_ships_in_the_package() -> None:
     # The schema is package data (like invariances/rules.schema.json), so downstream
     # consumers and the vetting CI can load it from the installed wheel.
-    plugins_dir = Path(__file__).resolve().parents[2] / "src" / "intentdiff" / "plugins"
+    plugins_dir = Path(__file__).resolve().parents[2] / "src" / "intentumdiff" / "plugins"
     pkg_schema = plugins_dir / "registry.schema.json"
     assert pkg_schema.is_file()
-    assert json.loads(pkg_schema.read_text(encoding="utf-8"))["title"].startswith("IntentDiff")
+    assert json.loads(pkg_schema.read_text(encoding="utf-8"))["title"].startswith("IntentumDiff")
 
 
 # --- CLI (the #95 vetting entry point) ----------------------------------------------------
@@ -164,13 +164,13 @@ def test_cli_reports_unreadable_manifest(tmp_path: Path, capsys) -> None:
 
 
 def test_host_contract_version_matches_the_wit() -> None:
-    """Drift guard: HOST_CONTRACT_VERSION must equal `package intentdiff:plugin@X` in the WIT,
+    """Drift guard: HOST_CONTRACT_VERSION must equal `package intentumdiff:plugin@X` in the WIT,
     so a contract bump forces a conscious host bump (#94)."""
     wit = (
         Path(__file__).resolve().parents[2]
-        / "src" / "intentdiff" / "plugins" / "wit" / "plugin.wit"
+        / "src" / "intentumdiff" / "plugins" / "wit" / "plugin.wit"
     ).read_text(encoding="utf-8")
-    match = _re.search(r"package\s+intentdiff:plugin@([0-9]+\.[0-9]+\.[0-9]+)", wit)
+    match = _re.search(r"package\s+intentumdiff:plugin@([0-9]+\.[0-9]+\.[0-9]+)", wit)
     assert match is not None, "could not find the plugin-contract package version in the WIT"
     assert match.group(1) == HOST_CONTRACT_VERSION
 
@@ -272,7 +272,7 @@ def test_fetch_official_registry_parses_trust_tier() -> None:
 
 def test_render_catalog_groups_official_and_community() -> None:
     md = render_catalog_markdown(_valid_registry())
-    assert md.startswith("# IntentDiff plugin catalog")
+    assert md.startswith("# IntentumDiff plugin catalog")
     # dbt has org source + checksums -> official; terraform has checksums + git (no repo) ->
     # official; community-thing has a custom repo -> community.
     assert "## Official (2)" in md
@@ -281,7 +281,7 @@ def test_render_catalog_groups_official_and_community() -> None:
     assert "### dbt" in md
     assert "dbt SQL + schema semantics" in md
     assert "**ABI target**: `1.0.0`" in md
-    assert "intentdiff plugins add intentdiff-dbt==0.3.1" in md
+    assert "intentumdiff plugins add intentumdiff-dbt==0.3.1" in md
     assert "### community-thing" in md
 
 
@@ -291,14 +291,14 @@ def test_render_catalog_handles_empty_and_missing_fields() -> None:
     # An entry with only a name still renders an install line.
     md2 = render_catalog_markdown({"version": 1, "plugins": {"bare": {}}})
     assert "### bare" in md2
-    assert "intentdiff plugins add bare" in md2
+    assert "intentumdiff plugins add bare" in md2
 
 
 def test_cli_catalog_flag_emits_markdown(tmp_path: Path, capsys) -> None:
     path = _write_yaml(tmp_path, _valid_registry())
     assert _registry_cli([str(path), "--catalog"]) == 0
     out = capsys.readouterr().out
-    assert out.startswith("# IntentDiff plugin catalog")
+    assert out.startswith("# IntentumDiff plugin catalog")
     assert "## Official" in out
 
 

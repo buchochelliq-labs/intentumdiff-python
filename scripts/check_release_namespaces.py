@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Check public namespace/listing availability before the IntentDiff release.
+Check public namespace/listing availability before the IntentumDiff release.
 
 This helper performs unauthenticated public checks only. It cannot reserve a
 name, prove account ownership, or replace the manual Marketplace/Open VSX/PyPI
@@ -18,9 +18,9 @@ from dataclasses import asdict, dataclass
 from typing import Callable, Iterable
 
 
-DEFAULT_PRODUCT_NAME = "intentdiff"
+DEFAULT_PRODUCT_NAME = "intentumdiff"
 DEFAULT_OWNER_NAMESPACE = "buchochelliq-labs"
-DEFAULT_PLUGIN_REPO = "intentdiff-registry"
+DEFAULT_PLUGIN_REPO = "intentumdiff-registry"
 DEFAULT_TIMEOUT_SECONDS = 10.0
 
 
@@ -112,7 +112,7 @@ def http_status(url: str, timeout: float) -> int:
         raise ValueError(f"namespace probes must use https URLs: {url}")
     request = urllib.request.Request(  # noqa: S310
         url,
-        headers={"User-Agent": "IntentDiff release namespace check"},
+        headers={"User-Agent": "IntentumDiff release namespace check"},
     )
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310

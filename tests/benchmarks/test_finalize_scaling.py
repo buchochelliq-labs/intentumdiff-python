@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import time
 
-from intentdiff import SemanticDiffer
+from intentumdiff import SemanticDiffer
 
 
 def _program(functions: int, modify_every: int = 0) -> str:

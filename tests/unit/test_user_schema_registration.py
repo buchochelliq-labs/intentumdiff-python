@@ -13,9 +13,9 @@ from pathlib import Path
 
 import pytest
 
-from intentdiff import SemanticDiffer
-from intentdiff.analysis.schema_resolver import resolve_schema
-from intentdiff.analysis.user_schemas import (
+from intentumdiff import SemanticDiffer
+from intentumdiff.analysis.schema_resolver import resolve_schema
+from intentumdiff.analysis.user_schemas import (
     load_user_schema_profiles,
     match_user_profile,
 )
@@ -55,8 +55,8 @@ def _register(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, text: str) -> Pat
     registry.mkdir(exist_ok=True)
     descriptor = registry / "acme.yml"
     descriptor.write_text(text, encoding="utf-8")
-    monkeypatch.setenv("INTENTDIFF_USER_SCHEMA_DIR", str(registry))
-    monkeypatch.setenv("INTENTDIFF_SCHEMA_FETCH", "off")
+    monkeypatch.setenv("INTENTUMDIFF_USER_SCHEMA_DIR", str(registry))
+    monkeypatch.setenv("INTENTUMDIFF_SCHEMA_FETCH", "off")
     return descriptor
 
 
@@ -87,8 +87,8 @@ def test_without_registration_the_same_edit_is_reorder_churn(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The behavioral contrast that proves registration changed matching."""
-    monkeypatch.setenv("INTENTDIFF_USER_SCHEMAS", "off")
-    monkeypatch.setenv("INTENTDIFF_SCHEMA_FETCH", "off")
+    monkeypatch.setenv("INTENTUMDIFF_USER_SCHEMAS", "off")
+    monkeypatch.setenv("INTENTUMDIFF_SCHEMA_FETCH", "off")
 
     diff = SemanticDiffer().diff_strings(
         _OLD, _NEW, filename="service.acme.json", language_hint="json"
@@ -130,8 +130,8 @@ schema: ./acme.schema.json
         encoding="utf-8",
     )
     env = {
-        "INTENTDIFF_USER_SCHEMA_DIR": str(registry),
-        "INTENTDIFF_SCHEMA_FETCH": "on",
+        "INTENTUMDIFF_USER_SCHEMA_DIR": str(registry),
+        "INTENTUMDIFF_SCHEMA_FETCH": "on",
     }
 
     resolution = resolve_schema(
@@ -166,8 +166,8 @@ identity_fields: [service_name]
         encoding="utf-8",
     )
     env = {
-        "INTENTDIFF_USER_SCHEMA_DIR": str(registry),
-        "INTENTDIFF_SCHEMA_FETCH": "on",
+        "INTENTUMDIFF_USER_SCHEMA_DIR": str(registry),
+        "INTENTUMDIFF_SCHEMA_FETCH": "on",
     }
     content = json.dumps(
         {"$schema": "https://schemas.internal.example/service.json", "services": []}
@@ -194,7 +194,7 @@ def test_malformed_descriptor_fails_closed(tmp_path: Path) -> None:
         "match:\n  filename_patterns: ['*.json']\nidentity_fields: [name]\n",
         encoding="utf-8",
     )
-    env = {"INTENTDIFF_USER_SCHEMA_DIR": str(registry)}
+    env = {"INTENTUMDIFF_USER_SCHEMA_DIR": str(registry)}
 
     profiles, errors = load_user_schema_profiles(env)
 
@@ -215,7 +215,7 @@ identity_fields: [name]
 """,
         encoding="utf-8",
     )
-    env = {"INTENTDIFF_USER_SCHEMA_DIR": str(registry)}
+    env = {"INTENTUMDIFF_USER_SCHEMA_DIR": str(registry)}
 
     profiles, errors = load_user_schema_profiles(env)
 
@@ -239,7 +239,7 @@ match: {}
 """,
         encoding="utf-8",
     )
-    env = {"INTENTDIFF_USER_SCHEMA_DIR": str(registry)}
+    env = {"INTENTUMDIFF_USER_SCHEMA_DIR": str(registry)}
 
     profiles, errors = load_user_schema_profiles(env)
 
@@ -264,7 +264,7 @@ identity_fields: [name]
 """,
         encoding="utf-8",
     )
-    env = {"INTENTDIFF_USER_SCHEMA_DIR": str(registry)}
+    env = {"INTENTUMDIFF_USER_SCHEMA_DIR": str(registry)}
     profiles, errors = load_user_schema_profiles(env)
     assert errors == ()
 
@@ -351,19 +351,19 @@ def test_dialect_key_changes_matching_for_identity_edits(
     forbids pairing books across identities. (On small reorder fixtures the
     generic #57 tier happens to converge with the dialect result, so THIS is
     the discriminating contract, not reorder compaction.)"""
-    from intentdiff.rust_core import try_register_user_xml_dialects
+    from intentumdiff.rust_core import try_register_user_xml_dialects
 
     old = _catalog(_BOOK.format(i="978-0", p="10.99"))
     new = _catalog(_BOOK.format(i="978-9", p="10.99"))
 
-    monkeypatch.setenv("INTENTDIFF_USER_SCHEMAS", "off")
-    monkeypatch.setenv("INTENTDIFF_SCHEMA_FETCH", "off")
+    monkeypatch.setenv("INTENTUMDIFF_USER_SCHEMAS", "off")
+    monkeypatch.setenv("INTENTUMDIFF_SCHEMA_FETCH", "off")
     try_register_user_xml_dialects([])  # clear the process-level registry
     unregistered = SemanticDiffer().diff_strings(
         old, new, filename="shop.catalog.xml", language_hint="xml"
     )
 
-    monkeypatch.setenv("INTENTDIFF_USER_SCHEMAS", "1")
+    monkeypatch.setenv("INTENTUMDIFF_USER_SCHEMAS", "1")
     _register(tmp_path, monkeypatch, _CATALOG_DESCRIPTOR)
     registered = SemanticDiffer().diff_strings(
         old, new, filename="shop.catalog.xml", language_hint="xml"
@@ -390,7 +390,7 @@ keyed_elements:
 """,
         encoding="utf-8",
     )
-    env = {"INTENTDIFF_USER_SCHEMA_DIR": str(registry)}
+    env = {"INTENTUMDIFF_USER_SCHEMA_DIR": str(registry)}
 
     profiles, errors = load_user_schema_profiles(env)
 

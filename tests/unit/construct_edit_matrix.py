@@ -29,7 +29,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from intentdiff import SemanticDiffer
+from intentumdiff import SemanticDiffer
 
 _ENTITY_HINTS = (
     "function",

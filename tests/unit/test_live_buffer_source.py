@@ -14,44 +14,44 @@ import pytest
 
 class TestPathValidation:
     def test_absolute_path_rejected(self) -> None:
-        from intentdiff.sources.live_buffer_source import LiveBufferSource
+        from intentumdiff.sources.live_buffer_source import LiveBufferSource
 
         with pytest.raises(ValueError, match="Unsafe"):
             LiveBufferSource("/repo", "/etc/passwd", "content")
 
     def test_parent_traversal_rejected(self) -> None:
-        from intentdiff.sources.live_buffer_source import LiveBufferSource
+        from intentumdiff.sources.live_buffer_source import LiveBufferSource
 
         with pytest.raises(ValueError, match="Unsafe"):
             LiveBufferSource("/repo", "../secret.py", "content")
 
     def test_nested_traversal_rejected(self) -> None:
-        from intentdiff.sources.live_buffer_source import LiveBufferSource
+        from intentumdiff.sources.live_buffer_source import LiveBufferSource
 
         with pytest.raises(ValueError, match="Unsafe"):
             LiveBufferSource("/repo", "src/../../../etc/passwd", "content")
 
     def test_windows_traversal_rejected(self) -> None:
-        from intentdiff.sources.live_buffer_source import LiveBufferSource
+        from intentumdiff.sources.live_buffer_source import LiveBufferSource
 
         with pytest.raises(ValueError, match="Unsafe"):
             LiveBufferSource("/repo", r"src\..\secret.py", "content")
 
     def test_windows_drive_path_rejected(self) -> None:
-        from intentdiff.sources.live_buffer_source import LiveBufferSource
+        from intentumdiff.sources.live_buffer_source import LiveBufferSource
 
         with pytest.raises(ValueError, match="Unsafe"):
             LiveBufferSource("/repo", "C:/Windows/win.ini", "content")
 
     def test_valid_relative_path_accepted(self) -> None:
         """Should not raise for a normal relative path."""
-        from intentdiff.sources.live_buffer_source import LiveBufferSource
+        from intentumdiff.sources.live_buffer_source import LiveBufferSource
 
         src = LiveBufferSource("/repo", "src/main.py", "content")
         assert src._file_path == "src/main.py"
 
     def test_nested_relative_path_accepted(self) -> None:
-        from intentdiff.sources.live_buffer_source import LiveBufferSource
+        from intentumdiff.sources.live_buffer_source import LiveBufferSource
 
         src = LiveBufferSource("/repo", "a/b/c.py", "x=1")
         assert src._file_path == "a/b/c.py"
@@ -64,18 +64,18 @@ class TestPathValidation:
 
 class TestGetContent:
     def _source(self, file_path: str, live_content: str, committed: str, **kw):
-        from intentdiff.sources.live_buffer_source import LiveBufferSource
+        from intentumdiff.sources.live_buffer_source import LiveBufferSource
 
         src = LiveBufferSource("/repo", file_path, live_content, **kw)
         # _read_committed shells to git (#98); mock the git_cli helpers so the
         # committed side returns our content.
         with (
             patch(
-                "intentdiff.sources.live_buffer_source.resolve_repo_root",
+                "intentumdiff.sources.live_buffer_source.resolve_repo_root",
                 return_value="/repo",
             ),
             patch(
-                "intentdiff.sources.live_buffer_source.run_git_bytes",
+                "intentumdiff.sources.live_buffer_source.run_git_bytes",
                 return_value=committed.encode("utf-8"),
             ),
         ):
@@ -106,29 +106,29 @@ class TestGetContent:
         assert hint == "python"
 
     def test_ref_default_is_head(self) -> None:
-        from intentdiff.sources.live_buffer_source import LiveBufferSource
+        from intentumdiff.sources.live_buffer_source import LiveBufferSource
 
         src = LiveBufferSource("/repo", "foo.py", "content")
         assert src._ref == "HEAD"
 
     def test_custom_ref(self) -> None:
-        from intentdiff.sources.live_buffer_source import LiveBufferSource
+        from intentumdiff.sources.live_buffer_source import LiveBufferSource
 
         src = LiveBufferSource("/repo", "foo.py", "content", ref="main")
         assert src._ref == "main"
 
     def test_untracked_file_returns_empty_old(self) -> None:
         """When the file isn't in the git tree, old content is '' (empty string)."""
-        from intentdiff.sources.live_buffer_source import LiveBufferSource
+        from intentumdiff.sources.live_buffer_source import LiveBufferSource
 
         src = LiveBufferSource("/repo", "new_file.py", "new_content")
         with (
             patch(
-                "intentdiff.sources.live_buffer_source.resolve_repo_root",
+                "intentumdiff.sources.live_buffer_source.resolve_repo_root",
                 return_value="/repo",
             ),
             patch(
-                "intentdiff.sources.live_buffer_source.run_git_bytes",
+                "intentumdiff.sources.live_buffer_source.run_git_bytes",
                 side_effect=subprocess.CalledProcessError(1, "git"),
             ),
         ):
@@ -144,8 +144,8 @@ class TestGetContent:
 
 class TestEditDeltas:
     def test_edit_deltas_stored(self) -> None:
-        from intentdiff.core.models import EditDelta
-        from intentdiff.sources.live_buffer_source import LiveBufferSource
+        from intentumdiff.core.models import EditDelta
+        from intentumdiff.sources.live_buffer_source import LiveBufferSource
 
         deltas = [
             EditDelta(
@@ -161,7 +161,7 @@ class TestEditDeltas:
         assert src.edit_deltas == deltas
 
     def test_no_deltas_by_default(self) -> None:
-        from intentdiff.sources.live_buffer_source import LiveBufferSource
+        from intentumdiff.sources.live_buffer_source import LiveBufferSource
 
         src = LiveBufferSource("/repo", "foo.py", "content")
         assert src.edit_deltas is None

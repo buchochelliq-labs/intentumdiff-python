@@ -10,8 +10,8 @@ from typing import Any
 
 import pytest
 
-from intentdiff import SemanticDiffer
-from intentdiff.core.models import SemanticDiff
+from intentumdiff import SemanticDiffer
+from intentumdiff.core.models import SemanticDiff
 from tests.unit.diff_sanity import assert_no_identical_positioned_source_modifications
 
 _FIXTURE_PATH = (
@@ -88,7 +88,7 @@ def test_competitive_registry_has_required_report_sections(
 
     assert fixture_data["semanticdiff"]["strengths"]
     assert fixture_data["semanticdiff"]["weaknesses_to_exploit"]
-    assert fixture_data["separate_viewer_backlog"]["id"] == "custom-intentdiff-diff-viewer"
+    assert fixture_data["separate_viewer_backlog"]["id"] == "custom-intentumdiff-diff-viewer"
     assert "changed-only view" in fixture_data["separate_viewer_backlog"]["items"]
     assert fixture_data["prioritized_backlog"]
     assert fixture_data["vscode_comparison_smoke"]["manual_or_extension_harness_targets"]
@@ -147,14 +147,14 @@ def test_runtime_language_coverage_matrix_is_reportable(
         language: (
             "supported_by_both"
             if language in semanticdiff_languages
-            else "intentdiff_only"
+            else "intentumdiff_only"
         )
         for language in sorted(runtime_languages)
     }
     report = {
         "runtime_language_count": len(runtime_languages),
         "scenario_language_count": len(scenario_languages),
-        "intentdiff_only_count": sum(1 for value in matrix.values() if value == "intentdiff_only"),
+        "intentumdiff_only_count": sum(1 for value in matrix.values() if value == "intentumdiff_only"),
         "semanticdiff_overlap_count": sum(
             1 for value in matrix.values() if value == "supported_by_both"
         ),
@@ -164,11 +164,11 @@ def test_runtime_language_coverage_matrix_is_reportable(
     _write_optional_report({"language_coverage": report})
 
     assert scenario_languages <= runtime_languages
-    assert report["intentdiff_only_count"] > 0
+    assert report["intentumdiff_only_count"] > 0
     assert "databricks-workflow" in matrix
-    assert matrix["databricks-workflow"] == "intentdiff_only"
+    assert matrix["databricks-workflow"] == "intentumdiff_only"
     assert "hcl" in matrix
-    assert matrix["hcl"] == "intentdiff_only"
+    assert matrix["hcl"] == "intentumdiff_only"
 
 
 def test_competitive_synthetic_fixture_diff_contract(
@@ -272,7 +272,7 @@ def _format_diff_failure(scenario: dict[str, Any], diff: SemanticDiff) -> str:
 
 
 def _write_optional_report(report: dict[str, Any]) -> None:
-    target = os.environ.get("INTENTDIFF_SEMANTICDIFF_COMPETITIVE_REPORT")
+    target = os.environ.get("INTENTUMDIFF_SEMANTICDIFF_COMPETITIVE_REPORT")
     if not target:
         return
     path = Path(target)

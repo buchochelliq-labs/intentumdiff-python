@@ -23,7 +23,7 @@ if str(SRC_ROOT) not in sys.path:
 # ── #82 split guard ─────────────────────────────────────────────────────────
 # The split python repo does not carry the monorepo's release/CI tooling under
 # scripts/ (some of it travels to other split repos, e.g. the media validator to
-# intentdiff-vscode). Ignore each tooling test when its script module is absent;
+# intentumdiff-vscode). Ignore each tooling test when its script module is absent;
 # in the monorepo every script exists, so nothing is ever ignored here.
 _SCRIPT_TESTS = {
     "unit/test_github_action.py": "github_action.py",
@@ -52,12 +52,12 @@ collect_ignore += [
 ]
 
 # ---------------------------------------------------------------------------
-# Set INTENTDIFF_ALLOW_VULNERABLE_WASMTIME=1 at import time so benchmark modules
+# Set INTENTUMDIFF_ALLOW_VULNERABLE_WASMTIME=1 at import time so benchmark modules
 # that run availability probes during collection keep working in unsynced
 # local environments. The normal lockfile path uses wasmtime>=45.0.
 # The session fixture below restores the original value after the run.
 # ---------------------------------------------------------------------------
-os.environ.setdefault("INTENTDIFF_ALLOW_VULNERABLE_WASMTIME", "1")
+os.environ.setdefault("INTENTUMDIFF_ALLOW_VULNERABLE_WASMTIME", "1")
 
 _GIT_REPO_REFS: list[weakref.ReferenceType[Any]] = []
 _ORIGINAL_GIT_REPO_INIT: Any = None
@@ -152,16 +152,16 @@ def _clear_tracked_git_repos() -> None:
 def _allow_vulnerable_wasmtime_in_tests():
     """Keep non-policy plugin tests runnable in stale local environments."""
     _install_git_repo_tracker()
-    prev = os.environ.get("INTENTDIFF_ALLOW_VULNERABLE_WASMTIME")
-    os.environ["INTENTDIFF_ALLOW_VULNERABLE_WASMTIME"] = "1"
+    prev = os.environ.get("INTENTUMDIFF_ALLOW_VULNERABLE_WASMTIME")
+    os.environ["INTENTUMDIFF_ALLOW_VULNERABLE_WASMTIME"] = "1"
     yield
     _clear_tracked_git_repos()
     _restore_git_repo_tracker()
     gc.collect()
     if prev is None:
-        os.environ.pop("INTENTDIFF_ALLOW_VULNERABLE_WASMTIME", None)
+        os.environ.pop("INTENTUMDIFF_ALLOW_VULNERABLE_WASMTIME", None)
     else:
-        os.environ["INTENTDIFF_ALLOW_VULNERABLE_WASMTIME"] = prev
+        os.environ["INTENTUMDIFF_ALLOW_VULNERABLE_WASMTIME"] = prev
 
 
 # ---------------------------------------------------------------------------
@@ -246,7 +246,7 @@ def sql_new_column_add() -> str:
 
 @pytest.fixture
 def make_node():
-    from intentdiff.core.models import NodePosition, SemanticNode
+    from intentumdiff.core.models import NodePosition, SemanticNode
 
     def _make(
         node_type: str = "identifier",

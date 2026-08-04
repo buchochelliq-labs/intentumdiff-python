@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from intentdiff import SemanticDiffer
-from intentdiff.core.models import Change, ChangeType, SemanticDiff, SemanticNode
+from intentumdiff import SemanticDiffer
+from intentumdiff.core.models import Change, ChangeType, SemanticDiff, SemanticNode
 
 _FILENAMES = {
     "asm": "code.asm",

@@ -6,8 +6,8 @@ import re
 import tomllib
 from pathlib import Path
 
-from intentdiff.plugins.adapter import ParserAdapter
-from intentdiff.plugins.loader import _language_info_record_to_dict
+from intentumdiff.plugins.adapter import ParserAdapter
+from intentumdiff.plugins.loader import _language_info_record_to_dict
 import pytest
 
 pytestmark = pytest.mark.skipif(
@@ -19,7 +19,7 @@ pytestmark = pytest.mark.skipif(
 ROOT = Path(__file__).resolve().parents[2]
 PARSER_LIBS = [
     path
-    for base in (ROOT / "crates", ROOT / "plugins" / "intentdiff_dbt" / "crates")
+    for base in (ROOT / "crates", ROOT / "plugins" / "intentumdiff_dbt" / "crates")
     for path in base.glob("*/src/lib.rs")
     if re.search(
         r"fn\s+language_info\(\)\s*->\s*Vec<LanguageInfoRecord>",
@@ -86,10 +86,10 @@ def _adapter_for(
             language_info=language_info,
         )
     )
-    adapter.plugin_id = "intentdiff:python:python"
+    adapter.plugin_id = "intentumdiff:python:python"
     adapter.package_version = "1.2.3"
     adapter.author = "Package Author"
-    adapter.provenance = "IntentDiff 1.2.3"
+    adapter.provenance = "IntentumDiff 1.2.3"
     return adapter
 
 
@@ -107,17 +107,17 @@ def test_parser_crates_bundle_metadata_for_every_language_id():
         assert "last_updated = 2026-05-19" in metadata
 
 
-def test_cli_entry_points_include_intentdiff_name():
+def test_cli_entry_points_include_intentumdiff_name():
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     scripts = pyproject["project"]["scripts"]
 
-    assert scripts["intentdiff"] == "intentdiff.cli:main"
-    assert set(scripts) == {"intentdiff"}
+    assert scripts["intentumdiff"] == "intentumdiff.cli:main"
+    assert set(scripts) == {"intentumdiff"}
 
 
 def test_parser_language_info_no_longer_hardcodes_display_metadata():
     forbidden = (
-        'author: "IntentDiff"',
+        'author: "IntentumDiff"',
         'plugin_version: "0.1.0"',
         'last_updated: "2026-05-19"',
         "fn display_language_name(",
@@ -213,7 +213,7 @@ def test_language_info_legacy_export_failure_uses_fallback_metadata():
     assert info.language_name == "Python"
     assert info.monaco_language == "python"
     assert info.default_filename == "code.py"
-    assert info.plugin_id == "intentdiff:python:python"
+    assert info.plugin_id == "intentumdiff:python:python"
 
 
 def test_language_info_record_conversion_reads_wit_hyphenated_attributes():
@@ -227,7 +227,7 @@ def test_language_info_record_conversion_reads_wit_hyphenated_attributes():
     setattr(record, "monaco-language", "plaintext")
     setattr(record, "default-filename", "query.m")
     setattr(record, "language-file-extensions", [".m"])
-    setattr(record, "author", "IntentDiff")
+    setattr(record, "author", "IntentumDiff")
     setattr(record, "plugin-version", "0.1.0")
     setattr(record, "last-updated", "2026-05-19")
 
@@ -240,7 +240,7 @@ def test_language_info_record_conversion_reads_wit_hyphenated_attributes():
         "monaco_language": "plaintext",
         "default_filename": "query.m",
         "language_file_extensions": [".m"],
-        "author": "IntentDiff",
+        "author": "IntentumDiff",
         "plugin_version": "0.1.0",
         "last_updated": "2026-05-19",
     }

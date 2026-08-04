@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import pytest
 
-from intentdiff import SemanticDiffer
-from intentdiff.core.models import ChangeType
+from intentumdiff import SemanticDiffer
+from intentumdiff.core.models import ChangeType
 
 
 @pytest.fixture(scope="module")
@@ -41,13 +41,13 @@ def test_added_pattern_is_one_clean_change_with_no_noise_group(differ: SemanticD
     diff = _diff(
         differ,
         "# Build output\n/target\nnode_modules/\n",
-        "# Build output\n/target\nnode_modules/\n/.intentdiff\n",
+        "# Build output\n/target\nnode_modules/\n/.intentumdiff\n",
     )
     assert [c.change_type for c in diff.changes] == [ChangeType.ADDITION]
     added = diff.changes[0].new_node
     assert added is not None
     assert added.node_type == "pattern"
-    assert added.label == "/.intentdiff"
+    assert added.label == "/.intentumdiff"
     # The whole point of the parser: no generic-text token-churn suppression group.
     assert not any(
         group.rule_id == "presentation.generic_text_diff" for group in diff.change_groups
@@ -80,8 +80,8 @@ def test_negation_is_distinct_from_a_plain_pattern(differ: SemanticDiffer) -> No
 def test_engine_emits_human_intent_descriptions(differ: SemanticDiffer) -> None:
     # The engine (Rust finalize path) owns the intent wording so every frontend — review
     # tree, CodeLens, CLI, release notes — reads it from Change.description (issue #58).
-    add = _diff(differ, "/target\n", "/target\n/.intentdiff\n").changes[0]
-    assert add.description == "Adds an ignore rule for /.intentdiff"
+    add = _diff(differ, "/target\n", "/target\n/.intentumdiff\n").changes[0]
+    assert add.description == "Adds an ignore rule for /.intentumdiff"
 
     remove = _diff(differ, "/target\n*.log\n", "/target\n").changes[0]
     assert remove.description == "Stops ignoring *.log"

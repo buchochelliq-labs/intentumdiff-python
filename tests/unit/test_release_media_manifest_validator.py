@@ -57,7 +57,7 @@ def write_manifest_with_status(path: Path, screenshot_path: Path, status: str) -
 
 
 def test_release_media_validator_accepts_bom_and_partial_smoke_manifest(tmp_path: Path) -> None:
-    screenshot = tmp_path / "intentdiff-vscode-review-smoke.png"
+    screenshot = tmp_path / "intentumdiff-vscode-review-smoke.png"
     manifest = tmp_path / "manifest.json"
     write_minimal_png(screenshot)
     write_manifest(manifest, screenshot)
@@ -66,7 +66,7 @@ def test_release_media_validator_accepts_bom_and_partial_smoke_manifest(tmp_path
 
 
 def test_release_media_validator_stays_strict_by_default_for_missing_surfaces(tmp_path: Path) -> None:
-    screenshot = tmp_path / "intentdiff-vscode-review-smoke.png"
+    screenshot = tmp_path / "intentumdiff-vscode-review-smoke.png"
     manifest = tmp_path / "manifest.json"
     write_minimal_png(screenshot)
     write_manifest(manifest, screenshot)
@@ -76,7 +76,7 @@ def test_release_media_validator_stays_strict_by_default_for_missing_surfaces(tm
 
 
 def test_release_media_validator_requires_required_surfaces_to_be_approved(tmp_path: Path) -> None:
-    screenshot = tmp_path / "intentdiff-vscode-review-smoke.png"
+    screenshot = tmp_path / "intentumdiff-vscode-review-smoke.png"
     manifest = tmp_path / "manifest.json"
     write_minimal_png(screenshot)
     write_manifest_with_status(manifest, screenshot, "needs_polish")

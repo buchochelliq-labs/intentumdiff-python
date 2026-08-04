@@ -8,8 +8,8 @@ from typing import Any
 
 import pytest
 
-from intentdiff import SemanticDiffer
-from intentdiff.core.models import SemanticDiff
+from intentumdiff import SemanticDiffer
+from intentumdiff.core.models import SemanticDiff
 from tests.unit.diff_sanity import assert_no_identical_positioned_source_modifications
 
 pytestmark = pytest.mark.integration
@@ -160,7 +160,7 @@ def _baseline_issues(value: Any) -> list[str]:
 
 
 def _write_optional_report(report: dict[str, Any]) -> None:
-    target = os.environ.get("INTENTDIFF_LANGUAGE_SMOKE_REPORT")
+    target = os.environ.get("INTENTUMDIFF_LANGUAGE_SMOKE_REPORT")
     if not target:
         return
     path = Path(target)

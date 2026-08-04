@@ -8,9 +8,9 @@ no git repo is needed (the same detection ``CommitDiffer`` uses).
 
 from __future__ import annotations
 
-from intentdiff.analysis.cross_file import detect_cross_file_changes
-from intentdiff.core.index import SemanticIndex
-from intentdiff.core.models import ChangeType, CrossFileChange, NodePosition, SemanticNode
+from intentumdiff.analysis.cross_file import detect_cross_file_changes
+from intentumdiff.core.index import SemanticIndex
+from intentumdiff.core.models import ChangeType, CrossFileChange, NodePosition, SemanticNode
 
 
 def _pos() -> NodePosition:

@@ -2,9 +2,9 @@
 tests/unit/test_diffignore.py
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tests for :mod:`intentdiff.core.diffignore` — the ``.diffignore``
+Tests for :mod:`intentumdiff.core.diffignore` — the ``.diffignore``
 file loading and path-matching logic — plus integration tests that verify
-:class:`~intentdiff.core.indexer.Indexer` respects the ignore file.
+:class:`~intentumdiff.core.indexer.Indexer` respects the ignore file.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from intentdiff.core.diffignore import DIFFIGNORE_FILENAME, DiffIgnore, load_diffignore
+from intentumdiff.core.diffignore import DIFFIGNORE_FILENAME, DiffIgnore, load_diffignore
 
 
 # ---------------------------------------------------------------------------
@@ -32,8 +32,8 @@ def _make_diffignore(patterns: str) -> DiffIgnore:
 
 def _make_stub_differ():
     """Minimal SemanticDiffer stub that parses .py files and skips everything else."""
-    from intentdiff.core.models import NodePosition, SemanticNode
-    from intentdiff.plugins.exceptions import PluginNotFoundError
+    from intentumdiff.core.models import NodePosition, SemanticNode
+    from intentumdiff.plugins.exceptions import PluginNotFoundError
 
     stub_node = SemanticNode(
         id="n1",
@@ -162,7 +162,7 @@ class TestDiffIgnorePatterns:
 
 class TestIndexerDiffignoreIntegration:
     def test_ignored_file_is_not_indexed(self, tmp_path: Path) -> None:
-        from intentdiff.core.indexer import Indexer
+        from intentumdiff.core.indexer import Indexer
 
         (tmp_path / "main.py").write_text("x = 1")
         (tmp_path / "generated.py").write_text("y = 2")
@@ -176,7 +176,7 @@ class TestIndexerDiffignoreIntegration:
         assert result.files_indexed == 1  # only main.py
 
     def test_directory_pattern_excludes_subtree(self, tmp_path: Path) -> None:
-        from intentdiff.core.indexer import Indexer
+        from intentumdiff.core.indexer import Indexer
 
         (tmp_path / "src").mkdir()
         (tmp_path / "src" / "main.py").write_text("x = 1")
@@ -194,7 +194,7 @@ class TestIndexerDiffignoreIntegration:
         assert all("generated/" in p for p in result.ignored_files)
 
     def test_no_diffignore_file_leaves_result_unchanged(self, tmp_path: Path) -> None:
-        from intentdiff.core.indexer import Indexer
+        from intentumdiff.core.indexer import Indexer
 
         (tmp_path / "a.py").write_text("x = 1")
         (tmp_path / "b.py").write_text("y = 2")
@@ -208,7 +208,7 @@ class TestIndexerDiffignoreIntegration:
         assert result.files_indexed == 2
 
     def test_ignored_count_in_result_fields(self, tmp_path: Path) -> None:
-        from intentdiff.core.indexer import Indexer
+        from intentumdiff.core.indexer import Indexer
 
         for name in ("a.py", "b.py", "c.py"):
             (tmp_path / name).write_text("pass")

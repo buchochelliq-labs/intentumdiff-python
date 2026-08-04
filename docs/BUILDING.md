@@ -1,4 +1,4 @@
-# Building intentdiff (Python) from source
+# Building intentumdiff (Python) from source
 
 Toolchains: **Python 3.12**, **Rust 1.93.0** (the wheel build compiles the engine).
 
@@ -8,12 +8,12 @@ The engine and the parser components are separate repos' artifacts:
 
 ```bash
 python scripts/provision_build_inputs.py \
-    --core-dir /path/to/intentdiff-core \      # or omit to clone the repo
+    --core-dir /path/to/intentumdiff-core \      # or omit to clone the repo
     --wasm-dir /path/to/built/components       # parser .wasm set to bundle
 ```
 
-This stages `build/intentdiff-core/` (pyproject's `[tool.maturin] manifest-path` points into
-it) and `src/intentdiff/wasm/*.wasm`.
+This stages `build/intentumdiff-core/` (pyproject's `[tool.maturin] manifest-path` points into
+it) and `src/intentumdiff/wasm/*.wasm`.
 
 ## 2. Build
 
@@ -32,8 +32,8 @@ python -m pytest tests/unit -q
 ```
 
 The suite runs entirely over the ctypes path. Verify the live backend if in doubt:
-`python -c "import intentdiff.rust_core as r; print(type(r._load_backend()).__name__)"`
+`python -c "import intentumdiff.rust_core as r; print(type(r._load_backend()).__name__)"`
 must print `_CtypesBackend`.
 
-Gotcha: a leftover pyo3-era `src/intentdiff/*.pyd` or a standalone `intentdiff_rust_core`
+Gotcha: a leftover pyo3-era `src/intentumdiff/*.pyd` or a standalone `intentumdiff_rust_core`
 pip install shadows the fresh cdylib — remove/uninstall them after rebuilds.

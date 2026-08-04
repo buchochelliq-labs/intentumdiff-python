@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from intentdiff.analysis.compile_commands import compile_commands_metadata
+from intentumdiff.analysis.compile_commands import compile_commands_metadata
 
 
 def test_compile_commands_metadata_matches_relative_file_and_extracts_flags(tmp_path) -> None:

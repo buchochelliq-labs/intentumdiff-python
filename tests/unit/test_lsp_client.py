@@ -1,4 +1,4 @@
-"""Unit tests for :mod:`intentdiff.lsp.client`.
+"""Unit tests for :mod:`intentumdiff.lsp.client`.
 
 We spin up a minimal asyncio TCP server that speaks JSON-RPC 2.0 with
 Content-Length framing, so no real LSP server is required.
@@ -12,9 +12,9 @@ from typing import Any
 
 import pytest
 
-from intentdiff.lsp.client import AsyncLspClient, _encode
-from intentdiff.lsp.config import LspServerConfig
-from intentdiff.lsp.exceptions import LspConnectionError, LspTimeoutError
+from intentumdiff.lsp.client import AsyncLspClient, _encode
+from intentumdiff.lsp.config import LspServerConfig
+from intentumdiff.lsp.exceptions import LspConnectionError, LspTimeoutError
 
 
 # ---------------------------------------------------------------------------

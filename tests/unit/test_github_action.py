@@ -8,7 +8,7 @@ from typing import Any
 
 import git
 
-from intentdiff.core.models import (
+from intentumdiff.core.models import (
     Change,
     ChangeType,
     CommitDiff,
@@ -350,7 +350,7 @@ def test_render_summary_markdown_mentions_guardrails() -> None:
     assert COMMENT_MARKER in rendered
     assert "Protected Config Changes" in rendered
     assert "Production host changed" in rendered
-    assert "intentdiff-review.html" in rendered
+    assert "intentumdiff-review.html" in rendered
 
 
 def test_static_html_report_escapes_workspace_controlled_text(tmp_path: Path) -> None:
@@ -393,7 +393,7 @@ def test_integration_temp_git_repo_guardrail_strict(tmp_path: Path) -> None:
         cfg.set_value("user", "name", "Test")
         cfg.set_value("user", "email", "test@example.com")
 
-    (tmp_path / "intentdiff.yaml").write_text(
+    (tmp_path / "intentumdiff.yaml").write_text(
         """
 config:
   plugin_fuel: 10_000_000
@@ -411,7 +411,7 @@ guardrails:
         "server:\n  host: localhost\n",
         encoding="utf-8",
     )
-    repo.index.add(["intentdiff.yaml", "config.yaml"])
+    repo.index.add(["intentumdiff.yaml", "config.yaml"])
     old_commit = repo.index.commit("initial")
 
     (tmp_path / "config.yaml").write_text(

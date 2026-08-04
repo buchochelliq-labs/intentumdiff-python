@@ -8,7 +8,7 @@ extension — it must not drop or mangle it.
 
 from __future__ import annotations
 
-from intentdiff.core.models import NodeFacts, SemanticNode
+from intentumdiff.core.models import NodeFacts, SemanticNode
 
 
 def _node_json(with_facts: bool) -> dict:

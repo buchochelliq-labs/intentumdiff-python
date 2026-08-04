@@ -37,12 +37,12 @@ from wasmtime import (
     wat2wasm,
 )
 
-from intentdiff.plugins.exceptions import (
+from intentumdiff.plugins.exceptions import (
     PluginFuelExhausted,
     PluginLoadError,
     PluginSandboxViolation,
 )
-from intentdiff.plugins.loader import LoadedPlugin, load_plugin
+from intentumdiff.plugins.loader import LoadedPlugin, load_plugin
 
 
 # ---------------------------------------------------------------------------
@@ -276,8 +276,8 @@ def test_malformed_plugin_output_rejected():
     """
     from unittest.mock import MagicMock
 
-    from intentdiff.plugins.adapter import ParserAdapter
-    from intentdiff.plugins.exceptions import PluginOutputError
+    from intentumdiff.plugins.adapter import ParserAdapter
+    from intentumdiff.plugins.exceptions import PluginOutputError
 
     mock_plugin = MagicMock()
     mock_plugin.call_grammar_id.return_value = "test"

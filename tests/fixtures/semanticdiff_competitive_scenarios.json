@@ -2,7 +2,7 @@
   "metadata": {
     "schema_version": 1,
     "created_at": "2026-05-26",
-    "description": "License-safe synthetic scenarios inspired by public examples, tutorials, docs, bug reports, and developer war stories for comparing IntentDiff with SemanticDiff.",
+    "description": "License-safe synthetic scenarios inspired by public examples, tutorials, docs, bug reports, and developer war stories for comparing IntentumDiff with SemanticDiff.",
     "fixture_policy": "Source URLs describe the shape of the change only. Old/new fixtures are fictional and intentionally not copied from the source.",
     "semanticdiff_observed_version": "0.10.0",
     "semanticdiff_marketplace_url": "https://marketplace.visualstudio.com/items?itemName=semanticdiff.semanticdiff",
@@ -57,7 +57,7 @@
       {
         "id": "partial-parse-and-fallback",
         "weakness": "SemanticDiff documents syntactically invalid code as a hard limitation for semantic diffs.",
-        "opportunity": "Make IntentDiff's fallback, parse warning, and partial-parse behavior explicit and testable.",
+        "opportunity": "Make IntentumDiff's fallback, parse warning, and partial-parse behavior explicit and testable.",
         "labels": [
           "differentiator",
           "quality-gap"
@@ -101,16 +101,16 @@
   "command_parity": [
     {
       "semanticdiff_command": "semanticdiff.show",
-      "intentdiff_candidate": "intentdiff.openSemanticDiffViewer",
+      "intentumdiff_candidate": "intentumdiff.openSemanticDiffViewer",
       "status": "missing",
       "labels": [
         "parity"
       ],
-      "reason": "Switch an existing VS Code diff into a dedicated IntentDiff viewer."
+      "reason": "Switch an existing VS Code diff into a dedicated IntentumDiff viewer."
     },
     {
       "semanticdiff_command": "semanticdiff.show-alt",
-      "intentdiff_candidate": "intentdiff.openSemanticDiffViewerAlternate",
+      "intentumdiff_candidate": "intentumdiff.openSemanticDiffViewerAlternate",
       "status": "missing",
       "labels": [
         "parity"
@@ -119,7 +119,7 @@
     },
     {
       "semanticdiff_command": "semanticdiff.hide",
-      "intentdiff_candidate": "intentdiff.openVscodeTextDiff",
+      "intentumdiff_candidate": "intentumdiff.openVscodeTextDiff",
       "status": "missing",
       "labels": [
         "parity"
@@ -128,7 +128,7 @@
     },
     {
       "semanticdiff_command": "semanticdiff.hideComments",
-      "intentdiff_candidate": "intentdiff.hideCommentOnlyChanges",
+      "intentumdiff_candidate": "intentumdiff.hideCommentOnlyChanges",
       "status": "missing",
       "labels": [
         "parity"
@@ -137,7 +137,7 @@
     },
     {
       "semanticdiff_command": "semanticdiff.showComments",
-      "intentdiff_candidate": "intentdiff.showCommentOnlyChanges",
+      "intentumdiff_candidate": "intentumdiff.showCommentOnlyChanges",
       "status": "missing",
       "labels": [
         "parity"
@@ -146,7 +146,7 @@
     },
     {
       "semanticdiff_command": "semanticdiff.previousChange",
-      "intentdiff_candidate": "intentdiff.previousSemanticChange",
+      "intentumdiff_candidate": "intentumdiff.previousSemanticChange",
       "status": "missing",
       "labels": [
         "parity"
@@ -155,7 +155,7 @@
     },
     {
       "semanticdiff_command": "semanticdiff.nextChange",
-      "intentdiff_candidate": "intentdiff.nextSemanticChange",
+      "intentumdiff_candidate": "intentumdiff.nextSemanticChange",
       "status": "missing",
       "labels": [
         "parity"
@@ -164,7 +164,7 @@
     },
     {
       "semanticdiff_command": "semanticdiff.openFile",
-      "intentdiff_candidate": "intentdiff.openSemanticChangeFile",
+      "intentumdiff_candidate": "intentumdiff.openSemanticChangeFile",
       "status": "partial",
       "labels": [
         "parity"
@@ -173,7 +173,7 @@
     },
     {
       "semanticdiff_command": "semanticdiff.recomputeDiff",
-      "intentdiff_candidate": "intentdiff.refreshSemanticDiffViewer",
+      "intentumdiff_candidate": "intentumdiff.refreshSemanticDiffViewer",
       "status": "partial",
       "labels": [
         "parity"
@@ -182,7 +182,7 @@
     },
     {
       "semanticdiff_command": "semanticdiff.collapseContextLines",
-      "intentdiff_candidate": "intentdiff.collapseSemanticDiffContext",
+      "intentumdiff_candidate": "intentumdiff.collapseSemanticDiffContext",
       "status": "missing",
       "labels": [
         "parity"
@@ -191,7 +191,7 @@
     },
     {
       "semanticdiff_command": "semanticdiff.expandContextLines",
-      "intentdiff_candidate": "intentdiff.expandSemanticDiffContext",
+      "intentumdiff_candidate": "intentumdiff.expandSemanticDiffContext",
       "status": "missing",
       "labels": [
         "parity"
@@ -200,7 +200,7 @@
     },
     {
       "semanticdiff_command": "semanticdiff.makeDefault",
-      "intentdiff_candidate": "intentdiff.makeDefaultSemanticDiffViewer",
+      "intentumdiff_candidate": "intentumdiff.makeDefaultSemanticDiffViewer",
       "status": "missing",
       "labels": [
         "parity"
@@ -209,7 +209,7 @@
     },
     {
       "semanticdiff_command": "semanticdiff.printState",
-      "intentdiff_candidate": "intentdiff.exportSemanticReviewState",
+      "intentumdiff_candidate": "intentumdiff.exportSemanticReviewState",
       "status": "partial",
       "labels": [
         "parity",
@@ -219,7 +219,7 @@
     },
     {
       "semanticdiff_command": "semanticdiff.resetState",
-      "intentdiff_candidate": "intentdiff.resetSemanticDiffState",
+      "intentumdiff_candidate": "intentumdiff.resetSemanticDiffState",
       "status": "missing",
       "labels": [
         "parity"
@@ -230,16 +230,16 @@
   "setting_parity": [
     {
       "semanticdiff_setting": "semanticdiff.defaultDiffViewer",
-      "intentdiff_candidate": "intentdiff.diff.defaultViewer",
+      "intentumdiff_candidate": "intentumdiff.diff.defaultViewer",
       "status": "missing",
       "labels": [
         "parity"
       ],
-      "reason": "Let users make the IntentDiff viewer the default for supported languages."
+      "reason": "Let users make the IntentumDiff viewer the default for supported languages."
     },
     {
       "semanticdiff_setting": "semanticdiff.closeOriginalTab",
-      "intentdiff_candidate": "intentdiff.diff.closeOriginalTab",
+      "intentumdiff_candidate": "intentumdiff.diff.closeOriginalTab",
       "status": "missing",
       "labels": [
         "parity"
@@ -248,7 +248,7 @@
     },
     {
       "semanticdiff_setting": "semanticdiff.fallbackDiff",
-      "intentdiff_candidate": "intentdiff.diff.fallbackMode",
+      "intentumdiff_candidate": "intentumdiff.diff.fallbackMode",
       "status": "partial",
       "labels": [
         "parity",
@@ -258,7 +258,7 @@
     },
     {
       "semanticdiff_setting": "semanticdiff.colorIcon",
-      "intentdiff_candidate": "intentdiff.diff.colorIcon",
+      "intentumdiff_candidate": "intentumdiff.diff.colorIcon",
       "status": "missing",
       "labels": [
         "parity"
@@ -267,7 +267,7 @@
     },
     {
       "semanticdiff_setting": "semanticdiff.minimap",
-      "intentdiff_candidate": "intentdiff.diff.minimap",
+      "intentumdiff_candidate": "intentumdiff.diff.minimap",
       "status": "missing",
       "labels": [
         "parity"
@@ -276,7 +276,7 @@
     },
     {
       "semanticdiff_setting": "semanticdiff.diff.contextLines",
-      "intentdiff_candidate": "intentdiff.diff.contextLines",
+      "intentumdiff_candidate": "intentumdiff.diff.contextLines",
       "status": "missing",
       "labels": [
         "parity"
@@ -285,7 +285,7 @@
     },
     {
       "semanticdiff_setting": "semanticdiff.diff.hideComments",
-      "intentdiff_candidate": "intentdiff.diff.hideCommentOnlyChanges",
+      "intentumdiff_candidate": "intentumdiff.diff.hideCommentOnlyChanges",
       "status": "missing",
       "labels": [
         "parity"
@@ -294,7 +294,7 @@
     },
     {
       "semanticdiff_setting": "semanticdiff.diff.compareMovedCode",
-      "intentdiff_candidate": "intentdiff.diff.compareMovedCode",
+      "intentumdiff_candidate": "intentumdiff.diff.compareMovedCode",
       "status": "missing",
       "labels": [
         "parity"
@@ -303,7 +303,7 @@
     }
   ],
   "separate_viewer_backlog": {
-    "id": "custom-intentdiff-diff-viewer",
+    "id": "custom-intentumdiff-diff-viewer",
     "priority": "P1",
     "labels": [
       "parity",
@@ -338,7 +338,7 @@
       "labels": [
         "parity"
       ],
-      "summary": "Build the separate changed-only IntentDiff viewer for SemanticDiff UX parity."
+      "summary": "Build the separate changed-only IntentumDiff viewer for SemanticDiff UX parity."
     },
     {
       "id": "p1-command-settings-parity",
@@ -778,10 +778,10 @@
       "databricks-workflow-conditional-task"
     ],
     "assertions": [
-      "overlap-language fixtures can be opened in SemanticDiff and IntentDiff",
-      "unsupported-by-SemanticDiff fixtures fall back in SemanticDiff but remain structured in IntentDiff",
-      "deleted text remains selected on intentdiff-base for deletion scenarios",
-      "custom IntentDiff viewer backlog remains additive to existing live overlays and Semantic Changes tree"
+      "overlap-language fixtures can be opened in SemanticDiff and IntentumDiff",
+      "unsupported-by-SemanticDiff fixtures fall back in SemanticDiff but remain structured in IntentumDiff",
+      "deleted text remains selected on intentumdiff-base for deletion scenarios",
+      "custom IntentumDiff viewer backlog remains additive to existing live overlays and Semantic Changes tree"
     ]
   }
 }

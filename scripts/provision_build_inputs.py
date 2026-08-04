@@ -1,16 +1,16 @@
 """Stage the wheel's build inputs — the engine checkout + the parser components.
 
 The thin Python binding (#82 split) builds its wheel against:
-  1. build/intentdiff-core — a checkout of the engine repo at CORE_REF (the
+  1. build/intentumdiff-core — a checkout of the engine repo at CORE_REF (the
      [tool.maturin] manifest-path points into it), and
-  2. src/intentdiff/wasm/*.wasm — the built parser/renderer components the wheel
-     bundles (built by the parser repos / intentdiff-core; the registry pins their
+  2. src/intentumdiff/wasm/*.wasm — the built parser/renderer components the wheel
+     bundles (built by the parser repos / intentumdiff-core; the registry pins their
      checksums).
 
 Sources (first match wins):
-  --core-dir / INTENTDIFF_CORE_DIR      an existing local checkout (copied, not cloned)
+  --core-dir / INTENTUMDIFF_CORE_DIR      an existing local checkout (copied, not cloned)
   otherwise                              `git clone --depth 1 --branch CORE_REF` of the repo
-  --wasm-dir / INTENTDIFF_WASM_DIR      a dir of built .wasm components to stage
+  --wasm-dir / INTENTUMDIFF_WASM_DIR      a dir of built .wasm components to stage
 
 Usage:
   python scripts/provision_build_inputs.py [--core-dir PATH] [--wasm-dir PATH]
@@ -26,17 +26,17 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-CORE_REPO = "https://github.com/buchochelliq-labs/intentdiff-core"
-CORE_REF = "main"  # pin to a tag once intentdiff-core cuts releases
-CORE_DEST = REPO_ROOT / "build" / "intentdiff-core"
-WASM_DEST = REPO_ROOT / "src" / "intentdiff" / "wasm"
+CORE_REPO = "https://github.com/buchochelliq-labs/intentumdiff-core"
+CORE_REF = "main"  # pin to a tag once intentumdiff-core cuts releases
+CORE_DEST = REPO_ROOT / "build" / "intentumdiff-core"
+WASM_DEST = REPO_ROOT / "src" / "intentumdiff" / "wasm"
 
 
 def stage_core(core_dir: str | None) -> None:
     if CORE_DEST.exists():
         shutil.rmtree(CORE_DEST)
     CORE_DEST.parent.mkdir(parents=True, exist_ok=True)
-    src = core_dir or os.environ.get("INTENTDIFF_CORE_DIR")
+    src = core_dir or os.environ.get("INTENTUMDIFF_CORE_DIR")
     if src:
         print(f"staging engine from local checkout: {src}")
         shutil.copytree(src, CORE_DEST, ignore=shutil.ignore_patterns("target", ".git"))
@@ -53,9 +53,9 @@ def stage_core(core_dir: str | None) -> None:
 
 
 def stage_wasm(wasm_dir: str | None) -> None:
-    src = wasm_dir or os.environ.get("INTENTDIFF_WASM_DIR")
+    src = wasm_dir or os.environ.get("INTENTUMDIFF_WASM_DIR")
     if not src:
-        print("NOTE: no --wasm-dir/INTENTDIFF_WASM_DIR — skipping component staging "
+        print("NOTE: no --wasm-dir/INTENTUMDIFF_WASM_DIR — skipping component staging "
               "(the wheel will not bundle parser components)")
         return
     WASM_DEST.mkdir(parents=True, exist_ok=True)
@@ -70,7 +70,7 @@ def stage_wasm(wasm_dir: str | None) -> None:
 
 
 # ── Parser components from sibling-repo CI artifacts (Phase D) ────────────────
-# The 69 intentdiff-<lang>-parser repos each publish their built component as a
+# The 69 intentumdiff-<lang>-parser repos each publish their built component as a
 # `parser-wasm` artifact on every successful CI run. Without those components the
 # engine resolves every language to 'unknown', so the suite cannot run. This mode
 # pulls the latest successful artifact from each parser repo — the embryo of the
@@ -87,7 +87,7 @@ def stage_wasm_from_artifacts(token: str, org: str = "buchochelliq-labs") -> int
 
     api = "https://api.github.com"
     hdr = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json",
-           "User-Agent": "intentdiff-provision"}
+           "User-Agent": "intentumdiff-provision"}
 
     class _StripAuthOnRedirect(urllib.request.HTTPRedirectHandler):
         """Drop the Authorization header when a redirect leaves the API host.
@@ -124,7 +124,7 @@ def stage_wasm_from_artifacts(token: str, org: str = "buchochelliq-labs") -> int
     import yaml  # pyyaml is already a runtime dep (hub.py)
 
     registry = yaml.safe_load(
-        get(f"{api}/repos/{org}/intentdiff-registry/contents/registry.yaml",
+        get(f"{api}/repos/{org}/intentumdiff-registry/contents/registry.yaml",
             accept="application/vnd.github.raw").decode("utf-8")
     )
     pins: dict[str, str] = {}
@@ -185,9 +185,9 @@ def stage_wasm_from_artifacts(token: str, org: str = "buchochelliq-labs") -> int
             with zipfile.ZipFile(io.BytesIO(blob)) as z:
                 for member in z.namelist():
                     if member.endswith(".wasm"):
-                        # strip the intentdiff_ prefix: the host stages <lang>_parser.wasm
+                        # strip the intentumdiff_ prefix: the host stages <lang>_parser.wasm
                         out = Path(member).name
-                        out = out[len("intentdiff_"):] if out.startswith("intentdiff_") else out
+                        out = out[len("intentumdiff_"):] if out.startswith("intentumdiff_") else out
                         payload = z.read(member)
                         digest = _hashlib.sha256(payload).hexdigest()
                         pinned = pins.get(out)

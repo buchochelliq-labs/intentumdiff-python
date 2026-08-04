@@ -32,11 +32,11 @@ from pathlib import Path
 _DEFAULT_PATTERNS: list[str] = [
     "dist/*.whl",
     "dist/*.tar.gz",
-    "src/intentdiff/**/*.wasm",
+    "src/intentumdiff/**/*.wasm",
 ]
 
 # Marker line in the manifest so it is clearly machine-generated.
-_HEADER = "# IntentDiff artifact checksums (SHA-256)\n"
+_HEADER = "# IntentumDiff artifact checksums (SHA-256)\n"
 
 
 def _repo_root() -> Path:
@@ -139,7 +139,7 @@ def cmd_verify(args: argparse.Namespace) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Record or verify SHA-256 checksums for IntentDiff artifacts."
+        description="Record or verify SHA-256 checksums for IntentumDiff artifacts."
     )
     parser.add_argument(
         "--manifest",

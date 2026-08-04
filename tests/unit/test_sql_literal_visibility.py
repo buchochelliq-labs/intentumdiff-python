@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from intentdiff import SemanticDiffer
-from intentdiff.core.models import ChangeType
+from intentumdiff import SemanticDiffer
+from intentumdiff.core.models import ChangeType
 
 _OLD = "SELECT 1;\n"
 _NEW = "SELECT 2;\n"

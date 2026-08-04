@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from intentdiff import DiffConfig, SemanticDiffer
-from intentdiff.core.models import SemanticDiff
+from intentumdiff import DiffConfig, SemanticDiffer
+from intentumdiff.core.models import SemanticDiff
 
 
 def test_phase_profile_metadata_is_disabled_by_default(monkeypatch: Any) -> None:

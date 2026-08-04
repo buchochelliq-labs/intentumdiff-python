@@ -8,13 +8,13 @@ from typing import Any
 
 import pytest
 
-from intentdiff import SemanticDiffer
-from intentdiff.core.models import ChangeType, DiffConfig
+from intentumdiff import SemanticDiffer
+from intentumdiff.core.models import ChangeType, DiffConfig
 # The absolute cap tracks the engine's hotspot policy: the floor moved with
 # literal-container capture (#46) and swings ±10-15% with whole-binary LTO codegen
 # jitter across rebuilds (typescript tiny-file measured 20.45M, 2026-07).
-from intentdiff.differ import _FUEL_HOTSPOT_ABSOLUTE
-from intentdiff.plugins.exceptions import PluginFuelExhausted
+from intentumdiff.differ import _FUEL_HOTSPOT_ABSOLUTE
+from intentumdiff.plugins.exceptions import PluginFuelExhausted
 
 pytestmark = pytest.mark.skipif(
     not (Path(__file__).resolve().parents[2] / "crates" / "parsers").exists(),
@@ -193,7 +193,7 @@ def test_realistic_low_fuel_setting_adapts_for_rust_parser_sized_file() -> None:
 def test_real_js_ts_parser_source_does_not_exhaust_configured_10m_fuel_floor() -> None:
     parser_source_path = _REPO_ROOT / "crates" / "parsers" / "js-ts-parser" / "src" / "lib.rs"
     old = parser_source_path.read_text(encoding="utf-8")
-    new = old + "\nfn intentdiff_fuel_probe() -> i32 { 1 }\n"
+    new = old + "\nfn intentumdiff_fuel_probe() -> i32 { 1 }\n"
     differ = SemanticDiffer(DiffConfig(plugin_fuel=10_000_000, diagnostics=True))
 
     diff = differ.diff_strings(

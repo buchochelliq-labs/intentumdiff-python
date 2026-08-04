@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from intentdiff import SemanticDiffer
-from intentdiff.core.models import ChangeType
+from intentumdiff import SemanticDiffer
+from intentumdiff.core.models import ChangeType
 
 
 def test_generic_tail_line_addition_is_compact() -> None:
     old = """MIT License
 
-Copyright (c) 2026 IntentDiff contributors
+Copyright (c) 2026 IntentumDiff contributors
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 SOFTWARE.

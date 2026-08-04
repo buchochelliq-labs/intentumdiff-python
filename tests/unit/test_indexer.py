@@ -1,5 +1,5 @@
 """
-Unit tests for intentdiff.core.indexer.
+Unit tests for intentumdiff.core.indexer.
 
 These tests run entirely against in-memory/stub data — no git repo or Wasm
 plugins required.
@@ -13,7 +13,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from intentdiff.core.indexer import (
+from intentumdiff.core.indexer import (
     IndexProgress,
     IndexResult,
     Indexer,
@@ -72,7 +72,7 @@ def test_index_progress_fraction_complete():
 
 def _make_stub_differ(parsed_language: str = "python"):
     """Return a SemanticDiffer stub whose parse() returns a minimal tree."""
-    from intentdiff.core.models import NodePosition, SemanticNode
+    from intentumdiff.core.models import NodePosition, SemanticNode
 
     stub_node = SemanticNode(
         id="n1",
@@ -92,7 +92,7 @@ def _make_stub_differ(parsed_language: str = "python"):
 
 def _make_stub_differ_no_parser():
     """Return a differ whose parse() raises PluginNotFoundError."""
-    from intentdiff.plugins.exceptions import PluginNotFoundError
+    from intentumdiff.plugins.exceptions import PluginNotFoundError
 
     differ = MagicMock()
     differ._cache = None
@@ -108,8 +108,8 @@ def _make_stub_differ_for_extensions(*extensions: str):
     """
     from pathlib import Path as _Path
 
-    from intentdiff.core.models import NodePosition, SemanticNode
-    from intentdiff.plugins.exceptions import PluginNotFoundError
+    from intentumdiff.core.models import NodePosition, SemanticNode
+    from intentumdiff.plugins.exceptions import PluginNotFoundError
 
     stub_node = SemanticNode(
         id="n1",
@@ -243,7 +243,7 @@ def test_constructor_callback_used_as_default():
     # forwarded at the _index_files level (it is forwarded by index_repo /
     # index_directory). Verify the caller glue works via index_directory:
     events.clear()
-    with patch("intentdiff.core.indexer.Path.rglob") as mock_rglob:
+    with patch("intentumdiff.core.indexer.Path.rglob") as mock_rglob:
         mock_path = MagicMock()
         mock_path.is_file.return_value = True
         mock_path.read_text.return_value = "x = 1"
@@ -281,7 +281,7 @@ def test_index_directory_mixed_errors(tmp_path: Path):
     differ = MagicMock()
     differ._cache = None
 
-    from intentdiff.core.models import NodePosition, SemanticNode
+    from intentumdiff.core.models import NodePosition, SemanticNode
 
     stub_node = SemanticNode(
         id="n1",
@@ -321,7 +321,7 @@ def test_index_directory_no_files(tmp_path: Path):
 
 def test_extension_aware_stub_skips_unknown():
     """_make_stub_differ_for_extensions only parses listed extensions."""
-    from intentdiff.plugins.exceptions import PluginNotFoundError
+    from intentumdiff.plugins.exceptions import PluginNotFoundError
 
     differ = _make_stub_differ_for_extensions(".py", ".ts")
 
@@ -344,7 +344,7 @@ def test_extension_aware_stub_skips_unknown():
 
 def test_store_symbol_index_called_after_indexing():
     """_store_symbol_index is called once after a successful index_files run."""
-    from intentdiff.core.index import SemanticIndex
+    from intentumdiff.core.index import SemanticIndex
 
     sem = SemanticIndex()
     sem.build()
@@ -368,7 +368,7 @@ def test_store_symbol_index_handles_put_error(caplog):
     """Errors from put_symbol_index are logged as warnings, not raised."""
     import logging
 
-    from intentdiff.core.index import SemanticIndex
+    from intentumdiff.core.index import SemanticIndex
 
     sem = SemanticIndex()
     sem.build()
@@ -379,7 +379,7 @@ def test_store_symbol_index_handles_put_error(caplog):
     differ._cache = cache
 
     indexer = Indexer(differ)
-    with caplog.at_level(logging.WARNING, logger="intentdiff.core.indexer"):
+    with caplog.at_level(logging.WARNING, logger="intentumdiff.core.indexer"):
         indexer._store_symbol_index(sem, "key", file_count=0)
 
     assert any("disk full" in r.message for r in caplog.records)
@@ -423,21 +423,21 @@ def test_index_repo_returns_from_cache():
 
     indexer = Indexer(differ)
 
-    with patch("intentdiff.core.indexer.Indexer.index_repo") as mock_ir:
+    with patch("intentumdiff.core.indexer.Indexer.index_repo") as mock_ir:
         # Replace with the real method to test the cache-hit branch indirectly
         pass
 
     # Call the real method with git patched out.
-    with patch("intentdiff.core.indexer.__import__", create=True):
+    with patch("intentumdiff.core.indexer.__import__", create=True):
         pass  # not used — patch git.Repo directly
 
-    import intentdiff.core.indexer as indexer_mod
+    import intentumdiff.core.indexer as indexer_mod
 
     with patch.object(indexer_mod, "__builtins__", {}):  # noop
         pass
 
     # Directly call _store_symbol_index to ensure no exception.
-    from intentdiff.core.index import SemanticIndex
+    from intentumdiff.core.index import SemanticIndex
 
     sem = SemanticIndex()
     sem.build()

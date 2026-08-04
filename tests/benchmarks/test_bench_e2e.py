@@ -40,7 +40,7 @@ from __future__ import annotations
 
 import pytest
 
-from intentdiff import DiffConfig, SemanticDiffer, StringSource
+from intentumdiff import DiffConfig, SemanticDiffer, StringSource
 
 from tests.benchmarks.helpers import make_python_source
 

@@ -66,12 +66,12 @@ def test_prepare_patch_scenario_creates_patch_artifacts(tmp_path) -> None:
     assert prepared.patch_base is not None
     assert prepared.patch_file.read_text(encoding="utf-8").startswith("--- a/")
     assert benchmark_sem.build_sem_command(prepared, "sem") is None
-    command = benchmark_sem.build_intentdiff_command(prepared)
+    command = benchmark_sem.build_intentumdiff_command(prepared)
     assert command is not None
     assert "patch" in command
 
 
-def test_change_count_helpers_accept_sem_and_intentdiff_json_shapes() -> None:
+def test_change_count_helpers_accept_sem_and_intentumdiff_json_shapes() -> None:
     sem_counts = benchmark_sem._sem_change_counts(
         {
             "summary": {
@@ -83,7 +83,7 @@ def test_change_count_helpers_accept_sem_and_intentdiff_json_shapes() -> None:
             }
         }
     )
-    intentdiff_counts = benchmark_sem._intentdiff_change_counts(
+    intentumdiff_counts = benchmark_sem._intentumdiff_change_counts(
         [
             {
                 "changes": [
@@ -98,28 +98,28 @@ def test_change_count_helpers_accept_sem_and_intentdiff_json_shapes() -> None:
     assert sem_counts["total"] == 3
     assert sem_counts["files"] == 2
     assert sem_counts["by_type"]["modified"] == 2
-    assert intentdiff_counts["total"] == 3
-    assert intentdiff_counts["files"] == 1
-    assert intentdiff_counts["by_type"]["MODIFICATION"] == 2
+    assert intentumdiff_counts["total"] == 3
+    assert intentumdiff_counts["files"] == 1
+    assert intentumdiff_counts["by_type"]["MODIFICATION"] == 2
 
 
 def test_rust_core_discrepancies_record_parity_gap() -> None:
     notes = benchmark_sem._rust_core_discrepancies(
-        intentdiff_status="ok",
+        intentumdiff_status="ok",
         rust_core_status="ok",
-        intentdiff_counts={"total": 3, "files": 1, "by_type": {"MODIFICATION": 3}},
+        intentumdiff_counts={"total": 3, "files": 1, "by_type": {"MODIFICATION": 3}},
         rust_core_counts={"total": 2, "files": 1, "by_type": {"MODIFICATION": 2}},
         rust_core_notes=[],
     )
 
-    assert notes == ["rust-core parity differs from IntentDiff: rust-core=2, intentdiff=3"]
+    assert notes == ["rust-core parity differs from IntentumDiff: rust-core=2, intentumdiff=3"]
 
 
 def test_rust_core_discrepancies_record_backend_not_used() -> None:
     notes = benchmark_sem._rust_core_discrepancies(
-        intentdiff_status="ok",
+        intentumdiff_status="ok",
         rust_core_status="ok",
-        intentdiff_counts={"total": 1, "files": 1, "by_type": {"MODIFICATION": 1}},
+        intentumdiff_counts={"total": 1, "files": 1, "by_type": {"MODIFICATION": 1}},
         rust_core_counts={"total": 1, "files": 1, "by_type": {"MODIFICATION": 1}},
         rust_core_notes=["rust-core lane did not use the Rust backend; check extension install"],
     )
@@ -129,16 +129,16 @@ def test_rust_core_discrepancies_record_backend_not_used() -> None:
 
 def test_rust_core_discrepancies_compare_semantic_signatures() -> None:
     notes = benchmark_sem._rust_core_discrepancies(
-        intentdiff_status="ok",
+        intentumdiff_status="ok",
         rust_core_status="ok",
-        intentdiff_counts={"total": 1, "files": 1, "by_type": {"MODIFICATION": 1}},
+        intentumdiff_counts={"total": 1, "files": 1, "by_type": {"MODIFICATION": 1}},
         rust_core_counts={"total": 1, "files": 1, "by_type": {"MODIFICATION": 1}},
         rust_core_notes=[],
-        intentdiff_signature=[{"change_type": "MODIFICATION", "old": {"id": "old.a"}}],
+        intentumdiff_signature=[{"change_type": "MODIFICATION", "old": {"id": "old.a"}}],
         rust_core_signature=[{"change_type": "MODIFICATION", "old": {"id": "old.b"}}],
     )
 
-    assert notes == ["rust-core parity differs from IntentDiff semantic change signatures"]
+    assert notes == ["rust-core parity differs from IntentumDiff semantic change signatures"]
 
 
 def test_signature_parity_report_shows_missing_extra_and_first_mismatch() -> None:
@@ -225,10 +225,10 @@ def test_validate_report_accepts_rust_candidate_status() -> None:
                 "tier": "simple",
                 "source_shape": "shape",
                 "sem_status": "ok",
-                "intentdiff_status": "ok",
-                "intentdiff_rust_batch_status": "ok",
-                "intentdiff_rust_batch_parity": "clean",
-                "intentdiff_rust_batch_parity_details": {
+                "intentumdiff_status": "ok",
+                "intentumdiff_rust_batch_status": "ok",
+                "intentumdiff_rust_batch_parity": "clean",
+                "intentumdiff_rust_batch_parity_details": {
                     "status": "clean",
                     "missing": [],
                     "extra": [],
@@ -236,9 +236,9 @@ def test_validate_report_accepts_rust_candidate_status() -> None:
                     "expected_count": 1,
                     "actual_count": 1,
                 },
-                "intentdiff_rust_batch_parallel_status": "ok",
-                "intentdiff_rust_batch_parallel_parity": "clean",
-                "intentdiff_rust_batch_parallel_parity_details": {
+                "intentumdiff_rust_batch_parallel_status": "ok",
+                "intentumdiff_rust_batch_parallel_parity": "clean",
+                "intentumdiff_rust_batch_parallel_parity_details": {
                     "status": "clean",
                     "missing": [],
                     "extra": [],
@@ -246,9 +246,9 @@ def test_validate_report_accepts_rust_candidate_status() -> None:
                     "expected_count": 1,
                     "actual_count": 1,
                 },
-                "intentdiff_rust_candidate_status": "ok",
-                "intentdiff_rust_candidate_parity": "clean",
-                "intentdiff_rust_candidate_parity_details": {
+                "intentumdiff_rust_candidate_status": "ok",
+                "intentumdiff_rust_candidate_parity": "clean",
+                "intentumdiff_rust_candidate_parity_details": {
                     "status": "clean",
                     "missing": [],
                     "extra": [],
@@ -256,9 +256,9 @@ def test_validate_report_accepts_rust_candidate_status() -> None:
                     "expected_count": 1,
                     "actual_count": 1,
                 },
-                "intentdiff_rust_native_candidate_status": "ok",
-                "intentdiff_rust_native_candidate_parity": "clean",
-                "intentdiff_rust_native_candidate_parity_details": {
+                "intentumdiff_rust_native_candidate_status": "ok",
+                "intentumdiff_rust_native_candidate_parity": "clean",
+                "intentumdiff_rust_native_candidate_parity_details": {
                     "status": "clean",
                     "missing": [],
                     "extra": [],
@@ -267,37 +267,37 @@ def test_validate_report_accepts_rust_candidate_status() -> None:
                     "actual_count": 1,
                 },
                 "sem_command": ["sem"],
-                "intentdiff_command": ["intentdiff"],
+                "intentumdiff_command": ["intentumdiff"],
                 "timings": {
                     "sem": {},
-                    "intentdiff": {},
-                    "intentdiff_rust_batch": {},
-                    "intentdiff_rust_batch_parallel": {},
-                    "intentdiff_rust_candidate": {},
-                    "intentdiff_rust_native_candidate": {},
+                    "intentumdiff": {},
+                    "intentumdiff_rust_batch": {},
+                    "intentumdiff_rust_batch_parallel": {},
+                    "intentumdiff_rust_candidate": {},
+                    "intentumdiff_rust_native_candidate": {},
                 },
                 "change_counts": {
                     "sem": {},
-                    "intentdiff": {},
-                    "intentdiff_rust_batch": {},
-                    "intentdiff_rust_batch_parallel": {},
-                    "intentdiff_rust_candidate": {},
-                    "intentdiff_rust_native_candidate": {},
+                    "intentumdiff": {},
+                    "intentumdiff_rust_batch": {},
+                    "intentumdiff_rust_batch_parallel": {},
+                    "intentumdiff_rust_candidate": {},
+                    "intentumdiff_rust_native_candidate": {},
                 },
                 "json_parse": {
                     "sem": "ok",
-                    "intentdiff": "ok",
-                    "intentdiff_rust_batch": "ok",
-                    "intentdiff_rust_batch_parallel": "ok",
-                    "intentdiff_rust_candidate": "ok",
-                    "intentdiff_rust_native_candidate": "ok",
+                    "intentumdiff": "ok",
+                    "intentumdiff_rust_batch": "ok",
+                    "intentumdiff_rust_batch_parallel": "ok",
+                    "intentumdiff_rust_candidate": "ok",
+                    "intentumdiff_rust_native_candidate": "ok",
                 },
                 "phase_summary": {
-                    "intentdiff": {},
-                    "intentdiff_rust_batch": {},
-                    "intentdiff_rust_batch_parallel": {},
-                    "intentdiff_rust_candidate": {},
-                    "intentdiff_rust_native_candidate": {},
+                    "intentumdiff": {},
+                    "intentumdiff_rust_batch": {},
+                    "intentumdiff_rust_batch_parallel": {},
+                    "intentumdiff_rust_candidate": {},
+                    "intentumdiff_rust_native_candidate": {},
                 },
                 "discrepancies": [],
                 "notes": [],
@@ -331,22 +331,22 @@ def test_render_summary_includes_rust_core_sequential_lane() -> None:
             {
                 "scenario_id": "working-tree-large-python",
                 "sem_status": "ok",
-                "intentdiff_status": "ok",
+                "intentumdiff_status": "ok",
                 "timings": {
                     "sem": {"steady_state_warm_mean_ms": 10.0},
-                    "intentdiff": {
+                    "intentumdiff": {
                         "first_warm_mean_ms": 30.0,
                         "steady_state_warm_mean_ms": 20.0,
                     },
-                    "intentdiff_rust_core": {"steady_state_warm_mean_ms": 12.0},
-                    "intentdiff_rust_core_sequential": {
+                    "intentumdiff_rust_core": {"steady_state_warm_mean_ms": 12.0},
+                    "intentumdiff_rust_core_sequential": {
                         "steady_state_warm_mean_ms": 18.0
                     },
                 },
                 "phase_summary": {
-                    "intentdiff": {},
-                    "intentdiff_rust_core": {},
-                    "intentdiff_rust_core_sequential": {},
+                    "intentumdiff": {},
+                    "intentumdiff_rust_core": {},
+                    "intentumdiff_rust_core_sequential": {},
                 },
                 "discrepancies": [],
                 "notes": [],
@@ -356,7 +356,7 @@ def test_render_summary_includes_rust_core_sequential_lane() -> None:
 
     summary = benchmark_sem.render_summary(report)
 
-    assert "intentdiff rust seq steady warm" in summary
+    assert "intentumdiff rust seq steady warm" in summary
     assert "18.0 ms" in summary
 
 
@@ -387,7 +387,7 @@ def test_timing_summary_separates_first_and_steady_warm_samples() -> None:
 def test_phase_summary_aggregates_profile_samples() -> None:
     measurement = benchmark_sem.CommandMeasurement(
         status="ok",
-        command=["intentdiff-api"],
+        command=["intentumdiff-api"],
         cwd=".",
         cold_ms=[100.0],
         warm_ms=[90.0, 20.0],
@@ -436,7 +436,7 @@ def test_phase_summary_aggregates_profile_samples() -> None:
 def test_phase_summary_counts_shared_phase_once_per_sample() -> None:
     measurement = benchmark_sem.CommandMeasurement(
         status="ok",
-        command=["intentdiff-api"],
+        command=["intentumdiff-api"],
         cwd=".",
         cold_ms=[100.0],
         warm_ms=[],
@@ -487,7 +487,7 @@ def test_phase_summary_counts_shared_phase_once_per_sample() -> None:
 def test_phase_summary_excludes_broad_adapter_totals() -> None:
     measurement = benchmark_sem.CommandMeasurement(
         status="ok",
-        command=["intentdiff-api-rust-core"],
+        command=["intentumdiff-api-rust-core"],
         cwd=".",
         cold_ms=[100.0],
         warm_ms=[],
@@ -615,7 +615,7 @@ def test_adapter_phase_profiles_are_shared_batch_phases() -> None:
         ],
         category="steady_state",
         sample_index=3,
-        label="intentdiff-api-rust-batch",
+        label="intentumdiff-api-rust-batch",
     )
 
     assert profiles == [
@@ -623,7 +623,7 @@ def test_adapter_phase_profiles_are_shared_batch_phases() -> None:
             "category": "steady_state",
             "sample_index": 3,
             "old_filename": "<batch>",
-            "new_filename": "intentdiff-api-rust-batch",
+            "new_filename": "intentumdiff-api-rust-batch",
             "language": "python",
             "phase_timings": {
                 "schema_version": 1,
@@ -665,7 +665,7 @@ def test_certified_commit_json_phase_profiles_include_control_and_batch_phases()
         attempt,
         category="steady_state",
         sample_index=4,
-        label="intentdiff-api-rust-core",
+        label="intentumdiff-api-rust-core",
     )
 
     assert [profile["old_filename"] for profile in profiles] == [
@@ -777,13 +777,13 @@ def test_report_validation_requires_mirrored_issue_log() -> None:
                 "tier": "simple",
                 "source_shape": "shape",
                 "sem_status": "ok",
-                "intentdiff_status": "ok",
+                "intentumdiff_status": "ok",
                 "sem_command": ["sem", "diff"],
-                "intentdiff_command": ["intentdiff-api"],
+                "intentumdiff_command": ["intentumdiff-api"],
                 "timings": {},
                 "change_counts": {},
                 "json_parse": {},
-                "phase_summary": {"intentdiff": {"available": False}},
+                "phase_summary": {"intentumdiff": {"available": False}},
                 "discrepancies": [],
                 "notes": [],
             }
@@ -803,17 +803,17 @@ def test_report_validation_requires_mirrored_issue_log() -> None:
     }
 
     benchmark_sem.validate_report(report)
-    report["scenarios"][0]["intentdiff_parallel_status"] = "ok"
-    report["scenarios"][0]["intentdiff_parallel_command"] = ["intentdiff-api-parallel"]
-    report["scenarios"][0]["timings"]["intentdiff_parallel"] = {}
-    report["scenarios"][0]["change_counts"]["intentdiff_parallel"] = {}
-    report["scenarios"][0]["json_parse"]["intentdiff_parallel"] = "ok"
-    report["scenarios"][0]["phase_summary"]["intentdiff_parallel"] = {"available": False}
+    report["scenarios"][0]["intentumdiff_parallel_status"] = "ok"
+    report["scenarios"][0]["intentumdiff_parallel_command"] = ["intentumdiff-api-parallel"]
+    report["scenarios"][0]["timings"]["intentumdiff_parallel"] = {}
+    report["scenarios"][0]["change_counts"]["intentumdiff_parallel"] = {}
+    report["scenarios"][0]["json_parse"]["intentumdiff_parallel"] = "ok"
+    report["scenarios"][0]["phase_summary"]["intentumdiff_parallel"] = {"available": False}
     benchmark_sem.validate_report(report)
-    report["scenarios"][0]["intentdiff_parallel_status"] = "bogus"
+    report["scenarios"][0]["intentumdiff_parallel_status"] = "bogus"
     with pytest.raises(ValueError, match="parallel status"):
         benchmark_sem.validate_report(report)
-    report["scenarios"][0]["intentdiff_parallel_status"] = "ok"
+    report["scenarios"][0]["intentumdiff_parallel_status"] = "ok"
     report["language_issue_log"] = []
     with pytest.raises(ValueError, match="language issue log"):
         benchmark_sem.validate_report(report)

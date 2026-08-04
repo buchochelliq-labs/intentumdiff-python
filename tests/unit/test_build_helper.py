@@ -3,10 +3,10 @@ from __future__ import annotations
 import build as build_helper
 
 
-def test_build_skips_cargo_build_when_intentdiff_skip_env_is_set(monkeypatch) -> None:
+def test_build_skips_cargo_build_when_intentumdiff_skip_env_is_set(monkeypatch) -> None:
     calls: list[str] = []
 
-    monkeypatch.setenv("INTENTDIFF_SKIP_WASM_BUILD", "1")
+    monkeypatch.setenv("INTENTUMDIFF_SKIP_WASM_BUILD", "1")
     monkeypatch.setattr(build_helper, "_cargo_build", lambda: calls.append("cargo"))
     monkeypatch.setattr(build_helper, "_copy_wasm_artifacts", lambda: calls.append("copy"))
 
@@ -18,7 +18,7 @@ def test_build_skips_cargo_build_when_intentdiff_skip_env_is_set(monkeypatch) ->
 def test_build_runs_cargo_build_without_skip_env(monkeypatch) -> None:
     calls: list[str] = []
 
-    monkeypatch.delenv("INTENTDIFF_SKIP_WASM_BUILD", raising=False)
+    monkeypatch.delenv("INTENTUMDIFF_SKIP_WASM_BUILD", raising=False)
     monkeypatch.setattr(build_helper, "_cargo_build", lambda: calls.append("cargo"))
     monkeypatch.setattr(build_helper, "_copy_wasm_artifacts", lambda: calls.append("copy"))
 

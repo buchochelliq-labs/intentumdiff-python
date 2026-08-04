@@ -8,12 +8,12 @@ MVP exists for webhook/check-run contract testing).
 - A sticky PR summary comment (`comment: true`), checks annotations for guardrails and risky
   semantic changes, a job summary with metrics.
 - Artifacts: `semantic-diff.json`, `guardrails.json`, `guardrails.sarif`, and a static
-  `intentdiff-review.html` report reviewers can download for a richer view.
+  `intentumdiff-review.html` report reviewers can download for a richer view.
 
 ## Minimal workflow
 
 ```yaml
-name: IntentDiff
+name: IntentumDiff
 on: [pull_request]
 permissions:
   contents: read
@@ -25,7 +25,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: {fetch-depth: 0}
-      - uses: buchochelliq-labs/intentdiff/.github/actions/semantic-diff@main
+      - uses: buchochelliq-labs/intentumdiff/.github/actions/semantic-diff@main
         with: {comment: true}
 ```
 

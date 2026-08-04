@@ -1,22 +1,22 @@
-# Installing intentdiff
+# Installing intentumdiff
 
 ## From PyPI (the user path)
 
 ```bash
-pip install intentdiff-python
+pip install intentumdiff-python
 ```
 
 Wheels are pre-built per platform and self-contained: the native engine and all parser
 components are bundled. Python ≥ 3.12.
 
-Optional extras: `intentdiff[serve]` (the local HTTP playground), `intentdiff[lsp]`,
-`intentdiff[analytics]`.
+Optional extras: `intentumdiff[serve]` (the local HTTP playground), `intentumdiff[lsp]`,
+`intentumdiff[analytics]`.
 
 ## Verify
 
 ```bash
-python -c "from intentdiff import SemanticDiffer; print('ok')"
-intentdiff --help
+python -c "from intentumdiff import SemanticDiffer; print('ok')"
+intentumdiff --help
 ```
 
 ## From source (development)
@@ -24,7 +24,7 @@ intentdiff --help
 Building from source compiles the engine — see [BUILDING.md](BUILDING.md). The short form:
 
 ```bash
-python scripts/provision_build_inputs.py --core-dir <intentdiff-core checkout> --wasm-dir <built components>
+python scripts/provision_build_inputs.py --core-dir <intentumdiff-core checkout> --wasm-dir <built components>
 pip install cffi
 pip install -e .[dev,serve]
 ```

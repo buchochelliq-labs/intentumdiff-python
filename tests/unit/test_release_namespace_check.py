@@ -17,26 +17,26 @@ def _load_namespace_check():
     return module
 
 
-def test_default_probes_use_intentdiff_identity() -> None:
+def test_default_probes_use_intentumdiff_identity() -> None:
     helper = _load_namespace_check()
 
     probes = {probe.id: probe for probe in helper.default_probes()}
 
     assert probes["github-owner"].url == "https://github.com/buchochelliq-labs"
     assert probes["github-owner"].visible_statuses == (200,)
-    assert probes["pypi-project"].url == "https://pypi.org/pypi/intentdiff/json"
-    assert probes["github-repo"].url == "https://github.com/buchochelliq-labs/intentdiff"
+    assert probes["pypi-project"].url == "https://pypi.org/pypi/intentumdiff/json"
+    assert probes["github-repo"].url == "https://github.com/buchochelliq-labs/intentumdiff"
     assert probes["github-repo"].visible_statuses == (200,)
     assert (
         probes["github-plugin-repo"].url
-        == "https://github.com/buchochelliq-labs/intentdiff-registry"
+        == "https://github.com/buchochelliq-labs/intentumdiff-registry"
     )
     assert probes["github-plugin-repo"].visible_statuses == (200,)
     assert (
         probes["vs-marketplace-extension"].url
-        == "https://marketplace.visualstudio.com/items?itemName=buchochelliq-labs.intentdiff"
+        == "https://marketplace.visualstudio.com/items?itemName=buchochelliq-labs.intentumdiff"
     )
-    assert probes["open-vsx-extension"].url == "https://open-vsx.org/api/buchochelliq-labs/intentdiff"
+    assert probes["open-vsx-extension"].url == "https://open-vsx.org/api/buchochelliq-labs/intentumdiff"
 
 
 def test_collect_results_classifies_available_taken_and_unknown() -> None:
@@ -95,10 +95,10 @@ def test_main_json_reports_results_and_nonzero_for_taken(monkeypatch, capsys) ->
         return [
             helper.NamespaceResult(
                 id="pypi-project",
-                label="PyPI project intentdiff",
+                label="PyPI project intentumdiff",
                 status="taken",
                 detail="HTTP 200: public listing or namespace is already visible.",
-                url="https://pypi.org/pypi/intentdiff/json",
+                url="https://pypi.org/pypi/intentumdiff/json",
                 note="",
             )
         ]
@@ -127,8 +127,8 @@ def test_publish_workflow_has_testpypi_trusted_publisher_lane() -> None:
     # input, so the `${{ }}` form was a code-injection vector in the workflow that
     # publishes to PyPI (zizmor template-injection). Assert both halves: the safe form
     # is present, and the unsafe one has not crept back.
-    assert '--expected-version "$INTENTDIFF_EXPECTED_VERSION"' in workflow
-    assert "--expected-version ${{ env.INTENTDIFF_EXPECTED_VERSION }}" not in workflow
+    assert '--expected-version "$INTENTUMDIFF_EXPECTED_VERSION"' in workflow
+    assert "--expected-version ${{ env.INTENTUMDIFF_EXPECTED_VERSION }}" not in workflow
     assert "name: Publish to TestPyPI" in workflow
     assert "name: testpypi" in workflow
     assert "repository-url: https://test.pypi.org/legacy/" in workflow

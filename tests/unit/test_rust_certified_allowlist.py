@@ -6,9 +6,9 @@ import os
 
 import pytest
 
-from intentdiff import SemanticDiffer
-from intentdiff.core.models import ChangeType
-from intentdiff.differ import RUST_CERTIFIED_LANGUAGES, _rust_certified_languages
+from intentumdiff import SemanticDiffer
+from intentumdiff.core.models import ChangeType
+from intentumdiff.differ import RUST_CERTIFIED_LANGUAGES, _rust_certified_languages
 
 
 def test_python_is_certified_by_default() -> None:
@@ -17,10 +17,10 @@ def test_python_is_certified_by_default() -> None:
 
 
 def test_force_hook_adds_languages(monkeypatch) -> None:
-    monkeypatch.setenv("INTENTDIFF_FORCE_RUST_CERTIFIED", "delphi, Elixir")
+    monkeypatch.setenv("INTENTUMDIFF_FORCE_RUST_CERTIFIED", "delphi, Elixir")
     forced = _rust_certified_languages()
     assert {"python", "delphi", "elixir"} <= forced
-    monkeypatch.delenv("INTENTDIFF_FORCE_RUST_CERTIFIED")
+    monkeypatch.delenv("INTENTUMDIFF_FORCE_RUST_CERTIFIED")
     assert _rust_certified_languages() == RUST_CERTIFIED_LANGUAGES
 
 
@@ -37,7 +37,7 @@ def test_python_still_routes_through_certified_batch() -> None:
 
 
 @pytest.mark.skipif(
-    os.getenv("INTENTDIFF_ENFORCE_RUST_ONLY_ENGINE") == "1",
+    os.getenv("INTENTUMDIFF_ENFORCE_RUST_ONLY_ENGINE") == "1",
     reason=(
         "The tree-sitter delphi grammar reports parse errors on this fixture, so this diff "
         "is actually served by the coarse token-level fallback (the last non-Rust producer), "

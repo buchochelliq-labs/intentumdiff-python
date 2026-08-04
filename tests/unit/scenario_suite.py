@@ -10,7 +10,7 @@ set): :class:`LineScenarioSuite` (text/markdown/config, line-oriented) and
 :class:`CodeScenarioSuite` (programming languages, entity-oriented). Markdown adds a few
 section-aware scenarios via :class:`MarkdownScenarioSuite`.
 
-Each ``Case`` asserts the *expected clean behavior* from the intentdiff-diff-expectations oracle.
+Each ``Case`` asserts the *expected clean behavior* from the intentumdiff-diff-expectations oracle.
 A scenario the engine does not yet satisfy sets ``xfail=<reason>``: the assertion still RUNS and
 fails, so the gap is a failing test on the record; when the engine is fixed it reports XPASS
 ("remove the xfail"). A scenario a language legitimately omits is simply absent from ``CASES`` and
@@ -23,8 +23,8 @@ from dataclasses import dataclass
 
 import pytest
 
-from intentdiff import SemanticDiffer
-from intentdiff.core.models import ChangeType, RefactoringKind, SemanticDiff
+from intentumdiff import SemanticDiffer
+from intentumdiff.core.models import ChangeType, RefactoringKind, SemanticDiff
 
 _RENAME_KINDS = {
     RefactoringKind.RENAME_SYMBOL,

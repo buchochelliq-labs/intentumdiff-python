@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from intentdiff import SemanticDiffer
+from intentumdiff import SemanticDiffer
 
 # (language, filename, trivial-body source, real-body source)
 CASES = [

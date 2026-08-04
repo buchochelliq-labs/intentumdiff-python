@@ -1,4 +1,4 @@
-"""Unit tests for intentdiff.watcher."""
+"""Unit tests for intentumdiff.watcher."""
 from __future__ import annotations
 
 import threading
@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 if TYPE_CHECKING:
-    from intentdiff.watcher import FileWatcher
+    from intentumdiff.watcher import FileWatcher
 
 
 # ---------------------------------------------------------------------------
@@ -67,7 +67,7 @@ def _make_moved_event(src: str, dest: str) -> MagicMock:
 
 def _watcher(tmp_path: Path, **kw) -> "FileWatcher":
     """Create a FileWatcher for testing with a no-op render_fn."""
-    from intentdiff.watcher import FileWatcher
+    from intentumdiff.watcher import FileWatcher
 
     differ = MagicMock()
     return FileWatcher([tmp_path], differ, render_fn=MagicMock(), **kw)
@@ -84,7 +84,7 @@ class TestDebounce:
     ) -> None:
         """Three rapid on_modified events for the same path → only one timer survives."""
         # Use _LazyTimer so timers don't auto-fire; we manually invoke the survivor.
-        monkeypatch.setattr("intentdiff.watcher.threading.Timer", _LazyTimer)
+        monkeypatch.setattr("intentumdiff.watcher.threading.Timer", _LazyTimer)
 
         watcher = _watcher(tmp_path)
         calls: list[str] = []
@@ -108,7 +108,7 @@ class TestDebounce:
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         """Events for two different paths produce two _run_diff calls."""
-        monkeypatch.setattr("intentdiff.watcher.threading.Timer", _ImmediateTimer)
+        monkeypatch.setattr("intentumdiff.watcher.threading.Timer", _ImmediateTimer)
 
         watcher = _watcher(tmp_path)
         calls: list[str] = []
@@ -132,7 +132,7 @@ class TestDebounce:
             timers.append(t)
             return t
 
-        monkeypatch.setattr("intentdiff.watcher.threading.Timer", _tracking_timer)
+        monkeypatch.setattr("intentumdiff.watcher.threading.Timer", _tracking_timer)
 
         watcher = _watcher(tmp_path)
         watcher._run_diff = lambda p: None  # don't actually diff
@@ -199,7 +199,7 @@ class TestEventHandlerFiltering:
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         """on_created triggers a diff (handles atomic-rename saves)."""
-        monkeypatch.setattr("intentdiff.watcher.threading.Timer", _ImmediateTimer)
+        monkeypatch.setattr("intentumdiff.watcher.threading.Timer", _ImmediateTimer)
 
         watcher = _watcher(tmp_path)
         calls: list[str] = []
@@ -214,7 +214,7 @@ class TestEventHandlerFiltering:
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         """on_moved uses dest_path (rename-into-place pattern)."""
-        monkeypatch.setattr("intentdiff.watcher.threading.Timer", _ImmediateTimer)
+        monkeypatch.setattr("intentumdiff.watcher.threading.Timer", _ImmediateTimer)
 
         watcher = _watcher(tmp_path)
         calls: list[str] = []
@@ -246,7 +246,7 @@ class TestEventHandlerFiltering:
 class TestRunDiffExceptions:
     def _patched_watcher(self, tmp_path: Path) -> tuple["FileWatcher", list[str]]:
         """Return (watcher, warnings) where warnings captures _warn.print calls."""
-        from intentdiff.watcher import FileWatcher
+        from intentumdiff.watcher import FileWatcher
 
         differ = MagicMock()
         watcher = FileWatcher([tmp_path], differ, render_fn=MagicMock())
@@ -266,8 +266,8 @@ class TestRunDiffExceptions:
         watcher._differ.diff.side_effect = KeyError("blob not found")
 
         with (
-            patch("intentdiff.watcher.resolve_repo_root") as mock_resolve,
-            patch("intentdiff.watcher.WorkingTreeSource"),
+            patch("intentumdiff.watcher.resolve_repo_root") as mock_resolve,
+            patch("intentumdiff.watcher.WorkingTreeSource"),
         ):
             mock_resolve.return_value = str(tmp_path)
             watcher._run_diff(str(tmp_path / "new_file.py"))
@@ -276,14 +276,14 @@ class TestRunDiffExceptions:
 
     def test_plugin_not_found_is_silent(self, tmp_path: Path) -> None:
         """PluginNotFoundError is silently swallowed — no warnings, no crash."""
-        from intentdiff.plugins.exceptions import PluginNotFoundError
+        from intentumdiff.plugins.exceptions import PluginNotFoundError
 
         watcher, warnings = self._patched_watcher(tmp_path)
         watcher._differ.diff.side_effect = PluginNotFoundError("no parser for .toml")
 
         with (
-            patch("intentdiff.watcher.resolve_repo_root") as mock_resolve,
-            patch("intentdiff.watcher.WorkingTreeSource"),
+            patch("intentumdiff.watcher.resolve_repo_root") as mock_resolve,
+            patch("intentumdiff.watcher.WorkingTreeSource"),
         ):
             mock_resolve.return_value = str(tmp_path)
             watcher._run_diff(str(tmp_path / "config.toml"))
@@ -296,8 +296,8 @@ class TestRunDiffExceptions:
         watcher._differ.diff.side_effect = FileNotFoundError("gone")
 
         with (
-            patch("intentdiff.watcher.resolve_repo_root") as mock_resolve,
-            patch("intentdiff.watcher.WorkingTreeSource"),
+            patch("intentumdiff.watcher.resolve_repo_root") as mock_resolve,
+            patch("intentumdiff.watcher.WorkingTreeSource"),
         ):
             mock_resolve.return_value = str(tmp_path)
             watcher._run_diff(str(tmp_path / "gone.py"))
@@ -306,11 +306,11 @@ class TestRunDiffExceptions:
 
     def test_invalid_git_repo_prints_warning(self, tmp_path: Path) -> None:
         """NotAGitRepositoryError prints a warning and does not crash."""
-        from intentdiff.vcs.git_cli import NotAGitRepositoryError
+        from intentumdiff.vcs.git_cli import NotAGitRepositoryError
 
         watcher, warnings = self._patched_watcher(tmp_path)
 
-        with patch("intentdiff.watcher.resolve_repo_root") as mock_resolve:
+        with patch("intentumdiff.watcher.resolve_repo_root") as mock_resolve:
             mock_resolve.side_effect = NotAGitRepositoryError("not a repo")
             watcher._run_diff(str(tmp_path / "foo.py"))
 
@@ -322,8 +322,8 @@ class TestRunDiffExceptions:
         watcher._differ.diff.side_effect = RuntimeError("unexpected boom")
 
         with (
-            patch("intentdiff.watcher.resolve_repo_root") as mock_resolve,
-            patch("intentdiff.watcher.WorkingTreeSource"),
+            patch("intentumdiff.watcher.resolve_repo_root") as mock_resolve,
+            patch("intentumdiff.watcher.WorkingTreeSource"),
         ):
             mock_resolve.return_value = str(tmp_path)
             watcher._run_diff(str(tmp_path / "boom.py"))

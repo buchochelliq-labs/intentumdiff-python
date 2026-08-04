@@ -5,7 +5,7 @@ import logging
 
 import pytest
 
-from intentdiff.plugins import loader
+from intentumdiff.plugins import loader
 
 
 def test_structural_hash_valid_json_still_works() -> None:

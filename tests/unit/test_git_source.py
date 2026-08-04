@@ -14,8 +14,8 @@ from pathlib import Path
 import git
 import pytest
 
-from intentdiff.sources.git_source import GitSource, _safe_file_path
-from intentdiff.vcs.git_cli import NotAGitRepositoryError
+from intentumdiff.sources.git_source import GitSource, _safe_file_path
+from intentumdiff.vcs.git_cli import NotAGitRepositoryError
 
 
 # ---------------------------------------------------------------------------
@@ -174,10 +174,10 @@ class TestGitSourceGetContent:
 
 
 class TestCliGitRepoOptional:
-    """Test that 'intentdiff git FILE' works without an explicit REPO."""
+    """Test that 'intentumdiff git FILE' works without an explicit REPO."""
 
     def test_repo_defaults_to_dot(self):
-        from intentdiff.cli import _build_parser
+        from intentumdiff.cli import _build_parser
 
         parser = _build_parser()
         args = parser.parse_args(["git", "src/app.py"])
@@ -185,7 +185,7 @@ class TestCliGitRepoOptional:
         assert args.file == "src/app.py"
 
     def test_repo_explicit_overrides_default(self):
-        from intentdiff.cli import _build_parser
+        from intentumdiff.cli import _build_parser
 
         parser = _build_parser()
         args = parser.parse_args(["git", "/some/repo", "src/app.py"])
@@ -194,7 +194,7 @@ class TestCliGitRepoOptional:
 
     def test_invalid_repo_prints_clear_error(self, tmp_path, capsys):
         """_cmd_git prints a helpful message when repo is not a git repo."""
-        from intentdiff.cli import _build_parser, _cmd_git
+        from intentumdiff.cli import _build_parser, _cmd_git
         import argparse
 
         empty_dir = tmp_path / "not_a_repo"
@@ -215,7 +215,7 @@ class TestCliGitRepoOptional:
 
         monkeypatch.chdir(tmp_path)
 
-        from intentdiff.cli import _build_parser, _cmd_git
+        from intentumdiff.cli import _build_parser, _cmd_git
 
         parser = _build_parser()
         args = parser.parse_args(["git", "app.py"])          # no REPO
@@ -224,7 +224,7 @@ class TestCliGitRepoOptional:
         # Capture stdout (terminal format) — just verify it runs without error
         captured = []
         monkeypatch.setattr(
-            "intentdiff.cli._shared._render",
+            "intentumdiff.cli._shared._render",
             lambda diff, fmt, output, fuel=None: captured.append(diff),
         )
         _cmd_git(args)

@@ -12,10 +12,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from intentdiff.cache.sqlite_store import SqliteCacheStore
-from intentdiff.cache.store import CacheStore, _make_key
-from intentdiff.core.models import DiffConfig
-from intentdiff.differ import SemanticDiffer
+from intentumdiff.cache.sqlite_store import SqliteCacheStore
+from intentumdiff.cache.store import CacheStore, _make_key
+from intentumdiff.core.models import DiffConfig
+from intentumdiff.differ import SemanticDiffer
 
 # ---------------------------------------------------------------------------
 # _make_key
@@ -230,7 +230,7 @@ def test_differ_creates_sqlite_cache_from_config(tmp_path: Path):
 
 
 @pytest.mark.skipif(
-    os.getenv("INTENTDIFF_ENFORCE_RUST_ONLY_ENGINE") == "1",
+    os.getenv("INTENTUMDIFF_ENFORCE_RUST_ONLY_ENGINE") == "1",
     reason=(
         "Uses a fully MagicMock'd parser to control the cache key; the mock cannot satisfy "
         "the native Rust path the RUST_ONLY gate requires. Cache-hit behaviour with the real "
@@ -243,7 +243,7 @@ def test_diff_cache_hit_skips_wasm(tmp_path: Path):
     differ = SemanticDiffer(cache=cache)
 
     # Build a minimal valid SemanticDiff JSON and prime the diff cache
-    from intentdiff.core.models import SemanticDiff
+    from intentumdiff.core.models import SemanticDiff
     fake_diff = SemanticDiff(
         changes=[],
         old_filename="a.py",
@@ -313,21 +313,21 @@ class TestDuckDbLimitValidation:
     """most_changed_files must reject non-int or non-positive limit values."""
 
     def test_string_limit_raises(self, tmp_path: Path):
-        from intentdiff.cache.duckdb_store import DuckDBAnalyticsStore
+        from intentumdiff.cache.duckdb_store import DuckDBAnalyticsStore
         store = DuckDBAnalyticsStore(tmp_path / "analytics.db")
         with pytest.raises(ValueError, match="limit must be a positive integer"):
             store.most_changed_files(limit="injection")  # type: ignore[arg-type]
         store.close()
 
     def test_zero_limit_raises(self, tmp_path: Path):
-        from intentdiff.cache.duckdb_store import DuckDBAnalyticsStore
+        from intentumdiff.cache.duckdb_store import DuckDBAnalyticsStore
         store = DuckDBAnalyticsStore(tmp_path / "analytics.db")
         with pytest.raises(ValueError, match="limit must be a positive integer"):
             store.most_changed_files(limit=0)
         store.close()
 
     def test_valid_limit_works(self, tmp_path: Path):
-        from intentdiff.cache.duckdb_store import DuckDBAnalyticsStore
+        from intentumdiff.cache.duckdb_store import DuckDBAnalyticsStore
         store = DuckDBAnalyticsStore(tmp_path / "analytics.db")
         result = store.most_changed_files(limit=5)
         assert isinstance(result, list)
@@ -336,7 +336,7 @@ class TestDuckDbLimitValidation:
 
 class TestDuckDbDiagnostics:
     def test_records_normalized_fuel_diagnostics(self, tmp_path: Path):
-        from intentdiff.cache.duckdb_store import DuckDBAnalyticsStore
+        from intentumdiff.cache.duckdb_store import DuckDBAnalyticsStore
 
         store = DuckDBAnalyticsStore(tmp_path / "diagnostics.duckdb")
         diff = {

@@ -18,7 +18,7 @@ from typing import Any
 
 import pytest
 
-from intentdiff.differ import SemanticDiffer
+from intentumdiff.differ import SemanticDiffer
 
 
 @dataclass(frozen=True)

@@ -12,7 +12,7 @@ from __future__ import annotations
 import hashlib
 import itertools
 
-from intentdiff.core.models import Change, ChangeType, NodePosition, SemanticNode
+from intentumdiff.core.models import Change, ChangeType, NodePosition, SemanticNode
 
 # Module-level counter ensures unique IDs across all tree instances created
 # within a single test session.

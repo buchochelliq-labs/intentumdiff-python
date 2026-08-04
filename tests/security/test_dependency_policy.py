@@ -12,8 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from intentdiff.plugins.exceptions import PluginLoadError
-from intentdiff.plugins import loader
+from intentumdiff.plugins.exceptions import PluginLoadError
+from intentumdiff.plugins import loader
 
 
 _REPO_ROOT = Path(__file__).parent.parent.parent
@@ -58,7 +58,7 @@ def test_wasmtime_advisory_policy_matches_loader_blocklist() -> None:
 
 
 def test_vulnerable_wasmtime_is_blocked_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("INTENTDIFF_ALLOW_VULNERABLE_WASMTIME", raising=False)
+    monkeypatch.delenv("INTENTUMDIFF_ALLOW_VULNERABLE_WASMTIME", raising=False)
     monkeypatch.setattr(
         loader._importlib_metadata,
         "version",
@@ -72,7 +72,7 @@ def test_vulnerable_wasmtime_is_blocked_by_default(monkeypatch: pytest.MonkeyPat
 def test_vulnerable_wasmtime_blocks_first_party_plugins_without_override(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv("INTENTDIFF_ALLOW_VULNERABLE_WASMTIME", raising=False)
+    monkeypatch.delenv("INTENTUMDIFF_ALLOW_VULNERABLE_WASMTIME", raising=False)
     monkeypatch.setattr(
         loader._importlib_metadata,
         "version",
@@ -87,9 +87,9 @@ def test_repo_plugin_paths_are_not_first_party_trusted_exceptions() -> None:
     official_dbt_wasm = (
         _REPO_ROOT
         / "plugins"
-        / "intentdiff_dbt"
+        / "intentumdiff_dbt"
         / "src"
-        / "intentdiff_dbt"
+        / "intentumdiff_dbt"
         / "wasm"
         / "dbt_sql_parser.wasm"
     )
@@ -101,7 +101,7 @@ def test_existing_wasmtime_override_allows_with_warning(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    monkeypatch.setenv("INTENTDIFF_ALLOW_VULNERABLE_WASMTIME", "1")
+    monkeypatch.setenv("INTENTUMDIFF_ALLOW_VULNERABLE_WASMTIME", "1")
     monkeypatch.setattr(
         loader._importlib_metadata,
         "version",
@@ -110,13 +110,13 @@ def test_existing_wasmtime_override_allows_with_warning(
 
     loader._check_wasmtime_version()
 
-    assert "INTENTDIFF_ALLOW_VULNERABLE_WASMTIME is set" in caplog.text
+    assert "INTENTUMDIFF_ALLOW_VULNERABLE_WASMTIME is set" in caplog.text
 
 
 def test_osv_advisory_gate_blocks_trusted_first_party_plugins(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv("INTENTDIFF_ALLOW_VULNERABLE_WASMTIME", raising=False)
+    monkeypatch.delenv("INTENTUMDIFF_ALLOW_VULNERABLE_WASMTIME", raising=False)
     monkeypatch.setattr(loader, "_read_stamp", lambda: loader._time.time())
     monkeypatch.setattr(
         loader,

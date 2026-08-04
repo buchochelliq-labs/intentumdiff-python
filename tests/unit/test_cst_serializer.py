@@ -10,7 +10,7 @@ import pytest
 
 class TestSerializeCst:
     def test_round_trips_to_dict(self):
-        from intentdiff.core.cst_serializer import deserialize_cst, serialize_cst
+        from intentumdiff.core.cst_serializer import deserialize_cst, serialize_cst
         tree_sitter = pytest.importorskip(
             "tree_sitter", reason="parse-side debt dep (#82 split repo does not carry it)"
         )
@@ -28,7 +28,7 @@ class TestSerializeCst:
         assert "children" in data or "text" in data
 
     def test_leaf_has_text(self):
-        from intentdiff.core.cst_serializer import deserialize_cst, serialize_cst
+        from intentumdiff.core.cst_serializer import deserialize_cst, serialize_cst
         tree_sitter = pytest.importorskip(
             "tree_sitter", reason="parse-side debt dep (#82 split repo does not carry it)"
         )

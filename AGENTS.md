@@ -1,9 +1,9 @@
-# Agent instructions — intentdiff (Python)
+# Agent instructions — intentumdiff (Python)
 
 The **thin Python binding** + PyPI package. Zero functional work here.
 
 ## Hard invariants
-- Semantic logic belongs in intentdiff-core — never add engine behavior to this shell.
+- Semantic logic belongs in intentumdiff-core — never add engine behavior to this shell.
 - The suite's **skip ratchet** (`tests/unit/test_skip_ratchet.py`) fails on unclassified skip
   reasons: classify in `skip_reasons_baseline.json` or fix — never accumulate.
 - There is no Python fallback engine; a missing cdylib fails loudly.

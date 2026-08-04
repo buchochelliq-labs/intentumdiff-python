@@ -2,7 +2,7 @@
 Competitor-conformance tests based on SemanticDiff's public demo examples.
 
 These tests intentionally assert the behavior SemanticDiff exposes in its
-browser demo and docs, not IntentDiff's current internal output shape.
+browser demo and docs, not IntentumDiff's current internal output shape.
 They should fail whenever we drift below that visible bar.
 """
 
@@ -15,8 +15,8 @@ from typing import Any
 
 import pytest
 
-from intentdiff import SemanticDiffer
-from intentdiff.core.models import (
+from intentumdiff import SemanticDiffer
+from intentumdiff.core.models import (
     Change,
     ChangeGroupKind,
     ChangeType,

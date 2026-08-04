@@ -1,7 +1,7 @@
-# Contributing to intentdiff (Python)
+# Contributing to intentumdiff (Python)
 
 - **This is a thin binding.** Semantic logic belongs in
-  [intentdiff-core](https://github.com/buchochelliq-labs/intentdiff-core) — if a change makes
+  [intentumdiff-core](https://github.com/buchochelliq-labs/intentumdiff-core) — if a change makes
   Python compute something the engine could, it's in the wrong repo.
 - Set up per [docs/BUILDING.md](docs/BUILDING.md); run `python -m pytest tests/unit -q`.
 - The suite enforces its own hygiene: the **skip ratchet**

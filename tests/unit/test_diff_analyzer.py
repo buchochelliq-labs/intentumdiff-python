@@ -15,7 +15,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from intentdiff.core.models import (
+from intentumdiff.core.models import (
     Change,
     ChangeType,
     DiffConfig,
@@ -23,8 +23,8 @@ from intentdiff.core.models import (
     SemanticDiff,
     SemanticNode,
 )
-from intentdiff.plugins.adapter import DiffAnalyzerAdapter
-from intentdiff.plugins.registry import PluginRegistry
+from intentumdiff.plugins.adapter import DiffAnalyzerAdapter
+from intentumdiff.plugins.registry import PluginRegistry
 
 
 # ---------------------------------------------------------------------------
@@ -262,8 +262,8 @@ class TestPipelineDiffAnalyzerStage:
         """Stage 13.5 is called and can inject a custom change_type."""
         pytest.importorskip("tree_sitter_javascript")
 
-        from intentdiff import SemanticDiffer
-        from intentdiff.sources.string_source import StringSource
+        from intentumdiff import SemanticDiffer
+        from intentumdiff.sources.string_source import StringSource
 
         def _inject(diff_json, language, filename):
             data = json.loads(diff_json)
@@ -291,8 +291,8 @@ class TestPipelineDiffAnalyzerStage:
         """A crashing analyzer is skipped; the diff is still returned."""
         pytest.importorskip("tree_sitter_javascript")
 
-        from intentdiff import SemanticDiffer
-        from intentdiff.sources.string_source import StringSource
+        from intentumdiff import SemanticDiffer
+        from intentumdiff.sources.string_source import StringSource
 
         def _raise(diff_json, language, filename):
             raise RuntimeError("analyzer exploded")

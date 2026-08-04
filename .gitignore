@@ -1,8 +1,8 @@
 # Provisioned build inputs (staged by scripts/provision_build_inputs.py)
 /build/
-src/intentdiff/wasm/*.wasm
-src/intentdiff/wasm/wasm_provenance.json
-src/intentdiff/intentdiff_rust_core/
+src/intentumdiff/wasm/*.wasm
+src/intentumdiff/wasm/wasm_provenance.json
+src/intentumdiff/intentumdiff_rust_core/
 
 # Python
 __pycache__/

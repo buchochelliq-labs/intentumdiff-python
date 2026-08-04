@@ -7,12 +7,12 @@ build-backend = "maturin"
 
 [project]
 # DELIBERATE, not a fallback: this is the Python BINDING of a polyglot core, and it is
-# named for that role alongside its siblings (intentdiff-go, intentdiff-java, ...) per
-# docs/TARGET_ARCHITECTURE.md. Do NOT "fix" this back to a bare `intentdiff` if that PyPI
+# named for that role alongside its siblings (intentumdiff-go, intentumdiff-java, ...) per
+# docs/TARGET_ARCHITECTURE.md. Do NOT "fix" this back to a bare `intentumdiff` if that PyPI
 # name ever frees up - the per-language suffix is the convention, and renaming a published
 # distribution costs users an uninstall/reinstall for no benefit.
-# Distribution name only: the import is unchanged, `import intentdiff`.
-name = "intentdiff-python"
+# Distribution name only: the import is unchanged, `import intentumdiff`.
+name = "intentumdiff-python"
 version = "0.0.1"
 description = "Semantic code review: detect intent, moves, refactorings, and style changes"
 readme = "README.md"
@@ -37,10 +37,10 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/buchochelliq-labs/intentdiff"
-Repository = "https://github.com/buchochelliq-labs/intentdiff"
-Issues = "https://github.com/buchochelliq-labs/intentdiff/issues"
-Documentation = "https://github.com/buchochelliq-labs/intentdiff/tree/main/docs"
+Homepage = "https://github.com/buchochelliq-labs/intentumdiff"
+Repository = "https://github.com/buchochelliq-labs/intentumdiff"
+Issues = "https://github.com/buchochelliq-labs/intentumdiff/issues"
+Documentation = "https://github.com/buchochelliq-labs/intentumdiff/tree/main/docs"
 
 [project.optional-dependencies]
 dev = [
@@ -82,108 +82,108 @@ serve = [
 ]
 # Mercurial support needs only the `hg` CLI on PATH — the Rust core shells it directly
 # (#98, A2.4.4); python-hglib is no longer used. The extra is kept as a no-op so existing
-# `pip install "intentdiff[hg]"` invocations still resolve.
+# `pip install "intentumdiff[hg]"` invocations still resolve.
 hg = []
 # Perforce support needs only the `p4` CLI on PATH — the Rust core shells it directly
 # (#98, A2.4.4); p4python is no longer used. The extra is kept as a no-op so existing
-# `pip install "intentdiff[perforce]"` invocations still resolve.
+# `pip install "intentumdiff[perforce]"` invocations still resolve.
 perforce = []
 
 [project.scripts]
-intentdiff = "intentdiff.cli:main"
+intentumdiff = "intentumdiff.cli:main"
 
 # ── Built-in plugin registration ─────────────────────────────────────────────
 # All plugins (built-in and third-party) are discovered via these entry points.
 # Built-in plugins ship as pre-compiled .wasm files inside the package.
 
-[project.entry-points."intentdiff.parsers"]
-python     = "intentdiff.plugins.builtins:python_parser_entry"
-sql        = "intentdiff.plugins.builtins:sql_parser_entry"
-generic    = "intentdiff.plugins.builtins:generic_parser_entry"
-graphql   = "intentdiff.plugins.builtins:graphql_parser_entry"
-gitignore = "intentdiff.plugins.builtins:gitignore_parser_entry"
-ocaml     = "intentdiff.plugins.builtins:ocaml_parser_entry"
-reasonml  = "intentdiff.plugins.builtins:reasonml_parser_entry"
-latex     = "intentdiff.plugins.builtins:latex_parser_entry"
-asciidoc  = "intentdiff.plugins.builtins:asciidoc_parser_entry"
-po        = "intentdiff.plugins.builtins:po_parser_entry"
-javascript = "intentdiff.plugins.builtins:js_ts_parser_entry"
-typescript = "intentdiff.plugins.builtins:js_ts_parser_entry"
-tsx        = "intentdiff.plugins.builtins:js_ts_parser_entry"
-java       = "intentdiff.plugins.builtins:java_parser_entry"
-go         = "intentdiff.plugins.builtins:go_parser_entry"
-rust       = "intentdiff.plugins.builtins:rust_parser_entry"
-csharp     = "intentdiff.plugins.builtins:csharp_parser_entry"
-ruby       = "intentdiff.plugins.builtins:ruby_parser_entry"
-php        = "intentdiff.plugins.builtins:php_parser_entry"
-kotlin     = "intentdiff.plugins.builtins:kotlin_parser_entry"
-c          = "intentdiff.plugins.builtins:cpp_parser_entry"
-cpp        = "intentdiff.plugins.builtins:cpp_parser_entry"
-swift      = "intentdiff.plugins.builtins:swift_parser_entry"
-bash       = "intentdiff.plugins.builtins:bash_parser_entry"
-powershell = "intentdiff.plugins.builtins:powershell_parser_entry"
-elixir     = "intentdiff.plugins.builtins:elixir_parser_entry"
-groovy     = "intentdiff.plugins.builtins:groovy_parser_entry"
-dart       = "intentdiff.plugins.builtins:dart_parser_entry"
-lua        = "intentdiff.plugins.builtins:lua_parser_entry"
-xml        = "intentdiff.plugins.builtins:xml_parser_entry"
-dockerfile = "intentdiff.plugins.builtins:dockerfile_parser_entry"
-vbnet      = "intentdiff.plugins.builtins:vbnet_parser_entry"
-squirrel   = "intentdiff.plugins.builtins:squirrel_parser_entry"
-puppet     = "intentdiff.plugins.builtins:puppet_parser_entry"
-hcl        = "intentdiff.plugins.builtins:terraform_parser_entry"
-delphi     = "intentdiff.plugins.builtins:delphi_parser_entry"
-adf        = "intentdiff.plugins.builtins:adf_parser_entry"
-databricks-workflow = "intentdiff.plugins.builtins:databricks_parser_entry"
-mdx        = "intentdiff.plugins.builtins:mdx_parser_entry"
-markdown   = "intentdiff.plugins.builtins:markdown_parser_entry"
-toml       = "intentdiff.plugins.builtins:toml_parser_entry"
-ini        = "intentdiff.plugins.builtins:ini_parser_entry"
-gomod      = "intentdiff.plugins.builtins:gomod_parser_entry"
-make       = "intentdiff.plugins.builtins:make_parser_entry"
-proto      = "intentdiff.plugins.builtins:proto_parser_entry"
-cmake      = "intentdiff.plugins.builtins:cmake_parser_entry"
-r          = "intentdiff.plugins.builtins:r_parser_entry"
-haskell    = "intentdiff.plugins.builtins:haskell_parser_entry"
-zig        = "intentdiff.plugins.builtins:zig_parser_entry"
-scala      = "intentdiff.plugins.builtins:scala_parser_entry"
-clojure    = "intentdiff.plugins.builtins:clojure_parser_entry"
-perl             = "intentdiff.plugins.builtins:perl_parser_entry"
-asm              = "intentdiff.plugins.builtins:asm_parser_entry"
-assemblyscript   = "intentdiff.plugins.builtins:assemblyscript_parser_entry"
-odin             = "intentdiff.plugins.builtins:odin_parser_entry"
-wat              = "intentdiff.plugins.builtins:wat_parser_entry"
-tsql             = "intentdiff.plugins.builtins:tsql_parser_entry"
-plsql            = "intentdiff.plugins.builtins:plsql_parser_entry"
-abap             = "intentdiff.plugins.builtins:abap_parser_entry"
-dax              = "intentdiff.plugins.builtins:dax_parser_entry"
-m                = "intentdiff.plugins.builtins:dax_parser_entry"
-sas              = "intentdiff.plugins.builtins:sas_parser_entry"
-qsharp           = "intentdiff.plugins.builtins:qsharp_parser_entry"
-postscript       = "intentdiff.plugins.builtins:postscript_parser_entry"
-css              = "intentdiff.plugins.builtins:css_parser_entry"
-json             = "intentdiff.plugins.builtins:json_parser_entry"
-yaml             = "intentdiff.plugins.builtins:yaml_parser_entry"
-html             = "intentdiff.plugins.builtins:html_parser_entry"
-scss             = "intentdiff.plugins.builtins:scss_parser_entry"
-vue              = "intentdiff.plugins.builtins:vue_parser_entry"
-svelte           = "intentdiff.plugins.builtins:svelte_parser_entry"
-astro             = "intentdiff.plugins.builtins:astro_parser_entry"
+[project.entry-points."intentumdiff.parsers"]
+python     = "intentumdiff.plugins.builtins:python_parser_entry"
+sql        = "intentumdiff.plugins.builtins:sql_parser_entry"
+generic    = "intentumdiff.plugins.builtins:generic_parser_entry"
+graphql   = "intentumdiff.plugins.builtins:graphql_parser_entry"
+gitignore = "intentumdiff.plugins.builtins:gitignore_parser_entry"
+ocaml     = "intentumdiff.plugins.builtins:ocaml_parser_entry"
+reasonml  = "intentumdiff.plugins.builtins:reasonml_parser_entry"
+latex     = "intentumdiff.plugins.builtins:latex_parser_entry"
+asciidoc  = "intentumdiff.plugins.builtins:asciidoc_parser_entry"
+po        = "intentumdiff.plugins.builtins:po_parser_entry"
+javascript = "intentumdiff.plugins.builtins:js_ts_parser_entry"
+typescript = "intentumdiff.plugins.builtins:js_ts_parser_entry"
+tsx        = "intentumdiff.plugins.builtins:js_ts_parser_entry"
+java       = "intentumdiff.plugins.builtins:java_parser_entry"
+go         = "intentumdiff.plugins.builtins:go_parser_entry"
+rust       = "intentumdiff.plugins.builtins:rust_parser_entry"
+csharp     = "intentumdiff.plugins.builtins:csharp_parser_entry"
+ruby       = "intentumdiff.plugins.builtins:ruby_parser_entry"
+php        = "intentumdiff.plugins.builtins:php_parser_entry"
+kotlin     = "intentumdiff.plugins.builtins:kotlin_parser_entry"
+c          = "intentumdiff.plugins.builtins:cpp_parser_entry"
+cpp        = "intentumdiff.plugins.builtins:cpp_parser_entry"
+swift      = "intentumdiff.plugins.builtins:swift_parser_entry"
+bash       = "intentumdiff.plugins.builtins:bash_parser_entry"
+powershell = "intentumdiff.plugins.builtins:powershell_parser_entry"
+elixir     = "intentumdiff.plugins.builtins:elixir_parser_entry"
+groovy     = "intentumdiff.plugins.builtins:groovy_parser_entry"
+dart       = "intentumdiff.plugins.builtins:dart_parser_entry"
+lua        = "intentumdiff.plugins.builtins:lua_parser_entry"
+xml        = "intentumdiff.plugins.builtins:xml_parser_entry"
+dockerfile = "intentumdiff.plugins.builtins:dockerfile_parser_entry"
+vbnet      = "intentumdiff.plugins.builtins:vbnet_parser_entry"
+squirrel   = "intentumdiff.plugins.builtins:squirrel_parser_entry"
+puppet     = "intentumdiff.plugins.builtins:puppet_parser_entry"
+hcl        = "intentumdiff.plugins.builtins:terraform_parser_entry"
+delphi     = "intentumdiff.plugins.builtins:delphi_parser_entry"
+adf        = "intentumdiff.plugins.builtins:adf_parser_entry"
+databricks-workflow = "intentumdiff.plugins.builtins:databricks_parser_entry"
+mdx        = "intentumdiff.plugins.builtins:mdx_parser_entry"
+markdown   = "intentumdiff.plugins.builtins:markdown_parser_entry"
+toml       = "intentumdiff.plugins.builtins:toml_parser_entry"
+ini        = "intentumdiff.plugins.builtins:ini_parser_entry"
+gomod      = "intentumdiff.plugins.builtins:gomod_parser_entry"
+make       = "intentumdiff.plugins.builtins:make_parser_entry"
+proto      = "intentumdiff.plugins.builtins:proto_parser_entry"
+cmake      = "intentumdiff.plugins.builtins:cmake_parser_entry"
+r          = "intentumdiff.plugins.builtins:r_parser_entry"
+haskell    = "intentumdiff.plugins.builtins:haskell_parser_entry"
+zig        = "intentumdiff.plugins.builtins:zig_parser_entry"
+scala      = "intentumdiff.plugins.builtins:scala_parser_entry"
+clojure    = "intentumdiff.plugins.builtins:clojure_parser_entry"
+perl             = "intentumdiff.plugins.builtins:perl_parser_entry"
+asm              = "intentumdiff.plugins.builtins:asm_parser_entry"
+assemblyscript   = "intentumdiff.plugins.builtins:assemblyscript_parser_entry"
+odin             = "intentumdiff.plugins.builtins:odin_parser_entry"
+wat              = "intentumdiff.plugins.builtins:wat_parser_entry"
+tsql             = "intentumdiff.plugins.builtins:tsql_parser_entry"
+plsql            = "intentumdiff.plugins.builtins:plsql_parser_entry"
+abap             = "intentumdiff.plugins.builtins:abap_parser_entry"
+dax              = "intentumdiff.plugins.builtins:dax_parser_entry"
+m                = "intentumdiff.plugins.builtins:dax_parser_entry"
+sas              = "intentumdiff.plugins.builtins:sas_parser_entry"
+qsharp           = "intentumdiff.plugins.builtins:qsharp_parser_entry"
+postscript       = "intentumdiff.plugins.builtins:postscript_parser_entry"
+css              = "intentumdiff.plugins.builtins:css_parser_entry"
+json             = "intentumdiff.plugins.builtins:json_parser_entry"
+yaml             = "intentumdiff.plugins.builtins:yaml_parser_entry"
+html             = "intentumdiff.plugins.builtins:html_parser_entry"
+scss             = "intentumdiff.plugins.builtins:scss_parser_entry"
+vue              = "intentumdiff.plugins.builtins:vue_parser_entry"
+svelte           = "intentumdiff.plugins.builtins:svelte_parser_entry"
+astro             = "intentumdiff.plugins.builtins:astro_parser_entry"
 
-[project.entry-points."intentdiff.renderers"]
-terminal = "intentdiff.plugins.builtins:terminal_renderer_entry"
-patch    = "intentdiff.plugins.builtins:patch_renderer_entry"
-html     = "intentdiff.plugins.builtins:html_renderer_entry"
-llm      = "intentdiff.plugins.builtins:llm_renderer_entry"
+[project.entry-points."intentumdiff.renderers"]
+terminal = "intentumdiff.plugins.builtins:terminal_renderer_entry"
+patch    = "intentumdiff.plugins.builtins:patch_renderer_entry"
+html     = "intentumdiff.plugins.builtins:html_renderer_entry"
+llm      = "intentumdiff.plugins.builtins:llm_renderer_entry"
 
 # Diff-analyzer plugins post-process the classified SemanticDiff and can
 # add or modify Change objects with language-specific change_type strings.
 # Third-party packages register here via:
-#   [project.entry-points."intentdiff.diff_analyzers"]
+#   [project.entry-points."intentumdiff.diff_analyzers"]
 #   my-lang = "my_lang_plugin:diff_analyzer_wasm_path"
 
 # ── Maturin native wheel config ──────────────────────────────────────────────
-# IntentDiff is shipped as one native platform wheel. The wheel contains:
+# IntentumDiff is shipped as one native platform wheel. The wheel contains:
 # - the Python public API/CLI packages from src/
 # - pre-built first-party Wasm parser/renderer components
 # - the PyO3 Rust core host extension module
@@ -194,26 +194,26 @@ llm      = "intentdiff.plugins.builtins:llm_renderer_entry"
 # pre-compiled platform wheels.
 
 [tool.maturin]
-# The engine lives in intentdiff-core (#82 split) — this repo is the THIN Python binding.
-# `python scripts/provision_build_inputs.py` stages a pinned checkout of intentdiff-core at
-# build/intentdiff-core (and the built parser components into src/intentdiff/wasm) before any
+# The engine lives in intentumdiff-core (#82 split) — this repo is the THIN Python binding.
+# `python scripts/provision_build_inputs.py` stages a pinned checkout of intentumdiff-core at
+# build/intentumdiff-core (and the built parser components into src/intentumdiff/wasm) before any
 # wheel build; the monorepo remains the archive of record.
-manifest-path = "build/intentdiff-core/crates/rust-core-host/Cargo.toml"
+manifest-path = "build/intentumdiff-core/crates/rust-core-host/Cargo.toml"
 python-source = "src"
-module-name = "intentdiff.intentdiff_rust_core"
-python-packages = ["intentdiff"]
+module-name = "intentumdiff.intentumdiff_rust_core"
+python-packages = ["intentumdiff"]
 # The crate is PyO3-free (#82/B.6): both `maturin develop` and the release wheel build a bare cdylib
-# (`intentdiff/intentdiff_rust_core/intentdiff_rust_core.<ext>`) that `rust_core.py` loads via ctypes
+# (`intentumdiff/intentumdiff_rust_core/intentumdiff_rust_core.<ext>`) that `rust_core.py` loads via ctypes
 # over the C ABI. `bindings = "cffi"` builds + packages that cdylib (maturin embeds cbindgen; its
 # generated cffi wrapper is unused — the loader ctypes-loads the cdylib directly, so no cffi runtime
 # dep). Release: `maturin build --release -b cffi --compatibility pypi`.
 bindings = "cffi"
 include = [
-    { path = "src/intentdiff/wasm/*.wasm", format = "wheel" },
-    { path = "src/intentdiff/invariances/*.yaml", format = "wheel" },
-    { path = "src/intentdiff/invariances/*.json", format = "wheel" },
+    { path = "src/intentumdiff/wasm/*.wasm", format = "wheel" },
+    { path = "src/intentumdiff/invariances/*.yaml", format = "wheel" },
+    { path = "src/intentumdiff/invariances/*.json", format = "wheel" },
     # The published plugin-registry schema (#95) — loaded at runtime via resources.files.
-    { path = "src/intentdiff/plugins/*.json", format = "wheel" },
+    { path = "src/intentumdiff/plugins/*.json", format = "wheel" },
 ]
 
 # ── Ruff ─────────────────────────────────────────────────────────────────────
@@ -254,7 +254,7 @@ markers = [
 
 # ── Coverage ──────────────────────────────────────────────────────────────────
 [tool.coverage.run]
-source = ["src/intentdiff"]
+source = ["src/intentumdiff"]
 omit = ["*/wasm/*"]
 
 [tool.coverage.report]

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import json
 
-from intentdiff import SemanticDiffer
-from intentdiff.core.models import ChangeGroupKind, ChangeType
+from intentumdiff import SemanticDiffer
+from intentumdiff.core.models import ChangeGroupKind, ChangeType
 from tests.unit.diff_sanity import assert_no_identical_positioned_source_modifications
 
 

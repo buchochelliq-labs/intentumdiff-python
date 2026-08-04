@@ -14,8 +14,8 @@ addresses only the final changes it actually owns.
 
 from __future__ import annotations
 
-from intentdiff.analysis.text_review import normalize_generic_text_for_review
-from intentdiff.core.models import (
+from intentumdiff.analysis.text_review import normalize_generic_text_for_review
+from intentumdiff.core.models import (
     Change,
     ChangeGroup,
     ChangeGroupKind,

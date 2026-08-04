@@ -6,12 +6,12 @@ from pathlib import Path
 
 import pytest
 
-from intentdiff.analysis.diagnostics import DiagnosticsRecorder
-from intentdiff.analysis.guardrails import (
+from intentumdiff.analysis.diagnostics import DiagnosticsRecorder
+from intentumdiff.analysis.guardrails import (
     apply_guardrails_to_diff,
     load_guardrail_policy,
 )
-from intentdiff.core.models import (
+from intentumdiff.core.models import (
     Change,
     ChangeType,
     DiffConfig,
@@ -20,7 +20,7 @@ from intentdiff.core.models import (
     SemanticDiff,
     SemanticNode,
 )
-from intentdiff.differ import SemanticDiffer
+from intentumdiff.differ import SemanticDiffer
 
 
 def _pos(line: int = 0) -> NodePosition:
@@ -44,7 +44,7 @@ def _node(
 
 
 def _write_policy(tmp_path: Path, body: str) -> Path:
-    path = tmp_path / "intentdiff.yaml"
+    path = tmp_path / "intentumdiff.yaml"
     path.write_text(body, encoding="utf-8")
     return path
 
@@ -312,7 +312,7 @@ guardrails:
 
 def test_policy_file_is_protected_by_default() -> None:
     result = apply_guardrails_to_diff(
-        SemanticDiff.style_only("intentdiff.yaml", "intentdiff.yaml", "yaml"),
+        SemanticDiff.style_only("intentumdiff.yaml", "intentumdiff.yaml", "yaml"),
         old_tree=None,
         new_tree=None,
         old_source="guardrails: {}\n",
@@ -321,7 +321,7 @@ def test_policy_file_is_protected_by_default() -> None:
     )
 
     assert len(result.guardrail_violations) == 1
-    assert result.guardrail_violations[0].rule_id == "intentdiff.policy_file"
+    assert result.guardrail_violations[0].rule_id == "intentumdiff.policy_file"
     assert result.guardrail_violations[0].severity == GuardrailSeverity.IMMUTABLE
     assert result.guardrail_violations[0].position is None
 

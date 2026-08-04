@@ -6,12 +6,12 @@ Benchmarks and boundary tests for Wasm fuel budgets and maximum diff size.
 
 What is Wasm fuel?
 ------------------
-IntentDiff runs every language parser as a WebAssembly (Wasm) module
+IntentumDiff runs every language parser as a WebAssembly (Wasm) module
 inside the Wasmtime runtime.  Wasmtime supports *fuel-based metering*: before
 invoking a Wasm module a budget of "fuel" is deposited, and each Wasm
 instruction executed (``i32.add``, ``call``, ``br``, ...) costs exactly one
 unit.  When the budget hits zero Wasmtime traps immediately, which
-IntentDiff converts into ``PluginFuelExhausted``.
+IntentumDiff converts into ``PluginFuelExhausted``.
 
 Why does fuel matter?
 ---------------------
@@ -68,9 +68,9 @@ from __future__ import annotations
 
 import pytest
 
-from intentdiff import DiffConfig, SemanticDiffer, StringSource
-from intentdiff.core.models import FUEL_UNLIMITED
-from intentdiff.plugins.exceptions import PluginFuelExhausted
+from intentumdiff import DiffConfig, SemanticDiffer, StringSource
+from intentumdiff.core.models import FUEL_UNLIMITED
+from intentumdiff.plugins.exceptions import PluginFuelExhausted
 
 from tests.benchmarks.helpers import make_python_source
 

@@ -1,4 +1,4 @@
-"""Integration tests for ``intentdiff watch`` LiveServer CLI args."""
+"""Integration tests for ``intentumdiff watch`` LiveServer CLI args."""
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 class TestLiveServerArgParsing:
     def _parse(self, *args: str):
-        from intentdiff.cli import _build_parser
+        from intentumdiff.cli import _build_parser
 
         return _build_parser().parse_args(["watch", *args])
 
@@ -77,12 +77,12 @@ class TestLiveServerArgParsing:
 
 class TestStandaloneLiveServerArgParsing:
     def _parse(self, *args: str):
-        from intentdiff.cli import _build_parser
+        from intentumdiff.cli import _build_parser
 
         return _build_parser().parse_args(["live-server", *args])
 
     def test_defaults_to_stdio_repo_head(self) -> None:
-        from intentdiff.cli import _cmd_live_server
+        from intentumdiff.cli import _cmd_live_server
 
         args = self._parse()
 
@@ -102,7 +102,7 @@ class TestStandaloneLiveServerArgParsing:
         args = self._parse(
             "repo",
             "--socket",
-            "intentdiff.sock",
+            "intentumdiff.sock",
             "--ref",
             "origin/main",
             "--debounce",
@@ -113,7 +113,7 @@ class TestStandaloneLiveServerArgParsing:
         )
 
         assert args.repo == "repo"
-        assert args.socket == "intentdiff.sock"
+        assert args.socket == "intentumdiff.sock"
         assert args.ref == "origin/main"
         assert args.debounce == 0.4
         assert args.stream is True
@@ -124,7 +124,7 @@ class TestStandaloneLiveServerArgParsing:
         monkeypatch,
         tmp_path,
     ) -> None:
-        from intentdiff import cli
+        from intentumdiff import cli
 
         captured: dict = {}
 
@@ -150,7 +150,7 @@ class TestStandaloneLiveServerArgParsing:
             ]
         )
 
-        monkeypatch.setattr("intentdiff.live_server.LiveServer", _FakeLiveServer)
+        monkeypatch.setattr("intentumdiff.live_server.LiveServer", _FakeLiveServer)
         monkeypatch.setattr(cli._commands, "SemanticDiffer", lambda cfg: SimpleNamespace(_cache=None))
 
         cli._cmd_live_server(args)
@@ -169,7 +169,7 @@ class TestWatchLiveServerRuntimeWiring:
         monkeypatch,
         tmp_path,
     ) -> None:
-        from intentdiff import cli
+        from intentumdiff import cli
 
         captured: dict = {}
 
@@ -187,7 +187,7 @@ class TestWatchLiveServerRuntimeWiring:
             ["watch", str(tmp_path), "--live-stdin", "--ref", "origin/main"]
         )
 
-        monkeypatch.setattr("intentdiff.live_server.LiveServer", _FakeLiveServer)
+        monkeypatch.setattr("intentumdiff.live_server.LiveServer", _FakeLiveServer)
         monkeypatch.setattr(cli._commands, "SemanticDiffer", lambda cfg: SimpleNamespace(_cache=None))
 
         cli._cmd_watch(args)
@@ -202,7 +202,7 @@ class TestWatchLiveServerRuntimeWiring:
         monkeypatch,
         tmp_path,
     ) -> None:
-        from intentdiff import cli
+        from intentumdiff import cli
 
         captured: dict = {}
 
@@ -212,7 +212,7 @@ class TestWatchLiveServerRuntimeWiring:
 
             def start_socket(self, socket_path=None) -> str:
                 captured["socket_path"] = socket_path
-                return "intentdiff-test-socket"
+                return "intentumdiff-test-socket"
 
             def stop(self) -> None:
                 captured["stopped"] = True
@@ -242,8 +242,8 @@ class TestWatchLiveServerRuntimeWiring:
             ]
         )
 
-        monkeypatch.setattr("intentdiff.live_server.LiveServer", _FakeLiveServer)
-        monkeypatch.setattr("intentdiff.watcher.FileWatcher", _FakeWatcher)
+        monkeypatch.setattr("intentumdiff.live_server.LiveServer", _FakeLiveServer)
+        monkeypatch.setattr("intentumdiff.watcher.FileWatcher", _FakeWatcher)
         monkeypatch.setattr(cli._commands, "SemanticDiffer", lambda cfg: SimpleNamespace(_cache=None))
 
         cli._cmd_watch(args)

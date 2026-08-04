@@ -6,9 +6,9 @@ from dataclasses import dataclass
 
 import pytest
 
-from intentdiff import SemanticDiffer
-from intentdiff.core.models import ChangeGroupKind, ChangeType, DiffConfig
-from intentdiff.plugins.exceptions import PluginFuelExhausted
+from intentumdiff import SemanticDiffer
+from intentumdiff.core.models import ChangeGroupKind, ChangeType, DiffConfig
+from intentumdiff.plugins.exceptions import PluginFuelExhausted
 from pathlib import Path
 
 pytestmark = pytest.mark.skipif(
@@ -489,7 +489,7 @@ export const answer = 42;
 """,
         # One changed prose/code line = one line-level MODIFICATION (whole-line label, char
         # detail in text_diff) — not per-character text_span churn (the old "2" label). See
-        # the intentdiff-diff-expectations oracle and _generic_line_modification.
+        # the intentumdiff-diff-expectations oracle and _generic_line_modification.
         modified_labels=frozenset({"export const answer = 42;"}),
     ),
     IntentScenario(

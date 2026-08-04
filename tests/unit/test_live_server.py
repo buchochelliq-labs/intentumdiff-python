@@ -21,7 +21,7 @@ import pytest
 
 def _make_differ(language: str = "python"):
     """Return a SemanticDiffer mock that returns a minimal SemanticDiff."""
-    from intentdiff.core.models import CommitDiff, SemanticDiff
+    from intentumdiff.core.models import CommitDiff, SemanticDiff
 
     diff = SemanticDiff(
         old_filename="foo.py",
@@ -43,7 +43,7 @@ def _make_differ(language: str = "python"):
 
 
 def _make_server(**kw):
-    from intentdiff.live_server import LiveServer
+    from intentumdiff.live_server import LiveServer
 
     differ = _make_differ()
     kw.setdefault("repo_path", tempfile.mkdtemp())
@@ -96,7 +96,7 @@ class _Cp1252Stream:
 
 class TestProtocolV2:
     def test_protocol_output_is_ascii_safe_for_windows_stdio(self) -> None:
-        from intentdiff.live_server import _write_line
+        from intentumdiff.live_server import _write_line
 
         stream = _Cp1252Stream()
 
@@ -152,7 +152,7 @@ class TestProtocolV2:
         server, differ = _make_server(debounce=0.1)
         sent: list[dict] = []
 
-        with patch("intentdiff.live_server.threading.Timer", side_effect=_fake_timer):
+        with patch("intentumdiff.live_server.threading.Timer", side_effect=_fake_timer):
             server._schedule_request(
                 {"op": "diff", "path": "foo.py", "content": "x", "seq": 4},
                 lambda obj: sent.append(obj),
@@ -175,7 +175,7 @@ class TestProtocolV2:
             captured.append(kwargs["ref"])
             return MagicMock()
 
-        with patch("intentdiff.live_server.LiveBufferSource", side_effect=_capture):
+        with patch("intentumdiff.live_server.LiveBufferSource", side_effect=_capture):
             server._process_request(
                 {
                     "op": "diff",
@@ -190,7 +190,7 @@ class TestProtocolV2:
         assert captured == ["feature"]
 
     def test_review_returns_commit_diff_json(self) -> None:
-        from intentdiff.core.models import ChangeType, CommitDiff, CrossFileChange
+        from intentumdiff.core.models import ChangeType, CommitDiff, CrossFileChange
 
         server, _ = _make_server(ref="origin/main")
         commit_diff = CommitDiff(
@@ -208,7 +208,7 @@ class TestProtocolV2:
         )
         sent: list[dict] = []
 
-        with patch("intentdiff.core.commit_differ.CommitDiffer") as commit_differ:
+        with patch("intentumdiff.core.commit_differ.CommitDiffer") as commit_differ:
             commit_differ.return_value.diff_commit.return_value = commit_diff
             server._process_request({"op": "review", "seq": 12}, lambda obj: sent.append(obj))
 
@@ -218,8 +218,8 @@ class TestProtocolV2:
         assert sent[0]["metadata"]["cross_file_change_count"] == 1
 
     def test_review_streaming_emits_per_file_events_then_terminal(self) -> None:
-        from intentdiff.core.commit_differ import FileDiffResult
-        from intentdiff.core.models import CommitDiff, SemanticDiff
+        from intentumdiff.core.commit_differ import FileDiffResult
+        from intentumdiff.core.models import CommitDiff, SemanticDiff
 
         server, _ = _make_server(ref="HEAD")
         diff_a = SemanticDiff(old_filename="a.py", new_filename="a.py", language="python")
@@ -232,7 +232,7 @@ class TestProtocolV2:
             file_diffs=[diff_a, diff_b],
         )
 
-        with patch("intentdiff.core.commit_differ.CommitDiffer") as commit_differ:
+        with patch("intentumdiff.core.commit_differ.CommitDiffer") as commit_differ:
             commit_differ.return_value.iter_file_diffs.return_value = iter([
                 FileDiffResult(diff_a, "a.py", "a.py", "old a", "new a"),
                 FileDiffResult(diff_b, "b.py", "b.py", "old b", "new b"),
@@ -256,12 +256,12 @@ class TestProtocolV2:
         assert len(terminals[0]["commit_diff"]["file_diffs"]) == 2
 
     def test_review_without_stream_emits_only_terminal_event(self) -> None:
-        from intentdiff.core.models import CommitDiff
+        from intentumdiff.core.models import CommitDiff
 
         server, _ = _make_server(ref="HEAD")
         sent: list[dict] = []
 
-        with patch("intentdiff.core.commit_differ.CommitDiffer") as commit_differ:
+        with patch("intentumdiff.core.commit_differ.CommitDiffer") as commit_differ:
             commit_differ.return_value.diff_commit.return_value = CommitDiff(
                 old_ref="HEAD", new_ref=""
             )
@@ -275,12 +275,12 @@ class TestProtocolV2:
         assert sent[0]["metadata"]["streamed"] is False
 
     def test_review_honors_request_refs(self) -> None:
-        from intentdiff.core.models import CommitDiff
+        from intentumdiff.core.models import CommitDiff
 
         server, _ = _make_server(ref="HEAD")
         sent: list[dict] = []
 
-        with patch("intentdiff.core.commit_differ.CommitDiffer") as commit_differ:
+        with patch("intentumdiff.core.commit_differ.CommitDiffer") as commit_differ:
             commit_differ.return_value.diff_commit.return_value = CommitDiff(
                 old_ref="main",
                 new_ref="feature",
@@ -302,7 +302,7 @@ class TestProtocolV2:
         server, _ = _make_server(ref="HEAD")
         sent: list[dict] = []
 
-        with patch("intentdiff.core.commit_differ.CommitDiffer") as commit_differ:
+        with patch("intentumdiff.core.commit_differ.CommitDiffer") as commit_differ:
             commit_differ.return_value.diff_commit.side_effect = RuntimeError(
                 "No parser plugins could be loaded"
             )
@@ -314,14 +314,14 @@ class TestProtocolV2:
         assert "No parser plugins could be loaded" in sent[0]["error"]["message"]
 
     def test_review_caps_unlimited_live_fuel_with_fresh_registry(self) -> None:
-        from intentdiff.core.models import CommitDiff, DiffConfig
+        from intentumdiff.core.models import CommitDiff, DiffConfig
 
         server, differ = _make_server(ref="HEAD")
         differ._config = DiffConfig(plugin_fuel=-1)
         differ._registry = object()
         sent: list[dict] = []
 
-        with patch("intentdiff.core.commit_differ.CommitDiffer") as commit_differ:
+        with patch("intentumdiff.core.commit_differ.CommitDiffer") as commit_differ:
             commit_differ.return_value.diff_commit.return_value = CommitDiff(
                 old_ref="HEAD",
                 new_ref="",
@@ -365,7 +365,7 @@ class TestDebounce:
 
         server, differ = _make_server(debounce=0.1)
 
-        with patch("intentdiff.live_server.threading.Timer", side_effect=_fake_timer):
+        with patch("intentumdiff.live_server.threading.Timer", side_effect=_fake_timer):
             calls = []
             req = {"path": "foo.py", "content": "x=1", "seq": 1}
             server._schedule_request(req, lambda obj: calls.append(obj))
@@ -391,7 +391,7 @@ class TestDebounce:
 
         server, differ = _make_server(debounce=0.1)
 
-        with patch("intentdiff.live_server.threading.Timer", side_effect=_fake_timer):
+        with patch("intentumdiff.live_server.threading.Timer", side_effect=_fake_timer):
             server._schedule_request(
                 {"path": "a.py", "content": "x", "seq": 1}, lambda _: None
             )
@@ -420,7 +420,7 @@ class TestSeqDiscarding:
             return t
 
         server, differ = _make_server(debounce=0.0)
-        with patch("intentdiff.live_server.threading.Timer", side_effect=_fake_timer):
+        with patch("intentumdiff.live_server.threading.Timer", side_effect=_fake_timer):
             # seq=5 arrives first — sets latest_seq["foo.py"] = 5
             server._schedule_request(
                 {"path": "foo.py", "content": "a", "seq": 5}, lambda _: None
@@ -459,7 +459,7 @@ class TestProcessRequest:
         sent = []
 
         with patch(
-            "intentdiff.live_server.LiveBufferSource",
+            "intentumdiff.live_server.LiveBufferSource",
             return_value=MagicMock(),
         ):
             server._process_request(
@@ -475,7 +475,7 @@ class TestProcessRequest:
         assert sent[0]["metadata"]["language"] == "python"
 
     def test_streaming_returns_events_then_done(self) -> None:
-        from intentdiff.core.models import ChangeStreamEvent, ChangeStreamPhase
+        from intentumdiff.core.models import ChangeStreamEvent, ChangeStreamPhase
 
         event = ChangeStreamEvent(
             phase=ChangeStreamPhase.STRUCTURAL, action="add", change=None
@@ -483,13 +483,13 @@ class TestProcessRequest:
         differ = _make_differ()
         differ.diff_stream_progressive.return_value = iter([event])
 
-        from intentdiff.live_server import LiveServer
+        from intentumdiff.live_server import LiveServer
 
         server = LiveServer(differ, repo_path=tempfile.mkdtemp(), stream_analysis=True)
         sent = []
 
         with patch(
-            "intentdiff.live_server.LiveBufferSource",
+            "intentumdiff.live_server.LiveBufferSource",
             return_value=MagicMock(),
         ):
             server._process_request(
@@ -504,13 +504,13 @@ class TestProcessRequest:
         differ = _make_differ()
         differ.diff.side_effect = FileNotFoundError("no such file")
 
-        from intentdiff.live_server import LiveServer
+        from intentumdiff.live_server import LiveServer
 
         server = LiveServer(differ, repo_path=tempfile.mkdtemp())
         sent = []
 
         with patch(
-            "intentdiff.live_server.LiveBufferSource",
+            "intentumdiff.live_server.LiveBufferSource",
             return_value=MagicMock(),
         ):
             server._process_request(
@@ -528,7 +528,7 @@ class TestProcessRequest:
         sent = []
 
         with patch(
-            "intentdiff.live_server.LiveBufferSource",
+            "intentumdiff.live_server.LiveBufferSource",
             return_value=MagicMock(),
         ):
             server._process_request(
@@ -558,10 +558,10 @@ class TestNativeDiffHandler:
     def test_native_python_diff_matches_differ(self, tmp_path: Path) -> None:
         import subprocess
 
-        from intentdiff import rust_core
-        from intentdiff.core.models import SemanticDiff
-        from intentdiff.differ import SemanticDiffer
-        from intentdiff.live_server import _wasm_dir
+        from intentumdiff import rust_core
+        from intentumdiff.core.models import SemanticDiff
+        from intentumdiff.differ import SemanticDiffer
+        from intentumdiff.live_server import _wasm_dir
 
         def git(*args: str) -> None:
             subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
@@ -602,10 +602,10 @@ class TestNativeDiffHandler:
         (still correct) and the test skips."""
         import subprocess
 
-        from intentdiff import rust_core
-        from intentdiff.core.models import SemanticDiff
-        from intentdiff.differ import SemanticDiffer
-        from intentdiff.live_server import _wasm_dir
+        from intentumdiff import rust_core
+        from intentumdiff.core.models import SemanticDiff
+        from intentumdiff.differ import SemanticDiffer
+        from intentumdiff.live_server import _wasm_dir
 
         def git(*args: str) -> None:
             subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
@@ -681,10 +681,10 @@ class TestNativeDiffHandler:
         special-case regressed exactly this)."""
         import subprocess
 
-        from intentdiff import rust_core
-        from intentdiff.core.models import SemanticDiff
-        from intentdiff.differ import SemanticDiffer
-        from intentdiff.live_server import _wasm_dir
+        from intentumdiff import rust_core
+        from intentumdiff.core.models import SemanticDiff
+        from intentumdiff.differ import SemanticDiffer
+        from intentumdiff.live_server import _wasm_dir
 
         def git(*args: str) -> None:
             subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
@@ -758,16 +758,16 @@ class TestNativeDiffHandler:
         )
 
     def test_native_diff_serves_with_empty_guardrail_policy(self, tmp_path: Path) -> None:
-        """A repo whose intentdiff.yaml carries `guardrails: protected: []` (a pure CONFIG file —
+        """A repo whose intentumdiff.yaml carries `guardrails: protected: []` (a pure CONFIG file —
         this repo's own dogfood shape) attaches ZERO violations in the differ, so the native path
         must SERVE it, not blanket-fall-back. Regression-locks the 'guardrail policy in effect'
         error that blocked every file of the dogfood repo in the VS Code side-by-side."""
         import subprocess
 
-        from intentdiff import rust_core
-        from intentdiff.core.models import SemanticDiff
-        from intentdiff.differ import SemanticDiffer
-        from intentdiff.live_server import _wasm_dir
+        from intentumdiff import rust_core
+        from intentumdiff.core.models import SemanticDiff
+        from intentumdiff.differ import SemanticDiffer
+        from intentumdiff.live_server import _wasm_dir
 
         def git(*args: str) -> None:
             subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
@@ -775,12 +775,12 @@ class TestNativeDiffHandler:
         git("init")
         git("config", "user.email", "t@example.com")
         git("config", "user.name", "T")
-        (tmp_path / "intentdiff.yaml").write_text(
+        (tmp_path / "intentumdiff.yaml").write_text(
             "config:\n  min_similarity: 0.5\n\nguardrails:\n  protected: []\n",
             encoding="utf-8",
         )
         (tmp_path / "a.ts").write_text("const x: number = 1;\n", encoding="utf-8")
-        git("add", "intentdiff.yaml", "a.ts")
+        git("add", "intentumdiff.yaml", "a.ts")
         git("commit", "-m", "v1")
 
         differ = SemanticDiffer()
@@ -810,10 +810,10 @@ class TestNativeDiffHandler:
         the A1.3 rule engine, all in Rust)."""
         import subprocess
 
-        from intentdiff import rust_core
-        from intentdiff.core.models import SemanticDiff
-        from intentdiff.differ import SemanticDiffer
-        from intentdiff.live_server import _wasm_dir
+        from intentumdiff import rust_core
+        from intentumdiff.core.models import SemanticDiff
+        from intentumdiff.differ import SemanticDiffer
+        from intentumdiff.live_server import _wasm_dir
 
         def git(*args: str) -> None:
             subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
@@ -821,7 +821,7 @@ class TestNativeDiffHandler:
         git("init")
         git("config", "user.email", "t@example.com")
         git("config", "user.name", "T")
-        policy = tmp_path / "intentdiff.yaml"
+        policy = tmp_path / "intentumdiff.yaml"
         policy.write_text(
             "guardrails:\n"
             "  protected:\n"
@@ -835,7 +835,7 @@ class TestNativeDiffHandler:
         old = '{\n  "version": 1,\n  "name": "x"\n}\n'
         new = '{\n  "version": 2,\n  "name": "x"\n}\n'
         (tmp_path / "d.json").write_text(old, encoding="utf-8")
-        git("add", "intentdiff.yaml", "d.json")
+        git("add", "intentumdiff.yaml", "d.json")
         git("commit", "-m", "v1")
 
         base = SemanticDiffer()
@@ -859,9 +859,9 @@ class TestNativeDiffHandler:
         defer for those, never silently drop or mis-read a rule."""
         import subprocess
 
-        from intentdiff import rust_core
-        from intentdiff.differ import SemanticDiffer
-        from intentdiff.live_server import _wasm_dir
+        from intentumdiff import rust_core
+        from intentumdiff.differ import SemanticDiffer
+        from intentumdiff.live_server import _wasm_dir
 
         def git(*args: str) -> None:
             subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
@@ -869,7 +869,7 @@ class TestNativeDiffHandler:
         git("init")
         git("config", "user.email", "t@example.com")
         git("config", "user.name", "T")
-        (tmp_path / "intentdiff.yaml").write_text(
+        (tmp_path / "intentumdiff.yaml").write_text(
             "guardrails:\n"
             "  protected:\n"
             "    - language: json\n"
@@ -878,7 +878,7 @@ class TestNativeDiffHandler:
             encoding="utf-8",
         )
         (tmp_path / "a.ts").write_text("const x: number = 1;\n", encoding="utf-8")
-        git("add", "intentdiff.yaml", "a.ts")
+        git("add", "intentumdiff.yaml", "a.ts")
         git("commit", "-m", "v1")
 
         differ = SemanticDiffer()
@@ -894,14 +894,14 @@ class TestNativeDiffHandler:
         assert "severity" in native["fallback"]
 
     def test_native_diff_flags_policy_file_edit_as_immutable(self, tmp_path: Path) -> None:
-        """Editing intentdiff.yaml itself must attach the IMMUTABLE `intentdiff.policy_file`
+        """Editing intentumdiff.yaml itself must attach the IMMUTABLE `intentumdiff.policy_file`
         violation on the served diff, exactly like `apply_guardrails_to_diff`."""
         import subprocess
 
-        from intentdiff import rust_core
-        from intentdiff.core.models import SemanticDiff
-        from intentdiff.live_server import _wasm_dir
-        from intentdiff.differ import SemanticDiffer
+        from intentumdiff import rust_core
+        from intentumdiff.core.models import SemanticDiff
+        from intentumdiff.live_server import _wasm_dir
+        from intentumdiff.differ import SemanticDiffer
 
         def git(*args: str) -> None:
             subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
@@ -911,14 +911,14 @@ class TestNativeDiffHandler:
         git("config", "user.name", "T")
         old = "config:\n  min_similarity: 0.5\n\nguardrails:\n  protected: []\n"
         new = "config:\n  min_similarity: 0.6\n\nguardrails:\n  protected: []\n"
-        (tmp_path / "intentdiff.yaml").write_text(old, encoding="utf-8")
-        git("add", "intentdiff.yaml")
+        (tmp_path / "intentumdiff.yaml").write_text(old, encoding="utf-8")
+        git("add", "intentumdiff.yaml")
         git("commit", "-m", "v1")
 
         differ = SemanticDiffer()
         native = rust_core.live_handle_diff(
             str(tmp_path),
-            "intentdiff.yaml",
+            "intentumdiff.yaml",
             "HEAD",
             new,
             differ._config.model_dump_json(),
@@ -927,7 +927,7 @@ class TestNativeDiffHandler:
         assert "diff" in native, f"policy-file edit must serve with the violation: {native}"
         served = json.loads(SemanticDiff.model_validate(native["diff"]).model_dump_json())
         rules = [(v["rule_id"], v["severity"]) for v in served["guardrail_violations"]]
-        assert ("intentdiff.policy_file", "immutable") in rules
+        assert ("intentumdiff.policy_file", "immutable") in rules
         assert served["metadata"]["guardrails"]["immutable_count"] >= 1
 
     def test_native_unknown_extension_diff_serves_generic(self, tmp_path: Path) -> None:
@@ -957,11 +957,11 @@ class TestNativeReviewHandler:
     def test_native_python_review_matches_commit_differ(self, tmp_path: Path) -> None:
         import subprocess
 
-        from intentdiff import rust_core
-        from intentdiff.core.commit_differ import CommitDiffer
-        from intentdiff.core.models import CommitDiff
-        from intentdiff.differ import SemanticDiffer
-        from intentdiff.live_server import _wasm_dir
+        from intentumdiff import rust_core
+        from intentumdiff.core.commit_differ import CommitDiffer
+        from intentumdiff.core.models import CommitDiff
+        from intentumdiff.differ import SemanticDiffer
+        from intentumdiff.live_server import _wasm_dir
 
         def git(*args: str) -> None:
             subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
@@ -1005,11 +1005,11 @@ class TestNativeReviewHandler:
         any uncovered case."""
         import subprocess
 
-        from intentdiff import rust_core
-        from intentdiff.core.commit_differ import CommitDiffer
-        from intentdiff.core.models import CommitDiff
-        from intentdiff.differ import SemanticDiffer
-        from intentdiff.live_server import _wasm_dir
+        from intentumdiff import rust_core
+        from intentumdiff.core.commit_differ import CommitDiffer
+        from intentumdiff.core.models import CommitDiff
+        from intentumdiff.differ import SemanticDiffer
+        from intentumdiff.live_server import _wasm_dir
 
         def git(*args: str) -> None:
             subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
@@ -1078,11 +1078,11 @@ class TestNativeReviewHandler:
         types AND staging statuses (unstaged / staged / untracked)."""
         import subprocess
 
-        from intentdiff import rust_core
-        from intentdiff.core.commit_differ import CommitDiffer
-        from intentdiff.core.models import CommitDiff
-        from intentdiff.differ import SemanticDiffer
-        from intentdiff.live_server import _wasm_dir
+        from intentumdiff import rust_core
+        from intentumdiff.core.commit_differ import CommitDiffer
+        from intentumdiff.core.models import CommitDiff
+        from intentumdiff.differ import SemanticDiffer
+        from intentumdiff.live_server import _wasm_dir
 
         def git(*args: str) -> None:
             subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
@@ -1156,13 +1156,13 @@ class TestStartStdin:
         output = StringIO()
 
         with patch(
-            "intentdiff.live_server.sys.stdin",
+            "intentumdiff.live_server.sys.stdin",
             iter([request_line + "\n"]),
         ), patch(
-            "intentdiff.live_server.sys.stdout",
+            "intentumdiff.live_server.sys.stdout",
             output,
         ), patch(
-            "intentdiff.live_server.LiveBufferSource",
+            "intentumdiff.live_server.LiveBufferSource",
             return_value=MagicMock(),
         ):
             server.start_stdin()
@@ -1179,10 +1179,10 @@ class TestStartStdin:
         output = StringIO()
 
         with patch(
-            "intentdiff.live_server.sys.stdin",
+            "intentumdiff.live_server.sys.stdin",
             iter(["not valid json\n"]),
         ), patch(
-            "intentdiff.live_server.sys.stdout",
+            "intentumdiff.live_server.sys.stdout",
             output,
         ):
             server.start_stdin()
@@ -1209,7 +1209,7 @@ class TestStop:
 
         server, _ = _make_server(debounce=10.0)  # never fires naturally
 
-        with patch("intentdiff.live_server.threading.Timer", side_effect=_fake_timer):
+        with patch("intentumdiff.live_server.threading.Timer", side_effect=_fake_timer):
             server._schedule_request(
                 {"path": "foo.py", "content": "x", "seq": 1}, lambda _: None
             )
@@ -1239,7 +1239,7 @@ class TestSecurityBoundaries:
             captured.append(str(kwargs.get("repo_path", args[0] if args else "")))
             return MagicMock()
 
-        with patch("intentdiff.live_server.LiveBufferSource", side_effect=_capture):
+        with patch("intentumdiff.live_server.LiveBufferSource", side_effect=_capture):
             server._process_request(
                 {"path": "foo.py", "content": "x", "seq": 1, "repo_path": "/attacker/path"},
                 lambda _: None,
@@ -1315,7 +1315,7 @@ class TestNamedPipeServer:
     def _start_pipe(self):
         """Force the named-pipe path by patching _has_unix_socket."""
         server, differ = _make_server(debounce=0)
-        with patch("intentdiff.live_server._has_unix_socket", return_value=False):
+        with patch("intentumdiff.live_server._has_unix_socket", return_value=False):
             addr = server.start_socket()
         return server, differ, addr
 
@@ -1442,7 +1442,7 @@ class TestNamedPipeServer:
         server, _, addr = self._start_pipe()
         try:
             with patch(
-                "intentdiff.live_server.LiveBufferSource",
+                "intentumdiff.live_server.LiveBufferSource",
                 return_value=MagicMock(),
             ):
                 resp = self._roundtrip(
@@ -1479,7 +1479,7 @@ class TestTransportSelection:
         """On win32, _has_unix_socket() must return False regardless of AF_UNIX."""
         import socket as _socket
 
-        from intentdiff import live_server as _ls
+        from intentumdiff import live_server as _ls
 
         monkeypatch.setattr(_ls.sys, "platform", "win32")
         # Ensure AF_UNIX appears to be available so the old bug would show True.
@@ -1490,7 +1490,7 @@ class TestTransportSelection:
         """On a non-win32 platform with AF_UNIX, _has_unix_socket() must return True."""
         import socket as _socket
 
-        from intentdiff import live_server as _ls
+        from intentumdiff import live_server as _ls
 
         monkeypatch.setattr(_ls.sys, "platform", "linux")
         monkeypatch.setattr(_socket, "AF_UNIX", 1, raising=False)

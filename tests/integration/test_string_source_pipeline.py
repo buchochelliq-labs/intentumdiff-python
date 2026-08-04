@@ -12,8 +12,8 @@ import pytest
 
 ts = pytest.importorskip("tree_sitter", reason="tree-sitter not installed")
 
-from intentdiff.core.models import ChangeType, DiffConfig, SemanticDiff
-from intentdiff.sources.string_source import StringSource
+from intentumdiff.core.models import ChangeType, DiffConfig, SemanticDiff
+from intentumdiff.sources.string_source import StringSource
 
 
 pytestmark = pytest.mark.integration
@@ -21,7 +21,7 @@ pytestmark = pytest.mark.integration
 
 def _diff(old: str, new: str, lang: str = "python") -> SemanticDiff:
     """Run the full diff pipeline end-to-end (tree-sitter + Wasm plugin)."""
-    from intentdiff.differ import SemanticDiffer
+    from intentumdiff.differ import SemanticDiffer
 
     # Use a generous fuel budget: the python_parser.wasm processes a full CST
     # JSON tree which can consume >10 M instructions for even small files.

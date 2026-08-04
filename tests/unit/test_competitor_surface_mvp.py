@@ -12,7 +12,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from intentdiff.github_app import (
+from intentumdiff.github_app import (
     build_pull_request_check_response,
     build_check_run_payload,
     create_app,
@@ -21,7 +21,7 @@ from intentdiff.github_app import (
     parse_pull_request_url,
     verify_webhook_signature,
 )
-from intentdiff.plugins.registry import PluginRegistry
+from intentumdiff.plugins.registry import PluginRegistry
 
 pytestmark = pytest.mark.skipif(
     not (Path(__file__).resolve().parents[2] / "apps" / "review-shell").exists(),
@@ -49,7 +49,7 @@ def test_github_app_signature_url_event_and_check_payload_contracts() -> None:
         parse_pull_request_event({"repository": {"full_name": "owner/repo"}, "pull_request": {"number": 0}})
 
     payload = build_check_run_payload(
-        name="IntentDiff",
+        name="IntentumDiff",
         head_sha="abc123",
         summary_markdown="summary",
         passed=False,
@@ -68,14 +68,14 @@ def test_github_app_signature_url_event_and_check_payload_contracts() -> None:
     assert response["repo"] == "repo"
     assert response["number"] == 7
     assert response["check_run"] == {
-        "name": "IntentDiff",
+        "name": "IntentumDiff",
         "head_sha": "abc123",
         "status": "completed",
         "conclusion": "success",
         "output": {
-            "title": "IntentDiff semantic review",
+            "title": "IntentumDiff semantic review",
             "summary": (
-                "# IntentDiff GitHub App Review\n\n"
+                "# IntentumDiff GitHub App Review\n\n"
                 "Status: **passed**\n\n"
                 "| Metric | Count |\n"
                 "|---|---:|\n"
@@ -86,7 +86,7 @@ def test_github_app_signature_url_event_and_check_payload_contracts() -> None:
         },
         "details_url": "https://example.invalid/review",
     }
-    assert "IntentDiff GitHub App Review" in response["artifacts"]["html_report"]
+    assert "IntentumDiff GitHub App Review" in response["artifacts"]["html_report"]
     assert response["review"] == {
         "checked_files": 0,
         "semantic_changes": 0,
@@ -104,7 +104,7 @@ def test_github_app_webhook_asgi_contract_validates_signature() -> None:
     body = (
         b'{"repository":{"full_name":"owner/repo"},'
         b'"pull_request":{"number":7,"head":{"sha":"abc123"}},'
-        b'"intentdiff_review":{"checked_files":2,"semantic_changes":1,"guardrail_violations":1,"passed":false}}'
+        b'"intentumdiff_review":{"checked_files":2,"semantic_changes":1,"guardrail_violations":1,"passed":false}}'
     )
     signature = "sha256=" + hmac.new(b"secret", body, hashlib.sha256).hexdigest()
 
@@ -128,7 +128,7 @@ def test_github_app_webhook_asgi_contract_validates_signature() -> None:
     assert payload["check_run"]["head_sha"] == "abc123"
     assert payload["check_run"]["conclusion"] == "failure"
     assert "Semantic changes | 1" in payload["check_run"]["output"]["summary"]
-    assert "IntentDiff GitHub App Review" in payload["artifacts"]["html_report"]
+    assert "IntentumDiff GitHub App Review" in payload["artifacts"]["html_report"]
     assert payload["review"] == {
         "checked_files": 2,
         "semantic_changes": 1,
@@ -188,13 +188,13 @@ def test_electron_review_shell_and_visual_studio_surface_are_repo_mvp_artifacts(
     assert (REPO_ROOT / "apps" / "review-shell" / "src" / "reviewArtifact.ts").exists()
 
     manifest_path = REPO_ROOT / "plugins" / "visualstudio" / "source.extension.vsixmanifest"
-    project_path = REPO_ROOT / "plugins" / "visualstudio" / "IntentDiff.VisualStudio.csproj"
-    pkgdef_path = REPO_ROOT / "plugins" / "visualstudio" / "IntentDiff.VisualStudio.pkgdef"
+    project_path = REPO_ROOT / "plugins" / "visualstudio" / "IntentumDiff.VisualStudio.csproj"
+    pkgdef_path = REPO_ROOT / "plugins" / "visualstudio" / "IntentumDiff.VisualStudio.pkgdef"
     manifest = ET.parse(manifest_path)
     ns = {"vsix": "http://schemas.microsoft.com/developer/vsx-schema/2011"}
     identity = manifest.find(".//vsix:Identity", ns)
     assert identity is not None
-    assert identity.attrib["Id"] == "IntentDiff.VisualStudio2022"
+    assert identity.attrib["Id"] == "IntentumDiff.VisualStudio2022"
     assert identity.attrib["Publisher"] == "BuchochelliqLabs"
     targets = {
         target.attrib["Id"]
@@ -209,28 +209,28 @@ def test_electron_review_shell_and_visual_studio_surface_are_repo_mvp_artifacts(
         asset.attrib["Path"]
         for asset in manifest.findall(".//vsix:Asset", ns)
     }
-    assert "IntentDiff.VisualStudio.pkgdef" in assets
+    assert "IntentumDiff.VisualStudio.pkgdef" in assets
 
     assert project_path.exists()
     project_source = project_path.read_text(encoding="utf-8")
     assert "<TargetFramework>net472</TargetFramework>" in project_source
-    assert "<AssemblyName>IntentDiff.VisualStudio</AssemblyName>" in project_source
+    assert "<AssemblyName>IntentumDiff.VisualStudio</AssemblyName>" in project_source
     assert "<EnableDefaultCompileItems>false</EnableDefaultCompileItems>" in project_source
-    assert 'Include="src\\IntentDiffCommandService.cs"' in project_source
+    assert 'Include="src\\IntentumDiffCommandService.cs"' in project_source
     assert 'Include="source.extension.vsixmanifest"' in project_source
-    assert 'Include="IntentDiff.VisualStudio.pkgdef"' in project_source
+    assert 'Include="IntentumDiff.VisualStudio.pkgdef"' in project_source
 
     pkgdef_source = pkgdef_path.read_text(encoding="utf-8")
-    assert "IntentDiff.VisualStudio.IntentDiffPackage" in pkgdef_source
-    assert "IntentDiffReviewCommand" in pkgdef_source
-    assert "Open IntentDiff Review" in pkgdef_source
+    assert "IntentumDiff.VisualStudio.IntentumDiffPackage" in pkgdef_source
+    assert "IntentumDiffReviewCommand" in pkgdef_source
+    assert "Open IntentumDiff Review" in pkgdef_source
 
-    command_service = REPO_ROOT / "plugins" / "visualstudio" / "src" / "IntentDiffCommandService.cs"
+    command_service = REPO_ROOT / "plugins" / "visualstudio" / "src" / "IntentumDiffCommandService.cs"
     assert command_service.exists()
     command_source = command_service.read_text(encoding="utf-8")
-    assert 'FileName = "intentdiff"' in command_source
+    assert 'FileName = "intentumdiff"' in command_source
     assert 'Arguments = "serve --host 127.0.0.1 --port 8765"' in command_source
-    assert 'startInfo.Environment["INTENTDIFF_REVIEW_ARTIFACT"] = outputPath' in command_source
+    assert 'startInfo.Environment["INTENTUMDIFF_REVIEW_ARTIFACT"] = outputPath' in command_source
     assert "Path.IsPathRooted(repositoryPath) == false" in command_source
     assert "Path.IsPathRooted(outputPath) == false" in command_source
 
