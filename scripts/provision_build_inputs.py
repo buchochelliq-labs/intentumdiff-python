@@ -185,9 +185,18 @@ def stage_wasm_from_artifacts(token: str, org: str = "buchochelliq-labs") -> int
             with zipfile.ZipFile(io.BytesIO(blob)) as z:
                 for member in z.namelist():
                     if member.endswith(".wasm"):
-                        # strip the intentumdiff_ prefix: the host stages <lang>_parser.wasm
+                        # Strip the crate prefix: the host stages <lang>_parser.wasm and
+                        # that unprefixed form is the registry key. BOTH spellings must be
+                        # accepted. The registry pins immutable artifacts BY REF, and the
+                        # ones pinned today were built before the IntentDiff ->
+                        # IntentumDiff rename, so they are still named intentdiff_*.wasm.
+                        # Accepting only the new prefix leaves the name prefixed, and every
+                        # component then reports "is not pinned in the registry".
                         out = Path(member).name
-                        out = out[len("intentumdiff_"):] if out.startswith("intentumdiff_") else out
+                        for _prefix in ("intentumdiff_", "intentdiff_"):
+                            if out.startswith(_prefix):
+                                out = out[len(_prefix):]
+                                break
                         payload = z.read(member)
                         digest = _hashlib.sha256(payload).hexdigest()
                         pinned = pins.get(out)
