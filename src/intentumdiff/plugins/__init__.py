@@ -1,1 +1,1 @@
-# intentdiff/plugins
+# intentumdiff/plugins

@@ -1,7 +1,7 @@
 """#94 item 1 — the plugin contract must be independently extractable.
 
 Every Wasm crate reads the WIT contract via ``wit_bindgen::generate!{ path: ... }``. Today
-those paths reach CROSS-TREE into the Python package (``../../../src/intentdiff/plugins/wit/
+those paths reach CROSS-TREE into the Python package (``../../../src/intentumdiff/plugins/wit/
 plugin.wit``), which becomes a broken cross-*repo* dependency the moment the crates or the
 Python binding move (#82). The DoD is **zero** such references (each crate vendors the contract
 or consumes it via wit-deps). Until the mass migration lands (see
@@ -22,9 +22,9 @@ pytestmark = pytest.mark.skipif(
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-# Cross-tree = a `path:` that walks up (`../`) into `src/intentdiff/plugins/wit/`.
+# Cross-tree = a `path:` that walks up (`../`) into `src/intentumdiff/plugins/wit/`.
 _CROSS_TREE_WIT_RE = re.compile(
-    r'path:\s*"(?:\.\./)+src/intentdiff/plugins/wit/plugin\.wit"'
+    r'path:\s*"(?:\.\./)+src/intentumdiff/plugins/wit/plugin\.wit"'
 )
 
 # The migration landed (#94 item 1): every crate now reads a LOCAL `wit/plugin.wit` synced by
@@ -58,7 +58,7 @@ def test_no_cross_tree_wit_paths() -> None:
     offenders = _cross_tree_files()
     assert len(offenders) == _CROSS_TREE_BASELINE, (
         f"cross-tree WIT contract references must be {_CROSS_TREE_BASELINE}, found "
-        f"{len(offenders)}. A Wasm crate must NOT reach into src/intentdiff/plugins/wit/ — "
+        f"{len(offenders)}. A Wasm crate must NOT reach into src/intentumdiff/plugins/wit/ — "
         'declare `wit_bindgen::generate!{ path: "wit/plugin.wit" }` and let '
         "scripts/sync_wit.py vendor the contract (see docs/WIT_CONTRACT_MIGRATION.md). "
         "Offenders:\n  "

@@ -117,7 +117,7 @@ def test_verify_wheel_rejects_missing_wasm_assets(tmp_path: Path) -> None:
         ("intentumdiff/.env", "sensitive/startup"),
         ("intentumdiff/payload.pth", "blocked file type"),
         ("intentumdiff/scripts/postinstall.ps1", "blocked file type"),
-        ("intentdiff/plugins/unexpected.wasm", "Wasm outside"),
+        ("intentumdiff/plugins/unexpected.wasm", "Wasm outside"),
         ("intentumdiff/extra_native.cp312-win_amd64.pyd", "unexpected native"),
     ],
 )

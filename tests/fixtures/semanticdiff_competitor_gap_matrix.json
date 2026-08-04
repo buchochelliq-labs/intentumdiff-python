@@ -203,7 +203,7 @@
       "implementation_owner": "rust_wasm_parser",
       "implementation_paths": [
         "crates/parsers",
-        "src/intentdiff/plugins/loader.py::call_language_info",
+        "src/intentumdiff/plugins/loader.py::call_language_info",
         "tests/unit/test_supported_language_examples.py::test_fuel_sensitive_language_parsers_emit_engine_telemetry"
       ],
       "next_action": "Keep exact issue-shaped fixtures for the most valuable parser edge cases.",
@@ -237,10 +237,10 @@
         "crates/parsers/asciidoc-parser/src/lib.rs",
         "crates/parsers/po-parser/src/lib.rs",
         "build.py",
-        "src/intentdiff/plugins/builtins.py::graphql_parser_entry",
-        "src/intentdiff/plugins/registry.py::detect_parser",
-        "src/intentdiff/plugins/registry.py::_FIRST_PARTY_PARSER_ENTRYPOINT_FALLBACKS",
-        "src/intentdiff/plugins/language_metadata.py"
+        "src/intentumdiff/plugins/builtins.py::graphql_parser_entry",
+        "src/intentumdiff/plugins/registry.py::detect_parser",
+        "src/intentumdiff/plugins/registry.py::_FIRST_PARTY_PARSER_ENTRYPOINT_FALLBACKS",
+        "src/intentumdiff/plugins/language_metadata.py"
       ],
       "next_action": "Replace lightweight full-parse entrypoints with deeper grammars as demand justifies, keeping issue-shaped fixtures for each upgrade.",
       "proof_strength": "exact_regression",
