@@ -347,14 +347,16 @@ def _render_terminal(diff: SemanticDiff) -> None:
             )
         )
         return
-    scope_label = (diff.staging_status or "working tree").replace("_", " ")
     header = Table.grid(padding=(0, 2))
     header.add_column(style="bold")
     header.add_column()
     header.add_row("Old", diff.old_filename or "<unknown>")
     header.add_row("New", diff.new_filename or "<unknown>")
     header.add_row("Language", diff.language or "unknown")
-    header.add_row("Scope", scope_label)
+    # Only a git-backed diff has a staging scope. Defaulting to "working tree" told
+    # someone comparing two local files that a working tree was involved when none was.
+    if diff.staging_status:
+        header.add_row("Scope", diff.staging_status.replace("_", " "))
     header.add_row("Changes", str(len(diff.changes)))
     _console.print(
         Panel(

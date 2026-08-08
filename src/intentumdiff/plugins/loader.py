@@ -40,6 +40,9 @@ from intentumdiff.plugins.exceptions import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Emitted once per process, not once per plugin load: there are 78 plugins.
+_OVERRIDE_WARNED: bool = False
 _MAX_TELEMETRY_RECORDS = 128
 
 # ---------------------------------------------------------------------------
@@ -404,13 +407,24 @@ def _check_osv_cache_or_block(
         # Stamp is fresh but no cache file: the last fetch failed.
         override = os.environ.get("INTENTUMDIFF_ALLOW_VULNERABLE_WASMTIME", "").strip()
         if override in ("1", "true", "yes"):
-            logger.warning(
-                "INTENTUMDIFF_ALLOW_VULNERABLE_WASMTIME: loading plugins with "
-                "unverified OSV status — last advisory fetch failed."
-            )
+            # Worth saying — a safety check has been deliberately disabled — but worth
+            # saying ONCE. Emitting it per plugin load repeated it up to 78 times a run.
+            global _OVERRIDE_WARNED
+            if not _OVERRIDE_WARNED:
+                _OVERRIDE_WARNED = True
+                logger.warning(
+                    "INTENTUMDIFF_ALLOW_VULNERABLE_WASMTIME: loading plugins with "
+                    "unverified OSV status — last advisory fetch failed."
+                )
             return
         if trusted or _is_trusted_wasm_path(wasm_path):
-            logger.warning(
+            # DEBUG, not WARNING. This fires on every ordinary run whenever the machine
+            # is offline or the advisory cache has expired, and there is nothing for the
+            # user to do about it: first-party plugins ship inside the wheel and
+            # third-party ones stay blocked either way. Emitting it at warning level put
+            # alarming text — naming a "allow vulnerable" override — on stderr beside
+            # correct results, which is precisely how 0.0.1 came to look broken.
+            logger.debug(
                 "Loading first-party trusted Wasm plugin with unverified OSV "
                 "status because the last advisory fetch failed. Third-party "
                 "plugins remain blocked without INTENTUMDIFF_ALLOW_VULNERABLE_WASMTIME=1."

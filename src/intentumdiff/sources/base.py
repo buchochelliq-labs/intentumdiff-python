@@ -26,3 +26,18 @@ class Source(ABC):
         ``language_hint`` — e.g. "python", "sql".  Pass None to auto-detect.
         """
         ...
+
+    def display_names(self) -> tuple[str, str] | None:
+        """
+        Distinct ``(old, new)`` names, when the two sides are named differently.
+
+        ``get_content`` returns ONE filename because that is what language detection
+        needs, and for most sources it is also the right thing to display: a git diff
+        compares one path at two revisions, so both sides share a name.
+
+        ``FileSource`` is the exception — it compares two separately named files — and
+        collapsing both sides onto the new name made the CLI report that it had diffed
+        a file with itself.  Sources that know two names override this; ``None`` means
+        "one name applies to both", which stays the default.
+        """
+        return None
