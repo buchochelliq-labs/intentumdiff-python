@@ -16,10 +16,29 @@ does zero functional work.
 ```python
 from intentumdiff import SemanticDiffer
 
+old = """def greet(name):
+    return "hi " + name
+"""
+
+new = """def greet(name):
+    if not name:
+        return None
+    return "hi " + name
+"""
+
 diff = SemanticDiffer().diff_strings(old, new, "example.py")
 for change in diff.changes:
     print(change.change_type, change.description)
 ```
+
+Running that prints one change — the added guard clause:
+
+```text
+ChangeType.ADDITION Insert -> if_statement('if_statement')
+```
+
+Reformat the same file — change the quotes, rewrap the lines, add blank lines — and
+IntentumDiff reports **no changes at all**. That is the point: it compares meaning, not text.
 
 ## Building from source
 

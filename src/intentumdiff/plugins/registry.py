@@ -70,6 +70,18 @@ _DISABLED_BUILTIN_PARSER_ENTRYPOINTS: frozenset[str] = frozenset({"freebasic"})
 # trusted plugin metadata.
 _TRUSTED_PLUGIN_PACKAGE_NAMES: frozenset[str] = frozenset(
     {
+        # The DISTRIBUTION name, which is not the import name. The wheel is published as
+        # `intentumdiff-python` (the polyglot-binding convention) while the import package
+        # is `intentumdiff`, and entry points report the DISTRIBUTION.
+        #
+        # Omitting it made the package fail its own first-party check: all 69 built-in
+        # parsers were treated as untrusted third-party plugins and refused with a security
+        # warning naming the package itself as the culprit. Every invocation printed ~69
+        # error lines before producing output. Shipped in 0.0.1 and only found by installing
+        # the published wheel — no test in the repo could see it, because in a source
+        # checkout the distribution resolves differently.
+        "intentumdiff-python",
+        "intentumdiff_python",
         "intentumdiff",
         "intentumdiff-dbt",
         "intentumdiff_dbt",
@@ -275,7 +287,7 @@ def _wasm_path_from_ep(ep: importlib.metadata.EntryPoint) -> str:
             "execute arbitrary code before Wasm sandboxing is in effect.  "
             f"The plugin author must add '{_WASM_PATH_METADATA_FIELD}: <relative/path.wasm>' "
             "to their package metadata.  "
-            "See: https://docs.intentumdiff.dev/plugins/metadata"
+            "See: https://github.com/buchochelliq-labs/intentumdiff-python/blob/main/docs/PLUGIN_GUIDE.md"
         )
 
     # Locate the file via importlib.metadata without importing anything.
