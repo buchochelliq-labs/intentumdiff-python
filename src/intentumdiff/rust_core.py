@@ -55,7 +55,38 @@ _TREE_ENGINE_V3 = "rust_core_semantic_tree_v3"
 _SOURCE_ENGINE = "rust_core_sources_v3_stage11"
 
 
+#: Distributions that ship the FIRST-PARTY Python parser. The plugin id is qualified by the
+#: distribution name, and this package is published as ``intentumdiff-python`` while the import
+#: package is ``intentumdiff`` — so the same certified parser is spelled two ways depending on
+#: how it was catalogued. Deliberately an allowlist, not a prefix match: canonicalising an
+#: arbitrary ``<dist>:python:python`` would let a third-party plugin claim the certified path.
+_PYTHON_PLUGIN_DISTRIBUTIONS = frozenset(
+    {"intentumdiff", "intentumdiff-python", "intentumdiff_python"}
+)
+
+
 def _canonical_python_plugin_id(parser_plugin_id: str | None) -> str | None:
+    """Normalise a first-party Python parser id to the certified spelling.
+
+    This was a no-op returning its argument, which meant the certified batch path rejected
+    the parser as an "unsupported parser plugin" and silently fell through to routed
+    finalize. The diff was still correct and still Rust — so no gate fired and nothing looked
+    broken — but the certified path was never taken, and the facts that only it derives went
+    missing.
+
+    Invisible until parser plugins could be catalogued at all: before that the id was absent
+    and the ``is not None`` guard let everything through.
+    """
+    if not parser_plugin_id:
+        return parser_plugin_id
+    parts = parser_plugin_id.split(":")
+    if (
+        len(parts) == 3
+        and parts[0] in _PYTHON_PLUGIN_DISTRIBUTIONS
+        and parts[1] == "python"
+        and parts[2] == "python"
+    ):
+        return _CANONICAL_PYTHON_PLUGIN_ID
     return parser_plugin_id
 
 
@@ -1353,6 +1384,23 @@ def live_handle_review(
         # Older core: no wasm_dir parameter -> Python-only certified commit (non-Python falls back).
         raw = backend.live_handle_review_json(repo_path, old_ref, new_ref, config_json)
     return json.loads(raw)
+
+
+def live_handle_asset_diff(
+    repo_path: str, default_ref: str, request: dict[str, Any], seq: int
+) -> dict[str, Any]:
+    """Native perceptual asset diff: the whole protocol response for op ``asset_diff``.
+
+    Unlike the other ``live_*`` handlers this returns a finished response envelope — success or
+    error — because a malformed request is an answer to send, not a call that failed. Request
+    parsing, path containment and the artifact cache all live in the core, so the Python server
+    and the native binary answer identically.
+    """
+    return json.loads(
+        _load_backend().live_handle_asset_diff_json(
+            repo_path, default_ref, json.dumps(request, separators=(",", ":")), int(seq)
+        )
+    )
 
 
 _registered_xml_dialects_fingerprint: str | None = None
