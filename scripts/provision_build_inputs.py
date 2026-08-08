@@ -27,7 +27,16 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CORE_REPO = "https://github.com/buchochelliq-labs/intentumdiff-core"
-CORE_REF = "main"  # pin to a tag once intentumdiff-core cuts releases
+# Which intentumdiff-core to build against.
+#
+# NOT "main". `main` only moves when a release is cut, so a consumer pinned to it cannot verify
+# against an unreleased engine change — which is precisely what a release candidate exists to
+# allow. That gap is not theoretical: the provenance tests here assert facts added to the core
+# and failed in CI while passing locally, because CI was building an engine that predated them.
+#
+# Tracking a branch does make the build unreproducible, so this becomes a TAG the moment core
+# cuts one. Override for a one-off build without editing the file.
+CORE_REF = os.environ.get("INTENTUMDIFF_CORE_REF", "release/v0.0.2-rc")
 CORE_DEST = REPO_ROOT / "build" / "intentumdiff-core"
 WASM_DEST = REPO_ROOT / "src" / "intentumdiff" / "wasm"
 
