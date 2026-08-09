@@ -1668,7 +1668,7 @@ class SemanticDiffer:
             _has_error_node(old_tree) or _has_error_node(new_tree)
         ):
             logger.warning(
-                "Parse errors detected in %r — falling back to token-level diff",
+                "Parse errors detected in %r - falling back to token-level diff",
                 filename,
             )
             _raise_rust_only_gate_error("parse errors require Rust token-level fallback")

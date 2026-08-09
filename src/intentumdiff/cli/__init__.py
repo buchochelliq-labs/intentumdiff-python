@@ -191,7 +191,40 @@ __all__ = [
 ]
 
 
+#: The pre-rebrand distribution. Installing IntentumDiff does not remove it, because pip
+#: treats a renamed project as an unrelated package.
+_RETIRED_DISTRIBUTION = "intentdiff"
+
+
+def _warn_if_retired_distribution_installed() -> None:
+    """
+    Warn when the pre-rebrand ``intentdiff`` distribution is installed alongside this one.
+
+    Both projects install the same ``intentumdiff`` import package, so whichever pip laid down
+    last wins and the resolved distribution name may be the retired one — which is NOT in the
+    first-party trust allowlist. Every bundled parser is then rejected as untrusted third-party
+    code, and the user sees a stream of ``native_fallback`` errors and no diff at all.
+
+    Nothing in that chain names the actual cause, and the failure is total rather than partial,
+    so it reads as "the tool is broken" rather than "you have two installs". This is the same
+    defect class that made 0.0.1 unusable: a package failing its own trust check because of how
+    its distribution name resolves.
+    """
+    try:
+        from importlib.metadata import distribution
+
+        distribution(_RETIRED_DISTRIBUTION)
+    except Exception:  # noqa: BLE001 - absence is the normal case, and any lookup failure is fine
+        return
+    _err.print(
+        f"[yellow]Warning:[/yellow] the retired '{_RETIRED_DISTRIBUTION}' distribution is "
+        "installed alongside IntentumDiff. They share an import package, so parsers may be "
+        f"rejected as untrusted and diffs may fail. Run: pip uninstall {_RETIRED_DISTRIBUTION}"
+    )
+
+
 def main(argv: list[str] | None = None) -> NoReturn:
+    _warn_if_retired_distribution_installed()
     _legacy_click_main(argv)
 
 
