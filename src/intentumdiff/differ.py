@@ -491,13 +491,20 @@ class SemanticDiffer:
         profiler = self._new_profiler()
         with profiler.phase("source_loading"):
             old_content, new_content, filename, language_hint = source.get_content()
-        return self._run_pipeline(
+        diff = self._run_pipeline(
             old_content,
             new_content,
             filename,
             language_hint,
             _profiler=profiler,
         )
+        # The pipeline works from the single filename language detection needs. A source
+        # comparing two differently named files knows both, so restore them here rather
+        # than threading a second name through every construction site.
+        names = source.display_names()
+        if names is not None:
+            diff = diff.model_copy(update={"old_filename": names[0], "new_filename": names[1]})
+        return diff
 
     def diff_strings(
         self,

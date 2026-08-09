@@ -131,6 +131,11 @@ class NodeFacts(BaseModel, frozen=True):
     without revealing code. The host carries this through unchanged.
     """
 
+    #: Which derivation passes produced these facts, e.g. ``"cst,enrich(derived=14,added=5)"``.
+    #: Populated only when ``INTENTUMDIFF_TRACE_FACTS=1``; ``None`` in normal operation.
+    #: Diagnostic provenance, never source — safe to paste into a bug report.
+    facts_trace: str | None = None
+
     param_count: int | None = None
     #: ``"none"`` | ``"value"`` | ``"literal"`` (constant) | ``"unknown"``.
     returns: str | None = None

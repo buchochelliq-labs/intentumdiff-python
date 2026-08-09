@@ -17,6 +17,8 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+from intentumdiff import __version__
 from rich.console import Console
 
 from intentumdiff.cli import (
@@ -130,7 +132,7 @@ def test_cli_primary_branding_is_intentumdiff(capsys: pytest.CaptureFixture[str]
     with pytest.raises(SystemExit):
         parser.parse_args(["--version"])
 
-    assert "IntentumDiff 0.0.1" in capsys.readouterr().out
+    assert f"IntentumDiff {__version__}" in capsys.readouterr().out
 
 
 def test_click_main_version_uses_primary_branding(
@@ -138,7 +140,7 @@ def test_click_main_version_uses_primary_branding(
 ) -> None:
     assert _run("--version") == 0
 
-    assert "IntentumDiff 0.0.1" in capsys.readouterr().out
+    assert f"IntentumDiff {__version__}" in capsys.readouterr().out
 
 
 def test_click_main_delegates_command_help_to_compatible_parser(

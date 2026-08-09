@@ -1047,8 +1047,39 @@ class LiveServer:
         if op == "cancel":
             send_fn(self._cancel_request(request, seq))
             return True
-        send_fn(self._error_response(seq, "unknown_op", f"unknown op: {op!r}", op=str(op)))
+        if op == "asset_diff":
+            send_fn(self._asset_diff_request(request, seq))
+            return True
+        # `invalid_op`, not `unknown_op`: the native server has always answered an unrouted op
+        # with that code, and it is the spelling the extension lists as non-retryable — so the
+        # python server's own spelling made the extension auto-retry a request that can never
+        # succeed. Two servers on one protocol have to name the same failure the same way.
+        send_fn(self._error_response(seq, "invalid_op", f"unknown op: {op!r}", op=str(op)))
         return True
+
+    def _asset_diff_request(self, request: dict[str, Any], seq: int) -> dict[str, Any]:
+        """Perceptual image diff — the engine does the pixel work, this only marshals the request.
+
+        The extension previously synthesised an asset "review" and never asked for artifacts,
+        so the panel always reported PERCEPTUAL DIFF PENDING while the engine sat there able
+        to answer. This is the missing call.
+
+        Two request shapes, both engine-served:
+
+        * ``path`` (+ optional ``ref``) — one tracked image against a git ref. This is what a
+          reviewing editor has: a repo-relative path and a base. The *before* bytes are in the
+          object store, and materialising them is git work, so the engine does it.
+        * ``before_path`` + ``after_path`` — two files that already exist on disk.
+
+        Request parsing, the path-containment guard and the self-ignoring artifact cache live in
+        the core's ``live_handle_asset_diff``, so this server and the native live-server binary
+        answer from ONE implementation. A second copy here would be a second place for the
+        containment rule to drift — and the rule is what stops a protocol method that accepts
+        file paths from becoming an arbitrary-file reader.
+        """
+        from intentumdiff import rust_core
+
+        return rust_core.live_handle_asset_diff(self._repo_path, self._ref, request, seq)
 
     def _process_review_request(
         self,
