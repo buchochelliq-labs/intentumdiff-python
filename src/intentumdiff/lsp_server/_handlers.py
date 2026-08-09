@@ -45,6 +45,17 @@ class _ServerState:
 # URI helpers
 # ---------------------------------------------------------------------------
 
+class WorkspaceContainmentError(ValueError):
+    """A URI resolved outside the workspace root, or used explicit traversal.
+
+    A distinct type because this is a REFUSAL, not a fault: the server did its job. Logged and
+    reported separately from internal errors so an operator can tell "someone asked for a path
+    outside the workspace and we blocked it" from "the diff engine threw".
+
+    Subclasses ValueError deliberately - callers that already catch ValueError keep working.
+    """
+
+
 def uri_to_path(uri: str, workspace_root: Path | None = None) -> Path:
     """Convert a ``file://`` URI to a :class:`~pathlib.Path`.
 
@@ -57,7 +68,7 @@ def uri_to_path(uri: str, workspace_root: Path | None = None) -> Path:
     path = Path(unquote(parsed.path))
     # Reject explicit traversal components
     if ".." in path.parts:
-        raise ValueError(f"Path traversal rejected in URI: {uri!r}")
+        raise WorkspaceContainmentError(f"Path traversal rejected in URI: {uri!r}")
     # On Windows, urlparse puts a leading '/' before the drive letter —
     # strip it so Path('C:/foo') is constructed correctly.
     if path.parts and path.parts[0] in ("/", "\\") and len(path.parts) > 1:
@@ -72,7 +83,7 @@ def uri_to_path(uri: str, workspace_root: Path | None = None) -> Path:
         try:
             resolved.relative_to(root_resolved)
         except ValueError:
-            raise ValueError(
+            raise WorkspaceContainmentError(
                 f"URI {uri!r} resolves to {resolved!r} which is outside the "
                 f"workspace root {root_resolved!r}."
             )

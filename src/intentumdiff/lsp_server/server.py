@@ -36,6 +36,7 @@ from intentumdiff.lsp_server._handlers import (
     _do_diff,
     schedule_diff,
     uri_to_path,
+    WorkspaceContainmentError,
 )
 
 log = logging.getLogger(__name__)
@@ -197,6 +198,14 @@ def create_server(
                 return {"error": "Diff computation failed"}
 
             return json.loads(diff.model_dump_json())
+
+        except WorkspaceContainmentError as exc:
+            # A refusal, not a fault. Logged distinctly so an operator can tell "someone asked
+            # for a path outside the workspace and we blocked it" from "the engine threw" -
+            # previously both produced the same line at the same level, which made the audit
+            # trail for a path-traversal attempt indistinguishable from routine noise.
+            log.warning("intentumdiff/semanticDiff refused (workspace containment): %s", exc)
+            return {"error": str(exc), "code": "workspace_containment"}
 
         except Exception as exc:  # noqa: BLE001
             log.warning("intentumdiff/semanticDiff error: %s", exc)

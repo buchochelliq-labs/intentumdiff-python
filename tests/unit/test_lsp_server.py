@@ -13,6 +13,8 @@ All translation tests use in-process model construction — no pygls running.
 
 from __future__ import annotations
 
+import logging
+
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -330,17 +332,35 @@ class TestSemanticDiffContainment:
         assert "error" in result
         assert "workspace root" in result["error"]
 
-    def test_uri_outside_root_returns_containment_error(self, _srv, tmp_path):
+    def test_uri_outside_root_returns_containment_error(self, _srv, tmp_path, caplog):
+        """A refusal outside the workspace root, and the audit line that records it.
+
+        The log line is asserted, not merely tolerated. It is part of the control: a server
+        that silently refuses a traversal attempt tells an operator nothing. Without this
+        assertion the warning could be deleted and every test would still pass.
+
+        Capturing it also keeps the suite output clean - this warning used to print in full
+        beside a PASSED line, which reads like something went wrong and was ignored.
+        """
         server, handler = _srv
         root = tmp_path / "project"
         root.mkdir()
         # Both paths are siblings of the workspace root, not inside it
         outside_old = tmp_path / "evil" / "old.py"
         outside_new = tmp_path / "evil" / "new.py"
-        with self._ws_patch(server, root.as_uri()):
-            result = handler({"oldUri": outside_old.as_uri(), "newUri": outside_new.as_uri()})
+        with caplog.at_level(logging.WARNING, logger="intentumdiff.lsp_server.server"):
+            with self._ws_patch(server, root.as_uri()):
+                result = handler(
+                    {"oldUri": outside_old.as_uri(), "newUri": outside_new.as_uri()}
+                )
         assert "error" in result
         assert "outside" in result["error"]
+        # A distinct code, so a client can act on a refusal without string-matching.
+        assert result.get("code") == "workspace_containment"
+        # Logged as a refusal, NOT as an internal error - the two were previously
+        # indistinguishable at the same level with the same prefix.
+        assert "refused (workspace containment)" in caplog.text
+        assert "intentumdiff/semanticDiff error:" not in caplog.text
 
     def test_uri_inside_root_passes_containment(self, _srv, tmp_path):
         server, handler = _srv
