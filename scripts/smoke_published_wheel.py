@@ -33,6 +33,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import re
 import shutil
 import subprocess
 import sys
@@ -76,6 +77,24 @@ class Smoke:
         )
 
 
+
+def _repo_readme() -> str | None:
+    """The README a user reads. Checked in preference order, nearest first."""
+    here = Path(__file__).resolve()
+    for candidate in (here.parent.parent / "README.md", here.parent / "README.md"):
+        if candidate.is_file():
+            return candidate.read_text(encoding="utf-8")
+    return None
+
+
+def _first_python_block(markdown: str) -> str | None:
+    """The first fenced ``python`` block — the headline example, the one people copy."""
+    fence = "`" * 3
+    pattern = fence + r"python\n(.*?)" + fence
+    match = re.search(pattern, markdown, re.DOTALL)
+    return match.group(1) if match else None
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--wheel", help="local wheel or sdist; defaults to installing from PyPI")
@@ -115,6 +134,36 @@ def main() -> int:
         script.write_text(USE_SCRIPT.format(old=OLD_SRC, new=NEW_SRC), encoding="utf-8")
         r = s.run(str(script))
         s.check("SemanticDiffer produces a diff", "CHANGES" in r.stdout, r.stderr)
+
+        # 5b. THE README'S OWN EXAMPLE, extracted and executed verbatim.
+        #
+        #     Check 5 above runs OLD_SRC/NEW_SRC — this file's PRIVATE copy of the example.
+        #     That proves the library works; it proves nothing about what we published. The
+        #     0.0.1 README shipped a headline example that raised NameError, and a gate that
+        #     asserts on its own copy would have passed that release too.
+        #
+        #     It nearly happened again: on the 0.0.2 release candidate the example's triple
+        #     quotes had collapsed to single quotes, so it died with SyntaxError at PARSE
+        #     time — before importing anything — while every other check here stayed green.
+        #
+        #     So extract the first ```python fence from the README a user actually reads and
+        #     run it against the INSTALLED wheel.
+        readme = _repo_readme()
+        if readme is None:
+            s.check("README example runs verbatim", False, "README.md not found")
+        else:
+            block = _first_python_block(readme)
+            if block is None:
+                s.check("README example runs verbatim", False, "no ```python block in README.md")
+            else:
+                example = root / "readme_example.py"
+                example.write_text(block, encoding="utf-8")
+                r_readme = s.run(str(example))
+                s.check(
+                    "README example runs verbatim",
+                    r_readme.returncode == 0,
+                    (r_readme.stderr or r_readme.stdout).strip()[:400],
+                )
 
         # 6. THE ONE THAT MATTERS. 0.0.1 emitted ~69 plugin-catalogue errors on every
         #    invocation while still returning a result, so exit code alone said "fine".
