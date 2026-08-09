@@ -454,7 +454,11 @@ def _cmd_plugins_list(_args: argparse.Namespace) -> None:
 
     # Resolve the core package provenance string once for built-in rows
     import importlib.metadata as _meta
-    for _dist_name in ("intentumdiff",):
+    # The DISTRIBUTION name, which is not the import name: this package publishes as
+    # `intentumdiff-python` while `import intentumdiff` is the package. Looking up only the
+    # import name silently fell through to the bare "IntentumDiff" fallback, so every
+    # built-in plugin row lost its version.
+    for _dist_name in ("intentumdiff-python", "intentumdiff_python", "intentumdiff"):
         try:
             _core_dist = _meta.distribution(_dist_name)
             _core_prov = (
@@ -1938,6 +1942,17 @@ def _add_output_args(p: argparse.ArgumentParser) -> None:
         default="terminal",
         metavar="FORMAT",
         help="Output format: terminal (default), json, patch, html, llm",
+    )
+    # `--json` is the spelling people reach for first, and reaching for it used to fail with
+    # "unrecognized arguments: --json" even though JSON output existed the whole time behind
+    # `--format json`. An error that denies a feature you actually ship is worse than a missing
+    # feature, because it teaches the user the tool cannot do it.
+    p.add_argument(
+        "--json",
+        dest="format",
+        action="store_const",
+        const="json",
+        help="Shorthand for --format json.",
     )
     p.add_argument(
         "--output", "-o",

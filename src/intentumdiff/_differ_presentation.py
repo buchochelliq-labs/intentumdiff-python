@@ -486,7 +486,12 @@ def _token_fallback_diff(
             changes.append(
                 Change(
                     change_type=ChangeType.MODIFICATION,
-                    description=f"token-level fallback: {i2 - i1} token(s) → {j2 - j1} token(s)",
+                    # ASCII arrow deliberately. A Windows console defaults to cp1252, which
+                    # cannot encode U+2192, and Rich raised UnicodeEncodeError while rendering
+                    # the row — so the fallback path printed "Error: 'charmap' codec can't
+                    # encode character" INSIDE the results table, on exactly the files that had
+                    # already failed to parse.
+                    description=f"token-level fallback: {i2 - i1} token(s) -> {j2 - j1} token(s)",
                     confidence=0.5,
                 )
             )
