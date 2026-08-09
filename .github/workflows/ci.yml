@@ -22,6 +22,11 @@ jobs:
     env:
       CARGO_PROFILE_DEV_DEBUG: "false"
       MATURIN_PEP517_ARGS: "--profile dev"
+      # Empty on Dependabot PRs and fork PRs, which receive NO repository secrets.
+      # Evaluated here because `secrets.*` cannot be referenced from a step-level `if:`.
+      # Every open Dependabot PR in this repo was red purely because provisioning
+      # hard-failed without it - nothing to do with the bumps they proposed.
+      HAS_SPLIT_TOKEN: ${{ secrets.SPLIT_REPO_TOKEN != '' }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -64,6 +69,7 @@ jobs:
         # resolves to 'unknown' and the suite cannot run. Fail-closed: a missing or
         # unverified component stops the job here rather than an hour later as mass
         # PluginNotFoundError failures.
+        if: env.HAS_SPLIT_TOKEN == 'true'
         run: |
           pip install "pyyaml>=6.0"
           python scripts/provision_build_inputs.py --from-parser-artifacts
@@ -80,4 +86,19 @@ jobs:
           pip install -e .[dev,serve]
 
       - name: Run the full unit suite
+        if: env.HAS_SPLIT_TOKEN == 'true'
         run: python -m pytest tests/unit -q
+
+      - name: Run the reduced suite (no token - components unavailable)
+        # Dependabot and fork PRs get no secrets, so parser components cannot be
+        # provisioned and every component-dependent test would fail for a reason the author
+        # cannot fix. Run what CAN run, and SAY what was skipped - a quiet reduced gate is
+        # indistinguishable from a full one, and someone will eventually merge believing the
+        # whole suite ran.
+        #
+        # The full gate still runs on every maintainer branch PR and on the base branch, so
+        # nothing merges without it having passed somewhere.
+        if: env.HAS_SPLIT_TOKEN != 'true'
+        run: |
+          echo "::notice::SPLIT_REPO_TOKEN unavailable (Dependabot or fork PR) - parser components were not provisioned, so component-dependent tests are skipped. A maintainer run exercises the full gate."
+          python -m pytest tests/unit -q --deselect tests/unit/test_construct_edit_matrix.py
