@@ -13,7 +13,7 @@ build-backend = "maturin"
 # distribution costs users an uninstall/reinstall for no benefit.
 # Distribution name only: the import is unchanged, `import intentumdiff`.
 name = "intentumdiff-python"
-version = "0.0.1"
+version = "0.0.2b1"
 description = "Semantic code review: detect intent, moves, refactorings, and style changes"
 readme = "README.md"
 requires-python = ">=3.12"
