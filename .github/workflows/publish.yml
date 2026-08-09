@@ -106,13 +106,34 @@ jobs:
           GIT_TAG: ${{ github.ref_name }}
         run: |
           tag="${GIT_TAG#v}"
-          project=$(python -c "import pathlib,tomllib; print(tomllib.loads(pathlib.Path('pyproject.toml').read_text(encoding='utf-8'))['project']['version'])")
-          echo "tag=$tag  pyproject=$project"
-          if [ "$tag" != "$project" ]; then
-            echo "::error::tag $tag does not match the pyproject version $project" >&2
-            exit 1
-          fi
-          echo "INTENTUMDIFF_EXPECTED_VERSION=$tag" >> "$GITHUB_ENV"
+          # Compare NORMALISED versions, not strings. Every IntentumDiff component is tagged
+          # with one estate-wide string (v0.0.2-beta.1) so the release does not look like
+          # several different releases, but PEP 440's canonical spelling is 0.0.2b1 and that is
+          # what pyproject and the wheel filename must carry. They are the SAME version —
+          # Version("0.0.2-beta.1") == Version("0.0.2b1") — and a string compare would reject a
+          # perfectly correct pairing.
+          #
+          # This still fails closed on a real mismatch: 0.0.3 vs 0.0.2 does not normalise away.
+          python - "$tag" <<'PY'
+          import pathlib, sys, tomllib
+          from packaging.version import InvalidVersion, Version
+
+          tag_raw = sys.argv[1]
+          project_raw = tomllib.loads(
+              pathlib.Path("pyproject.toml").read_text(encoding="utf-8")
+          )["project"]["version"]
+          try:
+              tag, project = Version(tag_raw), Version(project_raw)
+          except InvalidVersion as exc:
+              sys.exit(f"::error::version is not PEP 440 parseable: {exc}")
+          print(f"tag={tag_raw} ({tag})  pyproject={project_raw} ({project})")
+          if tag != project:
+              sys.exit(
+                  f"::error::tag {tag_raw} normalises to {tag}, which does not match the "
+                  f"pyproject version {project_raw} ({project})"
+              )
+          PY
+          echo "INTENTUMDIFF_EXPECTED_VERSION=$(python -c "from packaging.version import Version; print(Version('$tag'))")" >> "$GITHUB_ENV"
 
       - name: Install uv
         uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
