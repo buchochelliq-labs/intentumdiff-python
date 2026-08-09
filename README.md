@@ -27,14 +27,14 @@ parsers are included. There is no second download and nothing is fetched at runt
 ```python
 from intentumdiff import SemanticDiffer
 
-old = "def greet(name):
+old = """def greet(name):
     return 'hi ' + name
-"
-new = "def greet(name):
+"""
+new = """def greet(name):
     if not name:
         return None
     return 'hi ' + name
-"
+"""
 
 diff = SemanticDiffer().diff_strings(old, new, "example.py")
 for change in diff.changes:
