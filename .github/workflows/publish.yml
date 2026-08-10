@@ -272,7 +272,7 @@ jobs:
           --expected-platform-pattern "win_amd64"
           --expected-platform-pattern "win_arm64"
 
-      - uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # release/v1
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
         with:
           packages-dir: publish-dist/
           attestations: false
@@ -325,7 +325,7 @@ jobs:
           --max-release-mb 250
           --expected-version "$INTENTUMDIFF_EXPECTED_VERSION"
 
-      - uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # release/v1
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
         with:
           packages-dir: publish-dist/
           repository-url: https://test.pypi.org/legacy/
