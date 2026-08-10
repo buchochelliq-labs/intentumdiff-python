@@ -109,7 +109,7 @@ jobs:
           python -m pytest tests/unit -q --deselect tests/unit/test_construct_edit_matrix.py
 
   action-pins:
-    name: Action pins match their comments
+    name: Pins and links we ship
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -125,3 +125,14 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: python scripts/check_action_pin_comments.py
+
+      - name: Check every URL we ship actually resolves
+        # 0.0.1 shipped an error message naming a domain that was never registered, and its
+        # replacement named a file that does not exist on main. Both were introduced AS fixes.
+        #
+        # smoke_published_wheel.py already checks URLs that appear on stderr, but it can only
+        # see what a successful run prints - and the plugin-metadata error fires only for a
+        # third-party plugin, so its dead link went unnoticed through two releases.
+        #
+        # Needs no secrets, so this runs on Dependabot and fork PRs too.
+        run: python scripts/check_source_urls.py

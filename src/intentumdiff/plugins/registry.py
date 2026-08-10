@@ -288,7 +288,7 @@ def _wasm_path_from_ep(ep: importlib.metadata.EntryPoint) -> str:
             "execute arbitrary code before Wasm sandboxing is in effect.  "
             f"The plugin author must add '{_WASM_PATH_METADATA_FIELD}: <relative/path.wasm>' "
             "to their package metadata.  "
-            "See: https://github.com/buchochelliq-labs/intentumdiff-python/blob/main/docs/PLUGIN_GUIDE.md"
+            "See: https://buchochelliq-labs.github.io/intentumdiff-docs/extending/"
         )
 
     # Locate the file via importlib.metadata without importing anything.
