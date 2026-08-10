@@ -88,6 +88,11 @@ jobs:
       - name: Run the full unit suite
         if: env.HAS_SPLIT_TOKEN == 'true'
         run: python -m pytest tests/unit -q
+        env:
+          # Components were just staged, so an incomplete set is a provisioning failure, not
+          # a reason to quietly cover less. Without this the suite ran with ZERO renderers
+          # loaded and still reported green (#22).
+          INTENTUMDIFF_REQUIRE_ALL_COMPONENTS: "1"
 
       - name: Run the reduced suite (no token - components unavailable)
         # Dependabot and fork PRs get no secrets, so parser components cannot be
