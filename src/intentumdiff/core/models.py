@@ -153,6 +153,20 @@ class NodeFacts(BaseModel, frozen=True):
     has_error_handling: bool | None = None
     #: The body raises/throws an exception. Flag only.
     throws: bool | None = None
+    #: Cross-language structural facts, derived from the pruned canonical tree (#9) rather
+    #: than from any one grammar — so they are available for EVERY language, not just the
+    #: ones with a bespoke fact extractor.
+    #:
+    #: These are counts and flags only, in keeping with the rest of NodeFacts: no source, no
+    #: identifiers, no literals.
+    #:
+    #: `has_guard_clause` is deliberately tri-state. The pruned tree can prove a guard is
+    #: present, but cannot prove one is absent — statement order survives pruning, operators
+    #: do not. So `None` means "not determinable here", NOT "no guard". Omitting beats
+    #: claiming; see uast.rs for the reasoning.
+    early_exit_count: int | None = None
+    negated_condition_count: int | None = None
+    has_guard_clause: bool | None = None
     #: The body mutates state — an augmented assignment or an assignment to an
     #: attribute/subscript (``self.x = …``, ``a[i] = …``). Flag only, no target name.
     mutates: bool | None = None
