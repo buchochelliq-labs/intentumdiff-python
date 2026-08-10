@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import importlib.metadata
 import logging
+import os
 import re
 import threading
 import time
@@ -44,7 +45,7 @@ from intentumdiff.plugins.adapter import (
     ParserAdapter,
     RendererAdapter,
 )
-from intentumdiff.plugins.exceptions import PluginFuelExhausted, PluginNotFoundError
+from intentumdiff.plugins.exceptions import PluginFuelExhausted, PluginNotFoundError, PluginLoadError
 from intentumdiff.plugins.language_metadata import fallback_language_info
 from intentumdiff.plugins.loader import LoadedPlugin, load_plugin
 
@@ -1046,6 +1047,7 @@ def _load_parsers(
 def _load_renderers(fuel: int = 10_000_000) -> list[RendererAdapter]:
     """Discover and instantiate all registered renderer plugins."""
     adapters: list[RendererAdapter] = []
+    failed: list[str] = []
     for ep in importlib.metadata.entry_points(group=_RENDERER_GROUP):
         try:
             wasm_path = _wasm_path_from_ep(ep)
@@ -1056,6 +1058,22 @@ def _load_renderers(fuel: int = 10_000_000) -> list[RendererAdapter]:
             logger.debug("Loaded renderer plugin: %s (%s)", ep.name, wasm_path)
         except Exception as exc:
             logger.warning("Failed to load renderer plugin %r: %s", ep.name, exc)
+            failed.append(ep.name)
+    # A renderer that fails to load used to be a warning and nothing else: the adapter was
+    # simply omitted and every caller carried on with a smaller set. CI ran the whole suite
+    # with ZERO renderers and reported green - each test touching --format html|patch|llm|
+    # terminal was skipping, hitting a Python fallback, or asserting on degraded output, and
+    # nothing distinguished those from real coverage (#22).
+    #
+    # Opt-in rather than always-on, because a user with a partial install should still get a
+    # working diff - degrading is right for THEM and wrong for a gate. CI sets this so an
+    # incomplete component set stops the run where the cause is legible.
+    if failed and os.environ.get("INTENTUMDIFF_REQUIRE_ALL_COMPONENTS") == "1":
+        raise PluginLoadError(
+            f"{len(failed)} renderer plugin(s) failed to load: {', '.join(sorted(failed))}. "
+            "INTENTUMDIFF_REQUIRE_ALL_COMPONENTS=1 is set, so an incomplete component set is "
+            "an error rather than a silent downgrade - stage the components, or unset it."
+        )
     return adapters
 
 

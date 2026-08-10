@@ -222,6 +222,67 @@ def stage_wasm_from_artifacts(token: str, org: str = "buchochelliq-labs") -> int
                         staged += 1
         except urllib.error.HTTPError as exc:
             missing.append((name, f"HTTP {exc.code} at {stage} ({exc.reason})"))
+    # ---- renderers -------------------------------------------------------------------
+    # Renderers are NOT parser repos - they are crates in intentumdiff-core, published as
+    # the `renderer-components` artifact since core#26. Nothing fetched them before, so the
+    # suite ran with ZERO renderers loaded and still reported green: every test touching
+    # --format html|patch|llm|terminal was skipping, hitting a Python fallback, or asserting
+    # on degraded output, with nothing distinguishing those from real coverage (#22).
+    stage = "renderers"
+    try:
+        runs = _json.loads(
+            get(f"{api}/repos/{org}/intentumdiff-core/actions/runs"
+                f"?status=success&per_page=20")
+        ).get("workflow_runs", [])
+        art = None
+        for run in runs:
+            arts = _json.loads(get(run["artifacts_url"]))
+            art = next((a for a in arts.get("artifacts", [])
+                        if a["name"] == "renderer-components" and not a.get("expired")), None)
+            if art:
+                break
+        if art is None:
+            missing.append(("intentumdiff-core", "no renderer-components artifact"))
+        else:
+            blob = get(art["archive_download_url"])
+            found = 0
+            with zipfile.ZipFile(io.BytesIO(blob)) as z:
+                for member in z.namelist():
+                    if not member.endswith(".wasm"):
+                        continue
+                    out = Path(member).name
+                    for _prefix in ("intentumdiff_", "intentdiff_"):
+                        if out.startswith(_prefix):
+                            out = out[len(_prefix):]
+                            break
+                    payload = z.read(member)
+                    digest = _hashlib.sha256(payload).hexdigest()
+                    pinned = pins.get(out)
+                    # Renderers are not all pinned in the registry today. Where a pin EXISTS
+                    # it is enforced exactly as for parsers; where it does not, the component
+                    # is staged and the fact is printed rather than silently accepted, so an
+                    # unpinned component is visible instead of indistinguishable from a
+                    # verified one.
+                    if pinned is not None and pinned != digest:
+                        missing.append(("intentumdiff-core",
+                                        f"{out} CHECKSUM MISMATCH (registry pins "
+                                        f"{pinned[:16]}..., artifact is {digest[:16]}...)"))
+                        continue
+                    if pinned is None:
+                        print(f"  note: {out} is not pinned in the registry (staged unverified)")
+                    (WASM_DEST / out).write_bytes(payload)
+                    staged += 1
+                    found += 1
+            # Fail closed on a partial set. A consumer that stages 3 of 4 renderers loses one
+            # silently and reports green - the exact failure this exists to end.
+            _EXPECTED_RENDERERS = 4
+            if found < _EXPECTED_RENDERERS:
+                missing.append(("intentumdiff-core",
+                                f"only {found}/{_EXPECTED_RENDERERS} renderer components in "
+                                f"the artifact"))
+    except urllib.error.HTTPError as exc:
+        missing.append(("intentumdiff-core", f"HTTP {exc.code} at {stage} ({exc.reason})"))
+
     print(f"staged {staged} components into {WASM_DEST}")
     if missing:
         print(f"MISSING ({len(missing)}):")
