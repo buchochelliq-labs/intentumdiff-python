@@ -28,7 +28,7 @@ jobs:
       # hard-failed without it - nothing to do with the bumps they proposed.
       HAS_SPLIT_TOKEN: ${{ secrets.SPLIT_REPO_TOKEN != '' }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -107,3 +107,21 @@ jobs:
         run: |
           echo "::notice::SPLIT_REPO_TOKEN unavailable (Dependabot or fork PR) - parser components were not provisioned, so component-dependent tests are skipped. A maintainer run exercises the full gate."
           python -m pytest tests/unit -q --deselect tests/unit/test_construct_edit_matrix.py
+
+  action-pins:
+    name: Action pins match their comments
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check every pinned SHA against its version comment
+        # Reads only PUBLIC tag lists, so GITHUB_TOKEN is enough and this job works on
+        # Dependabot and fork PRs, which receive no repository secrets. That matters: a
+        # wrong comment is precisely what makes Dependabot open bumps that are already
+        # applied, so the check has to run on the PRs where the symptom shows up.
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python scripts/check_action_pin_comments.py
