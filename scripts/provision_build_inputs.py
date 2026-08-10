@@ -283,6 +283,29 @@ def stage_wasm_from_artifacts(token: str, org: str = "buchochelliq-labs") -> int
     except urllib.error.HTTPError as exc:
         missing.append(("intentumdiff-core", f"HTTP {exc.code} at {stage} ({exc.reason})"))
 
+    # Regenerate the provenance manifest for what was ACTUALLY staged.
+    #
+    # `stage_wasm()` copies a manifest if one happens to sit beside the source components;
+    # this artifact path had none, so after an artifact-based staging the manifest was stale
+    # or absent and the loader's provenance check either compared against the previous
+    # build's hashes or could not run at all. That check is the last line between a
+    # substituted component and the engine, so leaving it toothless in the path CI actually
+    # uses defeats it.
+    #
+    # The manifest is a per-build artifact and gitignored, so it is generated here rather
+    # than committed anywhere.
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from wasm_provenance import MANIFEST_FILENAME, generate_manifest, write_manifest
+
+        write_manifest(generate_manifest(WASM_DEST), WASM_DEST / MANIFEST_FILENAME)
+        print(f"wrote {MANIFEST_FILENAME} for {staged} staged component(s)")
+    except Exception as exc:  # noqa: BLE001
+        # Do not fail provisioning over the manifest: the components are staged and usable,
+        # and a hard failure here would block a build for a diagnostic aid. Say so loudly
+        # instead - a silent absence is what made this worth fixing.
+        print(f"WARNING: could not write {MANIFEST_FILENAME}: {type(exc).__name__}: {exc}")
+
     print(f"staged {staged} components into {WASM_DEST}")
     if missing:
         print(f"MISSING ({len(missing)}):")
