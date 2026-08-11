@@ -22,6 +22,7 @@ non-zero exit there just adds a red X that explains nothing.
 from __future__ import annotations
 
 import os
+import pathlib
 import platform
 import subprocess
 import sys
@@ -142,41 +143,61 @@ def main() -> int:
     # fail-fast, with no output at all. The product itself is fine there - the real diff above
     # succeeds - so this is about how pytest COLLECTS, not what it collects. These variants
     # separate the candidate causes in one run rather than one per CI cycle.
-    variants = [
-        ("baseline", [sys.executable, "-m", "pytest", "tests/unit", "--collect-only", "-q"]),
-        # pytest rewrites the AST of every test module to give rich assertion messages. That
-        # is recursive over the syntax tree and is the largest recursive workload in
-        # collection, so if the stack is the problem this is the likeliest source.
-        ("assert=plain", [sys.executable, "-m", "pytest", "tests/unit", "--collect-only", "-q", "--assert=plain"]),
-        # One small module. If this survives while the full tree dies, the trigger is volume
-        # or one specific file rather than collection itself.
-        ("single file", [sys.executable, "-m", "pytest", "tests/unit/test_cli.py", "--collect-only", "-q"]),
-        # A thread gets the stack size we ask for, unlike the main thread whose size is fixed
-        # in the executable's PE header. If this is the only variant that survives, the fix is
-        # simply to run the suite with a bigger stack.
-        ("64MB stack thread", [sys.executable, "-c", _BIG_STACK_RUNNER]),
-    ]
+    # ANSWERED already on windows-11-arm, so those probes are gone:
+    #   baseline          CRASHED 0xC0000409   (STATUS_STACK_BUFFER_OVERRUN)
+    #   --assert=plain    CRASHED              -> not pytest's AST rewriting
+    #   64MB stack thread CRASHED              -> not stack size
+    #   one file          ok, 69 collected     -> collection itself is fine
+    #
+    # One module collects; the whole tree does not. That leaves a specific module, or
+    # something cumulative across modules. Both are bisectable, so bisect.
+    files = sorted(str(p).replace("\\", "/") for p in pathlib.Path("tests/unit").glob("test_*.py"))
+    print(f"  {len(files)} test modules to bisect", flush=True)
 
-    results: list[tuple[str, int]] = []
-    for label, cmd in variants:
-        proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
-        results.append((label, proc.returncode))
-        print(f"\n  [{label}] exit code: {proc.returncode}", flush=True)
-        tail = (proc.stdout or "").strip().splitlines()[-6:]
-        for line in tail:
-            print(f"    out| {line}", flush=True)
-        for line in (proc.stderr or "").strip().splitlines()[-12:]:
-            print(f"    err| {line}", flush=True)
-        if not tail and not (proc.stderr or "").strip():
-            print("    NO OUTPUT AT ALL - died without writing anything", flush=True)
+    def collect(paths: list[str]) -> int:
+        return subprocess.run(
+            [sys.executable, "-m", "pytest", *paths, "--collect-only", "-q", "-p", "no:cacheprovider"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+        ).returncode
 
-    section("summary")
-    for label, code in results:
-        verdict = "ok" if code == 0 else ("collected, some issue" if code in (1, 2, 5) else f"CRASHED ({hex(code & 0xFFFFFFFF)})")
-        print(f"  {label:20} {code:>12}  {verdict}", flush=True)
+    CRASH = 3221226505  # 0xC0000409
+
+    # Ask the cheap question first. On a healthy platform this is one subprocess and the
+    # answer is "nothing to investigate" - sweeping ~200 modules individually there would
+    # cost minutes to confirm what one call already told us.
+    section("does the full tree crash on this platform?")
+    full_rc = collect(files)
+    if full_rc != CRASH:
+        print(f"  no - exit {full_rc}. Nothing to bisect here.", flush=True)
+    else:
+        print(f"  yes - {full_rc} (0x{full_rc & 0xFFFFFFFF:08x}). Bisecting.", flush=True)
+
+        section("phase 1: how many modules together does it take?")
+        # Smallest crashing prefix of the sorted list. Binary search, ~8 trials for 200
+        # modules, each in a fresh child so a crash costs a process rather than the bisect.
+        lo, hi = 1, len(files)
+        while lo < hi:
+            mid = (lo + hi) // 2
+            rc = collect(files[:mid])
+            print(f"  first {mid:3} modules -> {'CRASH' if rc == CRASH else f'ok({rc})'}", flush=True)
+            if rc == CRASH:
+                hi = mid
+            else:
+                lo = mid + 1
+        print(f"\n  smallest crashing prefix: {lo} of {len(files)} modules", flush=True)
+        print(f"  the module that tips it over: {files[lo - 1]}", flush=True)
+
+        section("phase 2: is that module poisonous, or just the last straw?")
+        alone = collect([files[lo - 1]])
+        if alone == CRASH:
+            print(f"  it crashes ALONE too -> that module is the problem, not the volume", flush=True)
+        else:
+            print(f"  it collects fine alone (exit {alone}) -> the trigger is CUMULATIVE.", flush=True)
+            print("  Something is retained across module imports and exhausts a limit:", flush=True)
+            print("  handles, memory, or wasmtime instances. The prefix size is the budget.", flush=True)
 
     section("done")
-    return 1 if "--strict" in sys.argv and any(c != 0 for _, c in results) else 0
+    return 0
 
 
 if __name__ == "__main__":
