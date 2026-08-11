@@ -115,6 +115,41 @@ def main() -> int:
         print("  nothing staged - provisioning did not run", flush=True)
         return 0
 
+    # ---------------------------------------------------------------------------------
+    # The gate is live (registry excludes powershell on Windows/aarch64) and collection
+    # STILL dies. So something reaches that component by a path the gate does not cover.
+    # Not conftest, not the hardening subset (powershell is not in it), not the one
+    # supported_languages() call already gated. Find out whether the gate is even reached
+    # inside pytest, before hunting a third loader.
+    # ---------------------------------------------------------------------------------
+    section("is the exclusion actually in effect here?")
+
+    GATE_PROBE = """
+import platform
+from intentumdiff.plugins import registry as r
+print("system", platform.system(), "machine", platform.machine())
+print("gate says:", r.arch_incompatible_reason("powershell"))
+cat = r._discover_parser_catalog()
+names = sorted(e.ep.name for e in cat)
+print("powershell in catalog:", "powershell" in names)
+print("catalog size:", len(cat))
+"""
+    r = run([sys.executable, "-c", GATE_PROBE])
+    for line in ((r.stdout or "") + (r.stderr or "")).strip().splitlines():
+        print(f"  {line}", flush=True)
+    print(f"  rc={r.returncode}", flush=True)
+
+    section("collect ONLY the module that dies, with stderr")
+    r = run([sys.executable, "-m", "pytest", "tests/unit/test_supported_language_examples.py",
+             "--collect-only", "-q", "-p", "no:cacheprovider"])
+    print(f"  rc={r.returncode}"
+          f"{'  (fail-fast)' if r.returncode in CRASH_CODES else ''}", flush=True)
+    for stream, text in (("out", r.stdout), ("err", r.stderr)):
+        for line in (text or "").strip().splitlines()[-15:]:
+            print(f"  {stream}| {line}", flush=True)
+    if not (r.stdout or "").strip() and not (r.stderr or "").strip():
+        print("  (no output at all)", flush=True)
+
     section("does each component load ON ITS OWN?")
     crashed: list[str] = []
     other: list[tuple[str, int, str]] = []
