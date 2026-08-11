@@ -4,46 +4,60 @@ WHY THIS EXISTS
 ---------------
 Widening CI to every platform we publish a wheel for (#9) turned windows-11-arm red in a way
 that carried no information: the suite exited after ~12 seconds with no traceback, no
-"collected N items", and - even with PYTHONFAULTHANDLER set - no fault handler output. That
-combination rules out both an ordinary test failure and a hard native crash, and leaves
-nothing to act on.
+"collected N items", and - even with PYTHONFAULTHANDLER set - no fault handler output.
 
-A test suite is a bad diagnostic instrument. It imports everything, collects everything, and
-reports at the end, so any abrupt exit destroys the evidence for all of it. This walks the
-same ground in order - interpreter, native runtime, package import, staged components, one
-real diff, then collection - printing each result before attempting the next, so the last line
+A test suite is a poor diagnostic instrument. It imports everything, collects everything and
+reports at the end, so an abrupt exit destroys the evidence for all of it at once. This walks
+the same ground in order, printing each result before attempting the next, so the last line
 printed names the step that killed the process.
 
-Every check is independently guarded. The script's own exit code is deliberately 0 unless
---strict is passed: it runs as a `continue-on-error` step whose value is the output, and a
-non-zero exit there just adds a red X that explains nothing.
+WHAT IS ALREADY ESTABLISHED (do not re-derive; each cost a CI cycle)
+-------------------------------------------------------------------
+  - The product WORKS on arm64: wasmtime Engine constructs, all 73 components stage, and a
+    real diff returns the right answer.
+  - Collection of the whole tree dies with 3221226505 = 0xC0000409.
+  - Not pytest's AST rewriting (--assert=plain dies too).
+  - Not stack size (a 64 MiB-stack thread dies too).
+  - One test module collects fine; the tree does not.
+  - Bisected to tests/unit/test_supported_language_examples.py, which crashes ALONE. Its
+    pytest_generate_tests calls SemanticDiffer().supported_languages(), which reaches
+    registry.language_ids(), which instantiates EVERY parser. So loading all 73 components in
+    one process is what is fatal.
+  - NOT memory pressure. Each plugin reserves ~4 GiB of address space (measured), but that is
+    0.2% of a 64-bit process's 128 TiB, and capping it to 68 MiB per plugin did not stop the
+    crash.
+
+0xC0000409 is __fastfail, which is what Rust's abort() compiles to on Windows. So the working
+hypothesis is an abort inside wasmtime while compiling or instantiating a particular component
+on aarch64. This script's job is now to name that component.
+
+A child process per component is the only way to get a name out of a fail-fast: the abort
+kills the child, the parent records which one and carries on.
 """
 
 from __future__ import annotations
 
-import os
 import pathlib
 import platform
 import subprocess
 import sys
 import traceback
 
+# Windows fail-fast, seen as an unsigned exit code.
+CRASH_CODES = {3221226505, -1073740791}
 
-# Run pytest's collection on a thread with an explicitly large stack. The MAIN thread's stack
-# size is fixed in the executable's PE header and cannot be changed at runtime on Windows; a
-# thread created afterwards gets whatever threading.stack_size asks for. If a stack overrun is
-# what kills collection, this is the variant that survives - and the fix.
-_BIG_STACK_RUNNER = """
-import sys, threading
-threading.stack_size(64 * 1024 * 1024)
-rc = {}
-def run():
-    import pytest
-    rc['code'] = pytest.main(['tests/unit', '--collect-only', '-q'])
-t = threading.Thread(target=run)
-t.start()
-t.join()
-sys.exit(int(rc.get('code', 99)))
+LOAD_ONE = """
+import sys
+from intentumdiff.plugins.loader import load_plugin
+load_plugin(sys.argv[1], 10_000_000, trusted=True)
+print("loaded")
+"""
+
+LOAD_MANY = """
+import sys
+from intentumdiff.plugins.loader import load_plugin
+keep = [load_plugin(p, 10_000_000, trusted=True) for p in sys.argv[1:]]
+print("loaded", len(keep))
 """
 
 
@@ -55,7 +69,7 @@ def attempt(label: str, fn) -> bool:
     """Run fn, print what happened, and keep going regardless."""
     try:
         result = fn()
-    except BaseException:  # noqa: BLE001 - SystemExit included on purpose; see below
+    except BaseException:  # noqa: BLE001 - keep going whatever happens; reporting is the point
         print(f"  {label}: FAILED", flush=True)
         traceback.print_exc()
         sys.stdout.flush()
@@ -64,11 +78,14 @@ def attempt(label: str, fn) -> bool:
     return True
 
 
+def run(args: list[str]) -> subprocess.CompletedProcess:
+    return subprocess.run(args, capture_output=True, text=True, encoding="utf-8", errors="replace")
+
+
 def main() -> int:
     section("interpreter")
     print(f"  {sys.version}", flush=True)
     print(f"  machine={platform.machine()}  platform={platform.platform()}", flush=True)
-    print(f"  maxsize={sys.maxsize}  executable={sys.executable}", flush=True)
 
     section("native runtime")
 
@@ -79,16 +96,6 @@ def main() -> int:
 
     attempt("import wasmtime", _wasmtime)
 
-    def _engine():
-        # Instantiating an Engine is where a runtime unsupported on this architecture would
-        # first actually execute native code, rather than merely load a shared library.
-        import wasmtime
-
-        wasmtime.Engine()
-        return "Engine() constructed"
-
-    attempt("wasmtime.Engine()", _engine)
-
     section("package")
 
     def _import():
@@ -96,107 +103,77 @@ def main() -> int:
 
         return f"{intentumdiff.__version__} at {intentumdiff.__file__}"
 
-    imported = attempt("import intentumdiff", _import)
+    if not attempt("import intentumdiff", _import):
+        return 0
 
-    if imported:
+    import intentumdiff as pkg
 
-        def _components():
-            import pathlib
+    wasm_dir = pathlib.Path(pkg.__file__).parent / "wasm"
+    components = sorted(wasm_dir.glob("*.wasm"))
+    print(f"  {len(components)} components in {wasm_dir}", flush=True)
+    if not components:
+        print("  nothing staged - provisioning did not run", flush=True)
+        return 0
 
-            import intentumdiff
-
-            d = pathlib.Path(intentumdiff.__file__).parent / "wasm"
-            n = len(sorted(d.glob("*.wasm"))) if d.is_dir() else 0
-            return f"{n} components in {d}"
-
-        attempt("staged components", _components)
-
-        def _core():
-            from intentumdiff.plugins import loader
-
-            return f"loader module at {loader.__file__}"
-
-        attempt("import the plugin loader", _core)
-
-        def _diff():
-            import tempfile
-            from pathlib import Path
-
-            from intentumdiff import FileSource, SemanticDiffer
-
-            with tempfile.TemporaryDirectory() as tmp:
-                old = Path(tmp) / "old.py"
-                new = Path(tmp) / "new.py"
-                old.write_text("def f():\n    return 1\n", encoding="utf-8")
-                new.write_text("def f():\n    return 2\n", encoding="utf-8")
-                d = SemanticDiffer().diff(FileSource(old, new))
-            return f"{len(d.changes)} change(s), language={getattr(d, 'language', '?')}"
-
-        attempt("one real diff", _diff)
-
-    section("pytest collection")
-    # Each variant runs in a CHILD process on purpose. If collection kills the interpreter,
-    # that must not take this script's remaining output with it - the point is to still
-    # report, and to keep going so one crash does not hide the next answer.
-    #
-    # windows-11-arm returns 3221226505 = 0xC0000409 = STATUS_STACK_BUFFER_OVERRUN, a Windows
-    # fail-fast, with no output at all. The product itself is fine there - the real diff above
-    # succeeds - so this is about how pytest COLLECTS, not what it collects. These variants
-    # separate the candidate causes in one run rather than one per CI cycle.
-    # ANSWERED already on windows-11-arm, so those probes are gone:
-    #   baseline          CRASHED 0xC0000409   (STATUS_STACK_BUFFER_OVERRUN)
-    #   --assert=plain    CRASHED              -> not pytest's AST rewriting
-    #   64MB stack thread CRASHED              -> not stack size
-    #   one file          ok, 69 collected     -> collection itself is fine
-    #
-    # One module collects; the whole tree does not. That leaves a specific module, or
-    # something cumulative across modules. Both are bisectable, so bisect.
-    files = sorted(str(p).replace("\\", "/") for p in pathlib.Path("tests/unit").glob("test_*.py"))
-    print(f"  {len(files)} test modules to bisect", flush=True)
-
-    def collect(paths: list[str]) -> int:
-        return subprocess.run(
-            [sys.executable, "-m", "pytest", *paths, "--collect-only", "-q", "-p", "no:cacheprovider"],
-            capture_output=True, text=True, encoding="utf-8", errors="replace",
-        ).returncode
-
-    CRASH = 3221226505  # 0xC0000409
-
-    # Ask the cheap question first. On a healthy platform this is one subprocess and the
-    # answer is "nothing to investigate" - sweeping ~200 modules individually there would
-    # cost minutes to confirm what one call already told us.
-    section("does the full tree crash on this platform?")
-    full_rc = collect(files)
-    if full_rc != CRASH:
-        print(f"  no - exit {full_rc}. Nothing to bisect here.", flush=True)
-    else:
-        print(f"  yes - {full_rc} (0x{full_rc & 0xFFFFFFFF:08x}). Bisecting.", flush=True)
-
-        section("phase 1: how many modules together does it take?")
-        # Smallest crashing prefix of the sorted list. Binary search, ~8 trials for 200
-        # modules, each in a fresh child so a crash costs a process rather than the bisect.
-        lo, hi = 1, len(files)
-        while lo < hi:
-            mid = (lo + hi) // 2
-            rc = collect(files[:mid])
-            print(f"  first {mid:3} modules -> {'CRASH' if rc == CRASH else f'ok({rc})'}", flush=True)
-            if rc == CRASH:
-                hi = mid
-            else:
-                lo = mid + 1
-        print(f"\n  smallest crashing prefix: {lo} of {len(files)} modules", flush=True)
-        print(f"  the module that tips it over: {files[lo - 1]}", flush=True)
-
-        section("phase 2: is that module poisonous, or just the last straw?")
-        alone = collect([files[lo - 1]])
-        if alone == CRASH:
-            print(f"  it crashes ALONE too -> that module is the problem, not the volume", flush=True)
+    section("does each component load ON ITS OWN?")
+    crashed: list[str] = []
+    other: list[tuple[str, int, str]] = []
+    loaded = 0
+    for c in components:
+        r = run([sys.executable, "-c", LOAD_ONE, str(c)])
+        if r.returncode == 0:
+            loaded += 1
+        elif r.returncode in CRASH_CODES:
+            crashed.append(c.name)
+            print(f"  ABORTS ALONE: {c.name}", flush=True)
         else:
-            print(f"  it collects fine alone (exit {alone}) -> the trigger is CUMULATIVE.", flush=True)
-            print("  Something is retained across module imports and exhausts a limit:", flush=True)
-            print("  handles, memory, or wasmtime instances. The prefix size is the budget.", flush=True)
+            last = ((r.stderr or "").strip().splitlines() or [""])[-1]
+            other.append((c.name, r.returncode, last))
+            print(f"  fails ({r.returncode}): {c.name}  {last[:100]}", flush=True)
 
-    section("done")
+    print(f"\n  loaded cleanly {loaded}, aborted {len(crashed)}, other failures {len(other)}", flush=True)
+
+    if crashed:
+        section("verdict")
+        print("  A SPECIFIC COMPONENT aborts on this platform:", flush=True)
+        for name in crashed:
+            print(f"    {name}", flush=True)
+        print("  That is the thing to fix or exclude - not the harness.", flush=True)
+        return 0
+
+    section("every component loads alone - so the trigger is CUMULATIVE")
+
+    # Only components that DID load alone. The staged set also contains non-parser components
+    # (plugin_sdk, index_engine) which legitimately raise "exports neither parser, renderer,
+    # enricher, nor diff-analyzer interface". Including them would end the search at the first
+    # one and report a "budget" that is really just a bad input.
+    good = [c for c in components if c.name not in {n for n, _, _ in other}]
+    print(f"  bisecting over the {len(good)} loadable components", flush=True)
+
+    n, last_ok = 1, 0
+    while True:
+        r = run([sys.executable, "-c", LOAD_MANY, *[str(c) for c in good[:n]]])
+        died = r.returncode in CRASH_CODES
+        if died:
+            state = f"DIED rc={r.returncode} (fail-fast)"
+        elif r.returncode != 0:
+            # A Python-level error is information, not the crash we are hunting.
+            state = f"error rc={r.returncode} (not a crash)"
+        else:
+            state = "ok"
+        print(f"  {n:3} components in one process -> {state}", flush=True)
+
+        if died:
+            print(f"\n  budget: {last_ok} fit, {n} does not", flush=True)
+            for line in (r.stderr or "").strip().splitlines()[-10:]:
+                print(f"    err| {line}", flush=True)
+            break
+        last_ok = n
+        if n >= len(good):
+            print(f"  all {len(good)} load together here - no limit hit on this platform", flush=True)
+            break
+        n = min(n * 2, len(good))
+
     return 0
 
 
