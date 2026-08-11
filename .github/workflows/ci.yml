@@ -42,6 +42,12 @@ jobs:
       # Every open Dependabot PR in this repo was red purely because provisioning
       # hard-failed without it - nothing to do with the bumps they proposed.
       HAS_SPLIT_TOKEN: ${{ secrets.SPLIT_REPO_TOKEN != '' }}
+      # windows-11-arm died during collection with NO output at all: no traceback, no
+      # "collected N items", just exit 1. That is what a native crash looks like when
+      # stdout is still buffered - the buffer dies with the process and takes the only
+      # evidence with it. These two make the next failure legible.
+      PYTHONFAULTHANDLER: "1"
+      PYTHONUNBUFFERED: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

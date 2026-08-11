@@ -22,9 +22,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
-yaml = pytest.importorskip("yaml", reason="PyYAML is a declared dev dependency; a missing one is a broken env, not a reason to skip silently")
+# PyYAML is a RUNTIME dependency of this package, not a dev extra, so it cannot be absent in
+# any environment where the tests can run at all. An importorskip here would only ever
+# convert a broken environment into a silent pass - and it added an unclassified skip reason
+# that the skip ratchet then failed on, which is the ratchet working exactly as intended.
+import yaml
 
 WORKFLOWS = Path(__file__).resolve().parents[2] / ".github" / "workflows"
 

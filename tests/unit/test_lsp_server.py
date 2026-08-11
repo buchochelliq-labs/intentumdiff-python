@@ -221,7 +221,12 @@ class TestUriToPath:
         else:
             uri = "file:///home/user/project/main.py"
             path = uri_to_path(uri)
-            assert path == Path("/home/user/project/main.py")
+            # uri_to_path resolves, and it must: the workspace-containment check compares
+            # real paths, so a symlinked route into the workspace cannot be used to escape
+            # it. On macOS /home is a firmlink to /System/Volumes/Data/home, so resolving is
+            # not a no-op there. Compare against the same resolution the OS performs rather
+            # than a hardcoded Linux-shaped literal.
+            assert path == Path("/home/user/project/main.py").resolve()
 
     def test_uri_with_spaces_decoded(self):
         if sys.platform == "win32":
