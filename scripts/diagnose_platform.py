@@ -78,6 +78,18 @@ def attempt(label: str, fn) -> bool:
     return True
 
 
+def say(text: str) -> None:
+    """Print text that came from another process without dying on it.
+
+    The arm64 runner's stdout is cp1252. Captured output contained U+FFFD (itself the result
+    of decoding with errors="replace"), and printing it raised UnicodeEncodeError - killing
+    the diagnostic at the exact moment it had the answer. A reporting tool must never fail on
+    what it is reporting.
+    """
+    enc = sys.stdout.encoding or "utf-8"
+    print(text.encode(enc, errors="replace").decode(enc, errors="replace"), flush=True)
+
+
 def run(args: list[str]) -> subprocess.CompletedProcess:
     return subprocess.run(args, capture_output=True, text=True, encoding="utf-8", errors="replace")
 
@@ -146,7 +158,7 @@ print("catalog size:", len(cat))
           f"{'  (fail-fast)' if r.returncode in CRASH_CODES else ''}", flush=True)
     for stream, text in (("out", r.stdout), ("err", r.stderr)):
         for line in (text or "").strip().splitlines()[-15:]:
-            print(f"  {stream}| {line}", flush=True)
+            say(f"  {stream}| {line}")
     if not (r.stdout or "").strip() and not (r.stderr or "").strip():
         print("  (no output at all)", flush=True)
 
@@ -183,7 +195,7 @@ print("catalog size:", len(cat))
         print(f"  rc={r.returncode}", flush=True)
         for stream, text in (("out", r.stdout), ("err", r.stderr)):
             for line in (text or "").strip().splitlines():
-                print(f"  {stream}| {line}", flush=True)
+                say(f"  {stream}| {line}")
         if not (r.stdout or "").strip() and not (r.stderr or "").strip():
             print("  (silent - the abort produced no message at all)", flush=True)
 

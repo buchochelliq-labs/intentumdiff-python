@@ -1070,6 +1070,13 @@ def _add_first_party_parser_entrypoint_fallbacks(
     for name, callable_name in _FIRST_PARTY_PARSER_ENTRYPOINT_FALLBACKS.items():
         if name in existing_names:
             continue
+        # The SAME architecture gate as entry-point discovery. This fallback builds catalog
+        # entries directly from builtin callables, bypassing that path entirely - which is
+        # exactly how powershell kept reaching the catalog on Windows/aarch64 while the gate
+        # itself correctly reported "excluded". Two ways in, one of them guarded, is no guard.
+        if arch_incompatible_reason(name) is not None:
+            logger.debug("Fallback skipped for %r: unavailable on this platform", name)
+            continue
         entry_callable = getattr(builtins, callable_name, None)
         if entry_callable is None:
             continue
