@@ -138,7 +138,52 @@ def main() -> int:
         print("  A SPECIFIC COMPONENT aborts on this platform:", flush=True)
         for name in crashed:
             print(f"    {name}", flush=True)
-        print("  That is the thing to fix or exclude - not the harness.", flush=True)
+
+        # A Rust abort usually prints a panic line before __fastfail. Capture it: that text
+        # names the wasmtime bug, which is the difference between "a component aborts" and
+        # "wasmtime's aarch64 backend panics in X".
+        section("what does it say before it dies?")
+        target = next(c for c in components if c.name == crashed[0])
+        r = run([sys.executable, "-c", LOAD_ONE, str(target)])
+        print(f"  rc={r.returncode}", flush=True)
+        for stream, text in (("out", r.stdout), ("err", r.stderr)):
+            for line in (text or "").strip().splitlines():
+                print(f"  {stream}| {line}", flush=True)
+        if not (r.stdout or "").strip() and not (r.stderr or "").strip():
+            print("  (silent - the abort produced no message at all)", flush=True)
+
+        # Narrow WHICH part of codegen trips. Each variant is one child process; whichever
+        # survives both identifies the trigger and is a candidate workaround.
+        section("does any wasmtime setting avoid it?")
+        VARIANTS = [
+            ("default", ""),
+            ("opt_level=none", "c.cranelift_opt_level = 'none'"),
+            ("opt_level=speed", "c.cranelift_opt_level = 'speed'"),
+            ("no simd", "c.wasm_simd = False"),
+            ("no relaxed_simd", "c.wasm_relaxed_simd = False"),
+            ("no parallel compilation", "c.parallel_compilation = False"),
+            ("no tail_call", "c.wasm_tail_call = False"),
+        ]
+        for label, tweak in VARIANTS:
+            probe = (
+                "import sys, wasmtime\n"
+                "_R = wasmtime.Config\n"
+                "class C(_R):\n"
+                "    def __init__(self, *a, **k):\n"
+                "        super().__init__(*a, **k)\n"
+                f"        c = self\n        {tweak or 'pass'}\n"
+                "wasmtime.Config = C\n"
+                "from intentumdiff.plugins.loader import load_plugin\n"
+                "load_plugin(sys.argv[1], 10_000_000, trusted=True)\n"
+                "print('loaded')\n"
+            )
+            rv = run([sys.executable, "-c", probe, str(target)])
+            verdict = "SURVIVES" if rv.returncode == 0 else (
+                "aborts" if rv.returncode in CRASH_CODES else f"error rc={rv.returncode}")
+            print(f"  {label:26} {verdict}", flush=True)
+            if rv.returncode not in CRASH_CODES and rv.returncode != 0:
+                last = ((rv.stderr or "").strip().splitlines() or [""])[-1]
+                print(f"    {last[:150]}", flush=True)
         return 0
 
     section("every component loads alone - so the trigger is CUMULATIVE")
