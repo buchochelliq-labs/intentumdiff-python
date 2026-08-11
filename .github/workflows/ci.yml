@@ -106,6 +106,20 @@ jobs:
           pip install cffi
           pip install -e .[dev,serve]
 
+      - name: Diagnose this platform before the suite
+        # TEMPORARY (#9). windows-11-arm exits the suite in ~12s with no traceback, no
+        # "collected N items" and - even with PYTHONFAULTHANDLER set - no fault handler
+        # output. That rules out both an ordinary test failure and a hard native crash,
+        # and leaves nothing to act on.
+        #
+        # A suite is a poor diagnostic instrument: it imports and collects everything and
+        # reports at the end, so an abrupt exit destroys the evidence for all of it. This
+        # walks the same ground in order, printing each result before attempting the next.
+        # continue-on-error because the OUTPUT is the value; a red X here explains nothing.
+        if: env.HAS_SPLIT_TOKEN == 'true'
+        continue-on-error: true
+        run: python scripts/diagnose_platform.py
+
       - name: Run the full unit suite
         if: env.HAS_SPLIT_TOKEN == 'true'
         run: python -m pytest tests/unit -q
