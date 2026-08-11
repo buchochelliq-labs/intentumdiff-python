@@ -14,11 +14,22 @@ permissions:
 
 jobs:
   python-suite:
-    name: Python full suite (pytest)
-    # windows-latest matches the environment the suite is developed and gated on
-    # (named-pipe LiveServer tests, path handling).
-    runs-on: windows-latest
+    name: Python full suite (${{ matrix.os }})
+    # publish.yml builds wheels for ubuntu, macos, windows and windows-11-arm. Until now the
+    # suite ran on windows-latest ONLY, so three of the four artefacts we publish had never
+    # had a test run on the platform they target - compiled and uploaded on the strength of a
+    # Windows run (#9).
+    #
+    # That is the 0.0.1 shape again: a check that proves the code builds standing in for a
+    # check that proves the artefact works.
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 180
+    strategy:
+      # Never fail-fast. On the first run every platform's result is information we do not
+      # have yet; cancelling macos because ubuntu went red would throw away half of it.
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
     env:
       CARGO_PROFILE_DEV_DEBUG: "false"
       MATURIN_PEP517_ARGS: "--profile dev"
@@ -107,6 +118,26 @@ jobs:
         run: |
           echo "::notice::SPLIT_REPO_TOKEN unavailable (Dependabot or fork PR) - parser components were not provisioned, so component-dependent tests are skipped. A maintainer run exercises the full gate."
           python -m pytest tests/unit -q --deselect tests/unit/test_construct_edit_matrix.py
+
+      - name: Build a wheel on this platform
+        # The suite above runs against an EDITABLE install, which resolves imports from the
+        # source checkout. That is not the artefact anyone downloads. Every 0.0.1 defect
+        # survived a green suite and appeared the moment a real wheel was installed, so the
+        # wheel itself has to be built and exercised here.
+        if: env.HAS_SPLIT_TOKEN == 'true'
+        run: pip wheel . --no-deps --wheel-dir dist
+
+      - name: Smoke the wheel this platform just built
+        # Installs into a CLEAN venv and does what a user does in their first five minutes:
+        # import, console script, python -m, a real diff, clean stderr, and every URL in the
+        # output resolving. Against the wheel built on THIS runner, not a source checkout and
+        # not the wheel some other platform produced.
+        if: env.HAS_SPLIT_TOKEN == 'true'
+        shell: bash
+        run: |
+          wheel=$(ls dist/*.whl | head -1)
+          echo "smoking $wheel on $RUNNER_OS"
+          python scripts/smoke_published_wheel.py --wheel "$wheel"
 
   action-pins:
     name: Pins and links we ship
