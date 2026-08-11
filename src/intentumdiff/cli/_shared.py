@@ -426,7 +426,13 @@ def _render(diff: SemanticDiff, fmt: str, output: str | None, fuel: int | None =
     # For patch / html / llm — delegate to the matching Wasm renderer plugin
     from intentumdiff.plugins.loader import load_plugin
 
-    wasm_dir = Path(__file__).parent / "wasm"
+    # Was `Path(__file__).parent / "wasm"`, which from inside `cli/` resolves to
+    # intentumdiff/cli/wasm/ — a directory that has never existed. The glob below found
+    # nothing, the fallback scan iterated the same empty path, and --format patch/html/llm
+    # reported "No renderer plugin found" for components that ship and load fine.
+    from intentumdiff.plugins.registry import builtin_wasm_dir
+
+    wasm_dir = builtin_wasm_dir()
     candidates = list(wasm_dir.glob(f"{fmt.replace('-', '_')}_renderer.wasm"))
     if not candidates:
         # Fallback: scan for any renderer plugin that reports this format name
