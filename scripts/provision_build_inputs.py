@@ -88,7 +88,9 @@ def stage_wasm(wasm_dir: str | None) -> None:
 def stage_wasm_from_artifacts(token: str, org: str = "buchochelliq-labs") -> int:
     import hashlib as _hashlib
     import io
+    import http.client
     import json as _json
+    import time
     import urllib.error
     import urllib.parse
     import urllib.request
@@ -121,9 +123,39 @@ def stage_wasm_from_artifacts(token: str, org: str = "buchochelliq-labs") -> int
     opener = urllib.request.build_opener(_StripAuthOnRedirect)
 
     def get(url: str, accept: str = "application/vnd.github+json") -> bytes:
+        """GET with bounded retries on TRANSIENT failures only.
+
+        Provisioning makes many API calls, and one dropped connection used to fail the job:
+
+            http.client.RemoteDisconnected: Remote end closed connection without response
+
+        That is not a defect in anything we control - it is the other end hanging up. It
+        became visible when CI widened from one platform to four (#9): four legs provisioning
+        concurrently meet it four times as often. Left alone the matrix is permanently flaky,
+        and a flaky gate is one people learn to re-run rather than read.
+
+        Deliberately NOT retried: 401, 403, 404. A missing artifact or a rejected token is a
+        real answer, and retrying it only turns a clear failure into a slow one.
+        """
         req = urllib.request.Request(url, headers={**hdr, "Accept": accept})
-        with opener.open(req, timeout=120) as r:
-            return r.read()
+        attempts = 4
+        for attempt in range(1, attempts + 1):
+            try:
+                with opener.open(req, timeout=120) as r:
+                    return r.read()
+            except urllib.error.HTTPError as exc:
+                # 5xx and 429 are the server asking us to come back. Everything else is an answer.
+                if exc.code not in (429, 500, 502, 503, 504) or attempt == attempts:
+                    raise
+                reason = f"HTTP {exc.code}"
+            except (urllib.error.URLError, TimeoutError, ConnectionError, http.client.HTTPException) as exc:
+                if attempt == attempts:
+                    raise
+                reason = type(exc).__name__
+            delay = 2 ** (attempt - 1)
+            print(f"  transient {reason} - retry {attempt}/{attempts - 1} in {delay}s")
+            time.sleep(delay)
+        raise RuntimeError("unreachable")  # pragma: no cover
 
     # The registry (#95) is the root of trust: it pins every official component by
     # SHA-256. Verifying the downloaded artifact against that pin is what makes this a

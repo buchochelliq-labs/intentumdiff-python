@@ -184,15 +184,21 @@ def main() -> int:
             if rv.returncode not in CRASH_CODES and rv.returncode != 0:
                 last = ((rv.stderr or "").strip().splitlines() or [""])[-1]
                 print(f"    {last[:150]}", flush=True)
-        return 0
+        # DO NOT return here. Finding one aborting component is not proof it is the only
+        # problem - and returning early is exactly the mistake that cost a CI cycle: the
+        # exclusion landed, arm64 still died, and we had never tested whether the REMAINING
+        # components load together. Carry on with the survivors.
+        print("\n  continuing with the survivors - one bad component may not be the only one",
+              flush=True)
 
-    section("every component loads alone - so the trigger is CUMULATIVE")
+    section("do the loadable components survive TOGETHER?")
 
     # Only components that DID load alone. The staged set also contains non-parser components
     # (plugin_sdk, index_engine) which legitimately raise "exports neither parser, renderer,
     # enricher, nor diff-analyzer interface". Including them would end the search at the first
     # one and report a "budget" that is really just a bad input.
-    good = [c for c in components if c.name not in {n for n, _, _ in other}]
+    bad = {n for n, _, _ in other} | set(crashed)
+    good = [c for c in components if c.name not in bad]
     print(f"  bisecting over the {len(good)} loadable components", flush=True)
 
     n, last_ok = 1, 0
