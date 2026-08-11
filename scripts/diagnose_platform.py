@@ -28,6 +28,24 @@ import sys
 import traceback
 
 
+# Run pytest's collection on a thread with an explicitly large stack. The MAIN thread's stack
+# size is fixed in the executable's PE header and cannot be changed at runtime on Windows; a
+# thread created afterwards gets whatever threading.stack_size asks for. If a stack overrun is
+# what kills collection, this is the variant that survives - and the fix.
+_BIG_STACK_RUNNER = """
+import sys, threading
+threading.stack_size(64 * 1024 * 1024)
+rc = {}
+def run():
+    import pytest
+    rc['code'] = pytest.main(['tests/unit', '--collect-only', '-q'])
+t = threading.Thread(target=run)
+t.start()
+t.join()
+sys.exit(int(rc.get('code', 99)))
+"""
+
+
 def section(title: str) -> None:
     print(f"\n=== {title}", flush=True)
 
@@ -116,26 +134,49 @@ def main() -> int:
         attempt("one real diff", _diff)
 
     section("pytest collection")
-    # In a CHILD process on purpose. If collection kills the interpreter, that must not take
-    # this script's remaining output with it - the whole point is to still be able to report.
-    proc = subprocess.run(
-        [sys.executable, "-m", "pytest", "tests/unit", "--collect-only", "-q"],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
-    print(f"  exit code: {proc.returncode}", flush=True)
-    tail = (proc.stdout or "").strip().splitlines()[-12:]
-    for line in tail:
-        print(f"  out| {line}", flush=True)
-    for line in (proc.stderr or "").strip().splitlines()[-25:]:
-        print(f"  err| {line}", flush=True)
-    if not tail and not (proc.stderr or "").strip():
-        print("  NO OUTPUT AT ALL - the collector died without writing anything", flush=True)
+    # Each variant runs in a CHILD process on purpose. If collection kills the interpreter,
+    # that must not take this script's remaining output with it - the point is to still
+    # report, and to keep going so one crash does not hide the next answer.
+    #
+    # windows-11-arm returns 3221226505 = 0xC0000409 = STATUS_STACK_BUFFER_OVERRUN, a Windows
+    # fail-fast, with no output at all. The product itself is fine there - the real diff above
+    # succeeds - so this is about how pytest COLLECTS, not what it collects. These variants
+    # separate the candidate causes in one run rather than one per CI cycle.
+    variants = [
+        ("baseline", [sys.executable, "-m", "pytest", "tests/unit", "--collect-only", "-q"]),
+        # pytest rewrites the AST of every test module to give rich assertion messages. That
+        # is recursive over the syntax tree and is the largest recursive workload in
+        # collection, so if the stack is the problem this is the likeliest source.
+        ("assert=plain", [sys.executable, "-m", "pytest", "tests/unit", "--collect-only", "-q", "--assert=plain"]),
+        # One small module. If this survives while the full tree dies, the trigger is volume
+        # or one specific file rather than collection itself.
+        ("single file", [sys.executable, "-m", "pytest", "tests/unit/test_cli.py", "--collect-only", "-q"]),
+        # A thread gets the stack size we ask for, unlike the main thread whose size is fixed
+        # in the executable's PE header. If this is the only variant that survives, the fix is
+        # simply to run the suite with a bigger stack.
+        ("64MB stack thread", [sys.executable, "-c", _BIG_STACK_RUNNER]),
+    ]
+
+    results: list[tuple[str, int]] = []
+    for label, cmd in variants:
+        proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+        results.append((label, proc.returncode))
+        print(f"\n  [{label}] exit code: {proc.returncode}", flush=True)
+        tail = (proc.stdout or "").strip().splitlines()[-6:]
+        for line in tail:
+            print(f"    out| {line}", flush=True)
+        for line in (proc.stderr or "").strip().splitlines()[-12:]:
+            print(f"    err| {line}", flush=True)
+        if not tail and not (proc.stderr or "").strip():
+            print("    NO OUTPUT AT ALL - died without writing anything", flush=True)
+
+    section("summary")
+    for label, code in results:
+        verdict = "ok" if code == 0 else ("collected, some issue" if code in (1, 2, 5) else f"CRASHED ({hex(code & 0xFFFFFFFF)})")
+        print(f"  {label:20} {code:>12}  {verdict}", flush=True)
 
     section("done")
-    return 1 if "--strict" in sys.argv and proc.returncode != 0 else 0
+    return 1 if "--strict" in sys.argv and any(c != 0 for _, c in results) else 0
 
 
 if __name__ == "__main__":
