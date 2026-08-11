@@ -30,6 +30,7 @@ from __future__ import annotations
 import importlib.metadata
 import logging
 import os
+import platform
 import re
 import threading
 import time
@@ -66,6 +67,49 @@ PhaseRecorder = Callable[[str, float], None]
 # their parser contract is restored.  Keeping this host-side guard makes editable
 # installs safe even when stale entry-point metadata still lists the plugin.
 _DISABLED_BUILTIN_PARSER_ENTRYPOINTS: frozenset[str] = frozenset({"freebasic"})
+
+# Parsers that CANNOT be loaded on a given machine architecture, keyed by entry-point name.
+#
+# This is not a preference or a performance tweak. Loading one of these aborts the PROCESS:
+# wasmtime's compiler panics, and a Rust panic compiled with panic=abort cannot be caught from
+# Python. No try/except saves you - the interpreter is gone, without a traceback, taking the
+# CLI, the LSP server or the editor extension with it.
+#
+#   powershell on aarch64:
+#     thread '<unnamed>' panicked at crates/cranelift/src/obj.rs:332:17: function too large
+#
+# tree-sitter grammars compile to enormous switch-based state machines, and this one exceeds
+# what aarch64's branch/relocation range can address in a single function body. x86-64 has more
+# headroom and accepts it. Confirmed on windows-11-arm: 72 of 73 components load, this one
+# aborts alone, and NO wasmtime setting avoids it - opt_level none and speed, simd off,
+# relaxed_simd off, parallel compilation off, tail_call off all abort identically.
+#
+# Excluding it is a stopgap, not a fix. The parser needs rebuilding so no single function is
+# that large, and components should be precompiled at build time so a compile failure becomes a
+# build error rather than a crash in a user's process. Until then, a documented missing language
+# beats an editor that dies on startup.
+_ARCH_INCOMPATIBLE_PARSERS: dict[str, tuple[frozenset[str], str]] = {
+    "powershell": (
+        frozenset({"arm64", "aarch64"}),
+        "cranelift cannot emit one of its functions on aarch64 ('function too large'); "
+        "loading it aborts the process",
+    ),
+}
+
+
+def _machine() -> str:
+    """Normalised machine name. Windows reports ARM64; Linux and macOS report aarch64."""
+    return platform.machine().lower()
+
+
+def arch_incompatible_reason(entry_point_name: str) -> str | None:
+    """Why this parser cannot be loaded on this machine, or None if it can be."""
+    rule = _ARCH_INCOMPATIBLE_PARSERS.get(entry_point_name)
+    if rule is None:
+        return None
+    machines, reason = rule
+    return reason if _machine() in machines else None
+
 
 # Normalised names of first-party packages whose entry-point callables are
 # trusted plugin metadata.
@@ -925,6 +969,19 @@ def _discover_parser_catalog(
         try:
             if ep.name in _DISABLED_BUILTIN_PARSER_ENTRYPOINTS and _is_trusted_entry_point(ep):
                 logger.debug("Skipping disabled first-party parser entry point: %s", ep.name)
+                continue
+            incompatible = arch_incompatible_reason(ep.name)
+            if incompatible is not None:
+                # WARNING, not debug. This is a real capability the user does not have on this
+                # machine, and they will otherwise discover it as "why is my PowerShell file
+                # showing no changes?". Say it once, plainly, at the level someone reads.
+                logger.warning(
+                    "Parser %r is not available on %s: %s. Files in that language will fall "
+                    "back to token-level diffing.",
+                    ep.name,
+                    platform.machine(),
+                    incompatible,
+                )
                 continue
             wasm_path = _wasm_path_from_ep(ep)
             resolved = str(Path(wasm_path).resolve())
