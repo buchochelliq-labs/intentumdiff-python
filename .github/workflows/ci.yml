@@ -29,7 +29,11 @@ jobs:
       # have yet; cancelling macos because ubuntu went red would throw away half of it.
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-latest, macos-latest]
+        # Exactly the four publish.yml builds a wheel for, so no artefact ships from a
+        # platform nothing was tested on. windows-11-arm is a NATIVE arm64 runner here for
+        # the same reason it is in publish.yml: `-b cffi` makes maturin EXECUTE a
+        # target-matching interpreter, and an arm64 python.exe cannot run on an x64 host.
+        os: [windows-latest, ubuntu-latest, macos-latest, windows-11-arm]
     env:
       CARGO_PROFILE_DEV_DEBUG: "false"
       MATURIN_PEP517_ARGS: "--profile dev"
