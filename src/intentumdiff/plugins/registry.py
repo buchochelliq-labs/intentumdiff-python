@@ -308,8 +308,25 @@ def _is_trusted_entry_point(ep: importlib.metadata.EntryPoint) -> bool:
 
 
 def _wasm_dir() -> Path:
-    """Return the directory containing built-in .wasm files."""
+    """Return the directory containing built-in .wasm files.
+
+    THE one place that knows where components live. Five call sites derived this
+    independently and four got it right; the CLI's copy used `Path(__file__).parent`
+    from inside `cli/`, resolving to `intentumdiff/cli/wasm/` — a directory that does
+    not exist. Every renderer lookup silently found nothing, and the user was told
+    "No renderer plugin found" for components that ship, load, and report the exact
+    format requested.
+
+    Re-deriving a path is how that happens. Call this instead.
+    """
     return Path(__file__).parent.parent / "wasm"
+
+
+#: Public alias. `_wasm_dir` is private by name and was therefore copied rather than
+#: imported; this gives callers outside this module something to use.
+def builtin_wasm_dir() -> Path:
+    """Directory containing the built-in .wasm components."""
+    return _wasm_dir()
 
 
 # ---------------------------------------------------------------------------

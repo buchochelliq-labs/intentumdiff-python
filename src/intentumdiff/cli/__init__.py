@@ -17,6 +17,8 @@ Formats: terminal (default), terminal-color, json, patch, html, llm
 
 from __future__ import annotations
 
+import sys
+from contextlib import suppress
 from typing import NoReturn
 
 from intentumdiff.cli._commands import (  # noqa: F401
@@ -223,7 +225,31 @@ def _warn_if_retired_distribution_installed() -> None:
     )
 
 
+def _use_utf8_streams() -> None:
+    """Make stdout/stderr able to carry the characters we actually emit.
+
+    On Windows a non-redirected console is cp1252, and we emit U+2192 (the arrow in
+    "old -> new"), spinner glyphs, and box-drawing characters. Writing any of them raises:
+
+        UnicodeEncodeError: 'charmap' codec can't encode character '→'
+
+    Observed as: `--format llm` failing outright, `intentumdiff index` dying with a charmap
+    error that masked "not a git repository", and mojibake in `plugins list` and the
+    token-level-fallback warning. One cause, four symptoms.
+
+    errors="replace" rather than strict: a console that genuinely cannot represent a glyph
+    should show a placeholder, never abort a completed diff. The results were correct; only
+    the printing failed.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:  # not present when the stream is replaced in tests
+            with suppress(Exception):
+                reconfigure(encoding="utf-8", errors="replace")
+
+
 def main(argv: list[str] | None = None) -> NoReturn:
+    _use_utf8_streams()
     _warn_if_retired_distribution_installed()
     _legacy_click_main(argv)
 
