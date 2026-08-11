@@ -13,12 +13,23 @@ was pulled from PyPI within a day; this one fixes what it got wrong.
   said nothing was wrong.
 - **`python -m intentumdiff` failed.** There was no `__main__.py`. Only the console script
   worked, despite the docs reaching for `python -m` throughout.
-- **An error message linked to a domain that did not exist.** It now points at the
-  documentation site.
+- **Error messages linked to pages that did not exist.** 0.0.1 pointed at an unregistered
+  domain; its replacement pointed at a file that was not in the repository. Both now point at
+  the documentation site, and CI follows every URL we ship so a third cannot go unnoticed.
+- **The SARIF reports we emit named a repository that does not exist.** Anyone following the
+  `informationUri` from a code-scanning result got a 404.
 - **`intentumdiff file a.py b.py` labelled both sides with the NEW filename**, and reported a
   "working tree" scope for diffs where no working tree was involved.
 - **An OSV advisory notice was printed to stderr on every invocation**, naming an
   "allow vulnerable" override. It is a debug detail, not something to act on.
+- **Intent facts were computed and then thrown away.** The engine derives structural facts —
+  early exits, negated conditions, guard clauses — and the Python layer dropped three of them
+  at the boundary because the model did not declare them. Explanations were built from a
+  smaller picture than the engine actually had.
+- **Renderers could be absent and the run still looked healthy.** A missing renderer component
+  was silent, so output could quietly fall back rather than say what was missing.
+- **Refusing to read a file outside the workspace was logged as an internal error.** It is a
+  deliberate refusal, and now reads as one instead of looking like a crash.
 - **The certified engine path was never taken.** The wheel publishes as `intentumdiff-python`
   while the import package is `intentumdiff`, so the parser id arrived distribution-qualified
   and failed an allowlist that did not recognise it. Diffs were still correct and still Rust,
