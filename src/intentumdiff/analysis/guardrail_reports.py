@@ -142,7 +142,7 @@ def sarif_from_guardrail_result(result: GuardrailCheckResult) -> dict[str, Any]:
                     "driver": {
                         "name": "IntentumDiff",
                         "informationUri": (
-                            "https://github.com/buchochelliq-labs/intentumdiff"
+                            "https://buchochelliq-labs.github.io/intentumdiff-docs/"
                         ),
                         "rules": list(rules_by_id.values()),
                     }
