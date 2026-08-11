@@ -15,6 +15,7 @@ from intentumdiff.core.models import (
     SemanticDiff,
     SemanticNode,
 )
+from tests.unit.platform_gates import powershell_unavailable
 
 _FIXTURE_PATH = Path(__file__).resolve().parents[1] / "fixtures" / "semanticdiff_examples.json"
 
@@ -553,6 +554,9 @@ def test_abap_changed_form_is_not_suppressed_as_stable_noise() -> None:
         and change.old_node.node_type == "form"
         and change.old_node.label == "GREET"
     ]
+
+
+@powershell_unavailable
 
 
 def test_powershell_entity_anchoring_keeps_shifted_functions_review_clean() -> None:
