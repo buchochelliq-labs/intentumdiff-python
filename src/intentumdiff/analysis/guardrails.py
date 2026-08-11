@@ -68,6 +68,20 @@ def load_guardrail_policy(
 ) -> GuardrailPolicy:
     policy_path = _find_policy_path(filename, explicit_path)
     if policy_path is None:
+        # An EXPLICIT --policy is the caller asserting that file exists. Returning an empty
+        # policy here is a fail-OPEN: the check then reports "Guardrail check passed" and
+        # exits 0 with nothing on stderr, so a typo in the path is indistinguishable from a
+        # clean run. For a gate whose documented purpose is stopping API keys changing
+        # unreviewed, that is the worst possible default.
+        #
+        # Auto-discovery finding nothing is different and stays permissive: the user never
+        # claimed a policy existed.
+        if explicit_path is not None:
+            raise FileNotFoundError(
+                f"Guardrail policy not found: {explicit_path}. "
+                "The check would otherwise pass with no rules loaded, which looks identical "
+                "to a clean run."
+            )
         return GuardrailPolicy(path=None, rules=())
 
     raw = yaml.safe_load(policy_path.read_text(encoding="utf-8")) or {}

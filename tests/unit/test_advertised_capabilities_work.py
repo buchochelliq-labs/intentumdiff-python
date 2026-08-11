@@ -132,11 +132,14 @@ def test_the_component_directory_is_derived_in_exactly_one_place() -> None:
     only one is, which is why review did not catch it.
     """
     src = Path(__file__).resolve().parents[2] / "src" / "intentumdiff"
+    # Skip comments: the fix site quotes the bad pattern to explain what it replaced, and a
+    # literal substring search flags that as a fresh offence. A guard that cannot tell code
+    # from the comment describing it punishes documenting the fix.
     offenders = [
         f"{path.relative_to(src).as_posix()}:{n}"
         for path in src.rglob("*.py")
         for n, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), 1)
-        if 'Path(__file__).parent / "wasm"' in line
+        if 'Path(__file__).parent / "wasm"' in line and not line.lstrip().startswith("#")
     ]
     assert not offenders, (
         "component directory derived from a subpackage's own __file__:\n  "

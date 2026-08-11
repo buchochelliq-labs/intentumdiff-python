@@ -411,6 +411,34 @@ def _cmd_diagnostics_query(args: argparse.Namespace) -> None:
 def _cmd_guardrails_check(args: argparse.Namespace) -> None:
     from intentumdiff.vcs.git_cli import NotAGitRepositoryError
 
+    # Validate the policy BEFORE diffing anything.
+    #
+    # The policy used to be loaded lazily, per changed file. With no changed files it was
+    # never loaded at all, so `guardrails check --policy typo.yaml` printed
+    # "Guardrail check passed: 0 file(s) checked" and exited 0 - with nothing on stderr.
+    # A typo in the path was indistinguishable from a clean run, on a gate whose documented
+    # purpose is stopping API keys changing unreviewed. It failed OPEN.
+    #
+    # A gate must verify it can do its job before reporting that it did.
+    if args.guardrails_policy is not None:
+        from pathlib import Path as _Path
+
+        from intentumdiff.analysis.guardrails import load_guardrail_policy
+
+        try:
+            policy = load_guardrail_policy("", explicit_path=_Path(args.guardrails_policy))
+        except (OSError, ValueError) as exc:
+            _err.print(f"[red]Guardrail policy could not be loaded: {exc}[/red]")
+            sys.exit(2)
+        if not policy.rules:
+            # Loaded, parsed, and protects nothing. Reporting "passed" for that is the same
+            # false assurance as failing to load it.
+            _err.print(
+                f"[red]Guardrail policy {args.guardrails_policy} defines no protected "
+                f"entries, so this check cannot fail. Add rules, or drop --policy.[/red]"
+            )
+            sys.exit(2)
+
     try:
         differ = _differ(
             args.fuel,
