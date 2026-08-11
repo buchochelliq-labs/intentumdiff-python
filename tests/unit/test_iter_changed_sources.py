@@ -21,6 +21,7 @@ from intentumdiff.sources.git_source import (
     collect_working_tree_python_sources_fast,
     iter_changed_sources,
 )
+from tests.unit.platform_gates import powershell_unavailable
 
 
 # ---------------------------------------------------------------------------
@@ -598,6 +599,8 @@ class TestDiffCommit:
         assert diff.staging_status == "staged"
         assert "summarizeOrder" in _semantic_labels(diff, ChangeType.ADDITION)
         assert "summarizeOrder" not in _semantic_labels(diff, ChangeType.MOVE)
+
+    @powershell_unavailable
 
     def test_multi_file_commit_preserves_insert_and_move_intent(self, tmp_path):
         repo = _make_repo_with_bare_origin(tmp_path)

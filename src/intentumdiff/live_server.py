@@ -144,10 +144,37 @@ def _make_socket_dir() -> str:
     return sock_dir
 
 
+# AF_UNIX addresses are a fixed-size struct field, not a string: sun_path is 104 bytes on
+# macOS and 108 on Linux, INCLUDING the NUL. Exceeding it raises "AF_UNIX path too long" at
+# bind() - not at connect, so the server simply never starts.
+#
+# macOS makes this easy to hit without doing anything unusual: TMPDIR there is a per-session
+# path like /var/folders/xy/9k4n.../T/, and this module then adds a per-pid directory and a
+# 16-character token. A GitHub macOS runner blows the limit outright, and so does any user
+# whose temp path is a little long.
+_SUN_PATH_MAX = 104 if sys.platform == "darwin" else 108
+
+
 def _make_socket_path(pid: int, token: str) -> str:
-    """Return a private socket path incorporating a random token."""
-    sock_dir = _make_socket_dir()
-    return os.path.join(sock_dir, f"intentumdiff-live-{token[:16]}.sock")
+    """Return a private socket path incorporating a random token.
+
+    Falls back to a shorter base if the preferred path would not fit in sun_path. The
+    fallback keeps the security properties that matter - an owner-only directory and an
+    unguessable name - and trades only the length of the token.
+    """
+    path = os.path.join(_make_socket_dir(), f"intentumdiff-live-{token[:16]}.sock")
+    if len(os.fsencode(path)) < _SUN_PATH_MAX:
+        return path
+
+    # Shortest base that is private per user and short on every POSIX system we support.
+    short = os.path.join(tempfile.gettempdir() if len(tempfile.gettempdir()) < 12 else "/tmp",
+                         f"imd-{pid}")
+    os.makedirs(short, mode=0o700, exist_ok=True)  # nosemgrep: python.lang.security.audit.insecure-file-permissions.insecure-file-permissions
+    try:
+        os.chmod(short, 0o700)  # nosemgrep: python.lang.security.audit.insecure-file-permissions.insecure-file-permissions
+    except OSError:
+        pass
+    return os.path.join(short, f"{token[:8]}.sock")
 
 
 def _has_unix_socket() -> bool:

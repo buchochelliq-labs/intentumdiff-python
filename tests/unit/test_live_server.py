@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import socket
 import sys
 import threading
@@ -1496,6 +1497,38 @@ class TestTransportSelection:
         monkeypatch.setattr(_socket, "AF_UNIX", 1, raising=False)
         assert _ls._has_unix_socket() is True
 
+    def test_socket_path_fits_in_sun_path_even_from_a_long_temp_dir(self) -> None:
+        """AF_UNIX addresses are a fixed-size struct field, not a string.
+
+        sun_path is 104 bytes on macOS and 108 on Linux, including the NUL. Overrunning it
+        raises "AF_UNIX path too long" at bind(), so the server never starts at all - and
+        macOS makes it easy to hit without doing anything unusual, because TMPDIR there is a
+        per-session path like /var/folders/xy/9k4n.../T/ to which this module adds a per-pid
+        directory and a 16-character token.
+
+        Found by running the suite on macOS for the first time (#9): it had been failing
+        there for anyone with a long temp path, invisibly, because nothing ever ran there.
+
+        Deliberately NOT skipped off POSIX. This is path arithmetic against a fixed byte
+        budget, so it is worth checking everywhere - the limit does not stop applying just
+        because the machine running the test would not bind the socket.
+        """
+        import intentumdiff.live_server as ls
+
+        long_base = "/var/folders/xy/9k4nqp1d7ax0c1jr2m5v8h6r0000gn/T/intentumdiff-88888"
+        naive = len(os.fsencode(os.path.join(long_base, "intentumdiff-live-0123456789abcdef.sock")))
+        assert naive > 104, "fixture no longer exceeds the macOS limit; it is testing nothing"
+
+        with patch.object(ls, "_make_socket_dir", return_value=long_base),                 patch.object(ls.os, "makedirs"), patch.object(ls.os, "chmod"):
+            for limit in (104, 108):  # darwin, linux
+                with patch.object(ls, "_SUN_PATH_MAX", limit):
+                    path = ls._make_socket_path(88888, "0123456789abcdef0123456789abcdef")
+                assert len(os.fsencode(path)) < limit, (
+                    f"socket path is {len(os.fsencode(path))} bytes, over the {limit}-byte "
+                    f"sun_path limit: {path}"
+                )
+
+    # Restored: this guard was on this test before the one above was inserted next to it.
     @pytest.mark.skipif(sys.platform == "win32", reason="Named pipe only on Windows")
     def test_start_socket_returns_unix_path_on_posix(self) -> None:
         """On POSIX, start_socket() should bind a Unix socket and return a path string."""

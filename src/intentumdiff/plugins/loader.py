@@ -1181,6 +1181,26 @@ def load_plugin(
         # exposes the setter (added in wasmtime-py post-44.0.0 builds).
         if hasattr(cfg, "wasm_memory64"):
             cfg.wasm_memory64 = False  # type: ignore[attr-defined]
+
+        # Every plugin gets its OWN Engine, and wasmtime reserves a large contiguous virtual
+        # address range per linear memory - 4 GiB by default on 64-bit, plus a guard region.
+        # With 73 parsers that is roughly 292 GiB of RESERVED (not committed) address space.
+        #
+        # x86-64 shrugs at that. Windows on ARM64 does not: loading every parser in one
+        # process - which language_ids() and every other inventory API does - fail-fasts with
+        # STATUS_STACK_BUFFER_OVERRUN (0xC0000409) and no Python traceback, because the
+        # failure happens in the allocator rather than in Python.
+        #
+        # Found by running the suite on windows-11-arm for the first time (#9). It was never
+        # only a test problem: any arm64 user listing supported languages would have hit it.
+        #
+        # A parser reads a source file. 64 MiB is already generous, and memory can still grow
+        # past the reservation by moving, so this caps address space, not capability.
+        if hasattr(cfg, "memory_reservation"):
+            cfg.memory_reservation = 64 * 1024 * 1024  # type: ignore[attr-defined]
+        if hasattr(cfg, "memory_guard_size"):
+            cfg.memory_guard_size = 64 * 1024  # type: ignore[attr-defined]
+
         if _unlimited:
             logger.warning(
                 "Unlimited Wasm fuel for plugin %r — calls are uncapped and "

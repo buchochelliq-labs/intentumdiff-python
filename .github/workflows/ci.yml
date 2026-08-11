@@ -14,11 +14,26 @@ permissions:
 
 jobs:
   python-suite:
-    name: Python full suite (pytest)
-    # windows-latest matches the environment the suite is developed and gated on
-    # (named-pipe LiveServer tests, path handling).
-    runs-on: windows-latest
+    name: Python full suite (${{ matrix.os }})
+    # publish.yml builds wheels for ubuntu, macos, windows and windows-11-arm. Until now the
+    # suite ran on windows-latest ONLY, so three of the four artefacts we publish had never
+    # had a test run on the platform they target - compiled and uploaded on the strength of a
+    # Windows run (#9).
+    #
+    # That is the 0.0.1 shape again: a check that proves the code builds standing in for a
+    # check that proves the artefact works.
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 180
+    strategy:
+      # Never fail-fast. On the first run every platform's result is information we do not
+      # have yet; cancelling macos because ubuntu went red would throw away half of it.
+      fail-fast: false
+      matrix:
+        # Exactly the four publish.yml builds a wheel for, so no artefact ships from a
+        # platform nothing was tested on. windows-11-arm is a NATIVE arm64 runner here for
+        # the same reason it is in publish.yml: `-b cffi` makes maturin EXECUTE a
+        # target-matching interpreter, and an arm64 python.exe cannot run on an x64 host.
+        os: [windows-latest, ubuntu-latest, macos-latest, windows-11-arm]
     env:
       CARGO_PROFILE_DEV_DEBUG: "false"
       MATURIN_PEP517_ARGS: "--profile dev"
@@ -27,6 +42,12 @@ jobs:
       # Every open Dependabot PR in this repo was red purely because provisioning
       # hard-failed without it - nothing to do with the bumps they proposed.
       HAS_SPLIT_TOKEN: ${{ secrets.SPLIT_REPO_TOKEN != '' }}
+      # windows-11-arm died during collection with NO output at all: no traceback, no
+      # "collected N items", just exit 1. That is what a native crash looks like when
+      # stdout is still buffered - the buffer dies with the process and takes the only
+      # evidence with it. These two make the next failure legible.
+      PYTHONFAULTHANDLER: "1"
+      PYTHONUNBUFFERED: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -85,6 +106,20 @@ jobs:
           pip install cffi
           pip install -e .[dev,serve]
 
+      - name: Diagnose this platform before the suite
+        # TEMPORARY (#9). windows-11-arm exits the suite in ~12s with no traceback, no
+        # "collected N items" and - even with PYTHONFAULTHANDLER set - no fault handler
+        # output. That rules out both an ordinary test failure and a hard native crash,
+        # and leaves nothing to act on.
+        #
+        # A suite is a poor diagnostic instrument: it imports and collects everything and
+        # reports at the end, so an abrupt exit destroys the evidence for all of it. This
+        # walks the same ground in order, printing each result before attempting the next.
+        # continue-on-error because the OUTPUT is the value; a red X here explains nothing.
+        if: env.HAS_SPLIT_TOKEN == 'true'
+        continue-on-error: true
+        run: python scripts/diagnose_platform.py
+
       - name: Run the full unit suite
         if: env.HAS_SPLIT_TOKEN == 'true'
         run: python -m pytest tests/unit -q
@@ -107,6 +142,26 @@ jobs:
         run: |
           echo "::notice::SPLIT_REPO_TOKEN unavailable (Dependabot or fork PR) - parser components were not provisioned, so component-dependent tests are skipped. A maintainer run exercises the full gate."
           python -m pytest tests/unit -q --deselect tests/unit/test_construct_edit_matrix.py
+
+      - name: Build a wheel on this platform
+        # The suite above runs against an EDITABLE install, which resolves imports from the
+        # source checkout. That is not the artefact anyone downloads. Every 0.0.1 defect
+        # survived a green suite and appeared the moment a real wheel was installed, so the
+        # wheel itself has to be built and exercised here.
+        if: env.HAS_SPLIT_TOKEN == 'true'
+        run: pip wheel . --no-deps --wheel-dir dist
+
+      - name: Smoke the wheel this platform just built
+        # Installs into a CLEAN venv and does what a user does in their first five minutes:
+        # import, console script, python -m, a real diff, clean stderr, and every URL in the
+        # output resolving. Against the wheel built on THIS runner, not a source checkout and
+        # not the wheel some other platform produced.
+        if: env.HAS_SPLIT_TOKEN == 'true'
+        shell: bash
+        run: |
+          wheel=$(ls dist/*.whl | head -1)
+          echo "smoking $wheel on $RUNNER_OS"
+          python scripts/smoke_published_wheel.py --wheel "$wheel"
 
   action-pins:
     name: Pins and links we ship

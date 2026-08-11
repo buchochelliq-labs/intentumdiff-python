@@ -30,6 +30,7 @@ from __future__ import annotations
 import importlib.metadata
 import logging
 import os
+import platform
 import re
 import threading
 import time
@@ -66,6 +67,77 @@ PhaseRecorder = Callable[[str, float], None]
 # their parser contract is restored.  Keeping this host-side guard makes editable
 # installs safe even when stale entry-point metadata still lists the plugin.
 _DISABLED_BUILTIN_PARSER_ENTRYPOINTS: frozenset[str] = frozenset({"freebasic"})
+
+# Parsers that CANNOT be loaded on a given OS + architecture, keyed by entry-point name.
+#
+# This is not a preference or a performance tweak. Loading one of these aborts the PROCESS:
+# wasmtime's compiler panics, and a Rust panic compiled with panic=abort cannot be caught from
+# Python. No try/except saves you - the interpreter is gone, without a traceback, taking the
+# CLI, the LSP server or the editor extension with it.
+#
+#   powershell on WINDOWS aarch64:
+#     thread '<unnamed>' panicked at crates/cranelift/src/obj.rs:332:17: function too large
+#
+# tree-sitter grammars compile to enormous switch-based state machines, and this one exceeds
+# what aarch64's branch/relocation range can address in a single function body. x86-64 has more
+# headroom and accepts it, and so does macOS on Apple Silicon - which is ALSO aarch64 and loads
+# all 73 components with zero aborts (measured). So the rule is OS-and-architecture, not
+# architecture alone. Confirmed on windows-11-arm: 72 of 73 components load, this one aborts
+# alone, and NO wasmtime setting avoids it - opt_level none and speed, simd off,
+# relaxed_simd off, parallel compilation off, tail_call off all abort identically.
+#
+# Excluding it is a stopgap, not a fix. The parser needs rebuilding so no single function is
+# that large, and components should be precompiled at build time so a compile failure becomes a
+# build error rather than a crash in a user's process. Until then, a documented missing language
+# beats an editor that dies on startup.
+# (systems, machines, file extensions, reason). ALL of systems and machines must match.
+_ARCH_INCOMPATIBLE_PARSERS: dict[str, tuple[frozenset[str], frozenset[str], frozenset[str], str]] = {
+    "powershell": (
+        # WINDOWS aarch64 only. macOS on Apple Silicon is also aarch64 and loads this
+        # component perfectly - measured, 73 of 73 with zero aborts. Gating on architecture
+        # alone took PowerShell away from every Mac for no reason, which is exactly the
+        # "guessing wider than the evidence" this table is supposed to prevent.
+        frozenset({"windows"}),
+        frozenset({"arm64", "aarch64"}),
+        frozenset({".ps1", ".psm1", ".psd1"}),
+        "cranelift cannot emit one of its functions on Windows/aarch64 "
+        "('function too large'); loading it aborts the process",
+    ),
+}
+
+
+def _machine() -> str:
+    """Normalised machine name. Windows reports ARM64; Linux and macOS report aarch64."""
+    return platform.machine().lower()
+
+
+def arch_incompatible_reason(entry_point_name: str) -> str | None:
+    """Why this parser cannot be loaded on THIS machine, or None if it can be."""
+    rule = _ARCH_INCOMPATIBLE_PARSERS.get(entry_point_name)
+    if rule is None:
+        return None
+    systems, machines, _exts, reason = rule
+    if platform.system().lower() not in systems:
+        return None
+    return reason if _machine() in machines else None
+
+
+def unavailable_parser_for(filename: str) -> tuple[str, str] | None:
+    """(parser name, reason) if this file's language is excluded here, else None.
+
+    Used where a file fails to find a parser, so the message explains WHY rather than
+    reporting a generic "unknown language". Discovery deliberately does not warn: a user
+    diffing Python should not be told about PowerShell, and 0.0.1 taught us what alarming
+    text beside correct results does to trust.
+    """
+    suffix = Path(filename).suffix.lower()
+    for name, (_systems, _machines, exts, _reason) in _ARCH_INCOMPATIBLE_PARSERS.items():
+        if suffix in exts:
+            reason = arch_incompatible_reason(name)
+            if reason is not None:
+                return name, reason
+    return None
+
 
 # Normalised names of first-party packages whose entry-point callables are
 # trusted plugin metadata.
@@ -635,6 +707,18 @@ class PluginRegistry:
             if entries is primary_entries and primary_entries:
                 break
 
+        excluded = unavailable_parser_for(filename)
+        if excluded is not None:
+            name, reason = excluded
+            # The one place this is worth saying out loud: the user is diffing a file whose
+            # parser we deliberately did not load. Without it they see "unknown language" and
+            # have no way to learn why, which looks like a broken product rather than a known
+            # platform limitation.
+            logger.warning(
+                "No semantic parser for %s on %s/%s: the %r parser is excluded here because "
+                "%s. This file falls back to token-level diffing.",
+                filename, platform.system(), platform.machine(), name, reason,
+            )
         raise PluginNotFoundError("unknown", filename)
 
     def detect_by_content(
@@ -926,6 +1010,18 @@ def _discover_parser_catalog(
             if ep.name in _DISABLED_BUILTIN_PARSER_ENTRYPOINTS and _is_trusted_entry_point(ep):
                 logger.debug("Skipping disabled first-party parser entry point: %s", ep.name)
                 continue
+            incompatible = arch_incompatible_reason(ep.name)
+            if incompatible is not None:
+                # DEBUG, not warning. Discovery runs on the first diff of ANY file, so warning
+                # here told someone diffing Python that PowerShell was unavailable - noise
+                # beside a correct result, which is precisely the 0.0.1 failure mode.
+                # The user is told at the point of USE instead, where it is relevant: see
+                # unavailable_parser_for() and PluginNotFoundError below.
+                logger.debug(
+                    "Parser %r is unavailable on %s/%s: %s",
+                    ep.name, platform.system(), platform.machine(), incompatible,
+                )
+                continue
             wasm_path = _wasm_path_from_ep(ep)
             resolved = str(Path(wasm_path).resolve())
             existing = by_path.get(resolved)
@@ -973,6 +1069,13 @@ def _add_first_party_parser_entrypoint_fallbacks(
 
     for name, callable_name in _FIRST_PARTY_PARSER_ENTRYPOINT_FALLBACKS.items():
         if name in existing_names:
+            continue
+        # The SAME architecture gate as entry-point discovery. This fallback builds catalog
+        # entries directly from builtin callables, bypassing that path entirely - which is
+        # exactly how powershell kept reaching the catalog on Windows/aarch64 while the gate
+        # itself correctly reported "excluded". Two ways in, one of them guarded, is no guard.
+        if arch_incompatible_reason(name) is not None:
+            logger.debug("Fallback skipped for %r: unavailable on this platform", name)
             continue
         entry_callable = getattr(builtins, callable_name, None)
         if entry_callable is None:

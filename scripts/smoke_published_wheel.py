@@ -101,6 +101,22 @@ def main() -> int:
     ap.add_argument("--package", default="intentumdiff-python")
     args = ap.parse_args()
 
+    # Resolve a local artefact to an ABSOLUTE path before going anywhere near the temp
+    # directory. Every command below runs with the clean environment as its working
+    # directory, so a relative `dist/foo.whl` resolves against THAT, and pip reports:
+    #
+    #   WARNING: Requirement 'dist/foo.whl' looks like a filename, but the file does not exist
+    #   OSError: [Errno 2] No such file or directory: '/private/var/.../dist/foo.whl'
+    #
+    # which reads like a broken wheel and is actually a broken path. Found the first time CI
+    # smoked a wheel it had just built - the first caller ever to pass a relative one.
+    if args.wheel:
+        wheel_path = Path(args.wheel).expanduser().resolve()
+        if not wheel_path.is_file():
+            print(f"  no such artefact: {args.wheel!r} (resolved to {wheel_path})")
+            return 1
+        args.wheel = str(wheel_path)
+
     root = Path(tempfile.mkdtemp(prefix="intentumdiff-smoke-"))
     print(f"  clean environment: {root}\n")
     try:

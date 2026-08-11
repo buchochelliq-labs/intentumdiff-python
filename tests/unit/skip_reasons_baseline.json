@@ -2,6 +2,7 @@
   "_doc": "The skip ratchet (pre-release skip audit): every skip reason in the test tree must match a pattern here, and every entry must still be in use. A new skip with a new reason FAILS the gate until it is classified and justified below (or fixed). Classes: platform (OS/tool-gated), env (opt-in creds/services), split-guard (#82 split repo lacks monorepo artifacts BY DESIGN; no-ops in the monorepo), scenario-matrix (sparse corpus cells — the pre-release burn-down backlog), staging (parser/wasm staging state).",
   "allowed": [
     {"pattern": "Named.pipe.*Windows", "class": "platform", "justification": "named-pipe transport is Windows-only"},
+    {"pattern": "powershell parser unavailable", "class": "platform", "justification": "the powershell component cannot be compiled on Windows/aarch64 - cranelift panics 'function too large' and ABORTS the process, so it is excluded there (#42). The condition is read from the registry, so these tests resume automatically when that is fixed."},
     {"pattern": "git not installed", "class": "platform", "justification": "VCS tests need the git CLI"},
     {"pattern": "pyyaml", "class": "platform", "justification": "optional YAML dep for dbt tests"},
     {"pattern": "pygls not installed", "class": "platform", "justification": "optional LSP server dep"},
