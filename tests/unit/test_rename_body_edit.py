@@ -96,6 +96,77 @@ def test_rename_does_not_hide_executable_statement_reordering(differ, old_body, 
                    for g in diff.change_groups)
 
 
+@pytest.mark.parametrize("old,new", [
+    ("def a(x): return x + 1\ndef b(x): return x + 2\n", "def c(x): return x + 2\n"),
+    ("def a(x): return x + 1\ndef b(x): return x * 1\n", "def c(x): return x * 1\n"),
+])
+def test_unique_exact_rename_source(differ, old, new):
+    diff = differ.diff_strings(old, new, "example.py")
+    assert any(c.refactoring_kind == "RENAME_SYMBOL" and c.old_node.label == "b"
+               and c.new_node.label == "c" for c in diff.changes)
+    assert any(c.change_type == "DELETION" and c.old_node.label == "a" for c in diff.changes)
+
+
+@pytest.mark.parametrize("old,new", [
+    ("def a(x): return x + 1\ndef b(x): return x + 1\n", "def c(x): return x + 1\n"),
+    ("def a(): return 1\n", "def b(): return 2\n"),
+])
+def test_positional_fallback_cannot_override_declined_identity(differ, old, new):
+    diff = differ.diff_strings(old, new, "example.py")
+    assert not any(c.refactoring_kind == "RENAME_SYMBOL" for c in diff.changes)
+    assert any(c.change_type == "ADDITION" for c in diff.changes)
+    assert any(c.change_type == "DELETION" for c in diff.changes)
+
+
+@pytest.mark.parametrize("new", [
+    "@b\n@a\ndef f(x): return x\n",
+    "@c\n@b\n@a\ndef f(x): return x\n",
+    "@b\n@a\ndef renamed(x): return x\n",
+])
+def test_decorator_order_remains_meaningful(differ, new):
+    diff = differ.diff_strings("@a\n@b\ndef f(x): return x\n", new, "example.py")
+    indices = [i for i, c in enumerate(diff.changes) if c.change_type == "MODIFICATION"
+               and "Reorder decorator" in c.description]
+    assert indices
+    assert any(g.kind == "MEANINGFUL_CHANGE" and set(indices) & set(g.raw_change_indices)
+               for g in diff.change_groups)
+
+
+def test_extraction_keeps_independent_literal_edit(differ):
+    diff = differ.diff_strings(OLD, NEW, "example.py")
+    assert any(c.refactoring_kind == "EXTRACT_FUNCTION" and c.new_node.label == "_subtotal"
+               for c in diff.changes)
+    assert any(c.change_type == "MODIFICATION" and c.old_node.label == "50"
+               and c.new_node.label == "75" for c in diff.changes)
+
+
+@pytest.mark.parametrize("body,argument", [("x + 2", "x"), ("x * 2", "3")])
+def test_extraction_declines_changed_expression_or_arguments(differ, body, argument):
+    old = "def calc(x):\n    return x * 2\n"
+    new = f"def helper(x):\n    return {body}\ndef calc(x):\n    return helper({argument})\n"
+    diff = differ.diff_strings(old, new, "example.py")
+    assert not any(c.refactoring_kind == "EXTRACT_FUNCTION" for c in diff.changes)
+
+
+def test_decorator_spacing_and_insertion_do_not_hide_swap(differ):
+    diff = differ.diff_strings("@a(1)\n@b\ndef f(x): return x\n",
+                               "@c\n@b\n@a( 1 )\ndef f(x): return x\n", "example.py")
+    assert any("Reorder decorator" in c.description for c in diff.changes)
+
+
+@pytest.mark.parametrize("old,new", [
+    ("def calc(x, helper):\n    return x * 2\n",
+     "def helper(x):\n    return x * 2\ndef calc(x, helper):\n    return helper(x)\n"),
+    ("def calc(x):\n    return x * 2\n",
+     "def helper(x) -> missing_name:\n    return x * 2\ndef calc(x):\n    return helper(x)\n"),
+    ("def calc(x):\n    return x * 2\n",
+     "def helper(x):\n    return x * 2\ndef calc(x):\n    return helper(x)\nhelper = lambda x: 99\n"),
+])
+def test_extraction_declines_binding_or_definition_side_effects(differ, old, new):
+    diff = differ.diff_strings(old, new, "example.py")
+    assert not any(c.refactoring_kind == "EXTRACT_FUNCTION" for c in diff.changes)
+
+
 @pytest.mark.parametrize("before,after,equivalent", [
     ("1", "0x1", True), ("1_000", "1000", True),
     ("50", "75", False), ("9007199254740992", "9007199254740993", False),

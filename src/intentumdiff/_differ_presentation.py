@@ -707,20 +707,9 @@ def _clean_string_literal_label(text: str) -> str:
 
 
 def _enrich_literal_labels(root: SemanticNode, source: str) -> SemanticNode:
-    children = [_enrich_literal_labels(child, source) for child in root.children]
-    label = root.label
-    node_type = root.node_type.lower()
-    if "string" in node_type and root.label in _GENERIC_STRING_LABELS:
-        literal = _clean_string_literal_label(_slice_source_text(source, root.position))
-        if literal:
-            label = literal
-    if node_type == "order_by_clause" and root.label in {root.node_type, node_type}:
-        source_slice = _slice_source_text(source, root.position).lower()
-        if "descending" in source_slice:
-            label = f"{root.label} descending"
-    if children == root.children and label == root.label:
-        return root
-    return root.model_copy(update={"label": label, "children": children})
+    from intentumdiff.rust_core import enrich_literal_labels
+
+    return enrich_literal_labels(root, source)
 
 
 def _changes_to_stream_events(
@@ -787,5 +776,4 @@ def _changes_to_stream_events(
                 action="remove",
                 replaced_ids=[node_id],
             )
-
 

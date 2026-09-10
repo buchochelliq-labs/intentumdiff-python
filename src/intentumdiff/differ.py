@@ -238,6 +238,7 @@ from intentumdiff.rust_core import (
     apply_invariances,
     build_style_only_evidence,
     enrich_node_facts,
+    review_trees_equivalent,
     try_register_user_xml_dialects,
     try_rust_core_batch_diff,
     try_rust_core_batch_diffs,
@@ -1872,35 +1873,16 @@ class SemanticDiffer:
                     # its own suppressions, which the replacement just discarded.
                     if not fin_changes:
 
-                        def _generic_norm(node: SemanticNode) -> tuple[Any, ...]:
-                            label = " ".join(node.label.split())
-                            return (
-                                node.node_type,
-                                label,
-                                tuple(_generic_norm(c) for c in node.children),
-                            )
-
                         fin_is_style_only = (
                             old_content == new_content
-                            or _generic_norm(old_tree) == _generic_norm(new_tree)
+                            or review_trees_equivalent(old_tree, new_tree)
                         )
-                # Stage-12 style-only resolution, language-agnostic (markdown #44 exposed
-                # it): ZERO surviving changes with identical (or whitespace-collapsed
-                # tree-equal) sources is a style-only diff for every routed language —
-                # the Rust finalize's flag only reflects its own suppressions.
+                # Generic presentation may replace the final change list. Core still
+                # owns the equivalence decision; Python only marshals the trees.
                 if not fin_changes and not fin_is_style_only:
-
-                    def _routed_norm(node: SemanticNode) -> tuple[Any, ...]:
-                        label = " ".join(node.label.split())
-                        return (
-                            node.node_type,
-                            label,
-                            tuple(_routed_norm(c) for c in node.children),
-                        )
-
                     fin_is_style_only = (
                         old_content == new_content
-                        or _routed_norm(old_tree) == _routed_norm(new_tree)
+                        or review_trees_equivalent(old_tree, new_tree)
                     )
                 metadata_fin: dict[str, Any] = {
                     "engine_owner": "rust",

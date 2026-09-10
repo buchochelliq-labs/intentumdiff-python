@@ -9,7 +9,7 @@ The thin Python binding (#82 split) builds its wheel against:
 
 Sources (first match wins):
   --core-dir / INTENTUMDIFF_CORE_DIR      an existing local checkout (copied, not cloned)
-  otherwise                              `git clone --depth 1 --branch CORE_REF` of the repo
+  otherwise                              fetch CORE_REF (branch, tag or immutable SHA)
   --wasm-dir / INTENTUMDIFF_WASM_DIR      a dir of built .wasm components to stage
 
 Usage:
@@ -27,16 +27,9 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CORE_REPO = "https://github.com/buchochelliq-labs/intentumdiff-core"
-# Which intentumdiff-core to build against.
-#
-# NOT "main". `main` only moves when a release is cut, so a consumer pinned to it cannot verify
-# against an unreleased engine change — which is precisely what a release candidate exists to
-# allow. That gap is not theoretical: the provenance tests here assert facts added to the core
-# and failed in CI while passing locally, because CI was building an engine that predated them.
-#
-# Tracking a branch does make the build unreproducible, so this becomes a TAG the moment core
-# cuts one. Override for a one-off build without editing the file.
-CORE_REF = os.environ.get("INTENTUMDIFF_CORE_REF", "release/v0.0.2-rc")
+# Immutable reviewed engine candidate for this binding. Override for an explicit
+# integration build; never let a moving branch silently change the engine under CI.
+CORE_REF = os.environ.get("INTENTUMDIFF_CORE_REF", "35b6a522185bffe9e9c654ff183e68af4d1dba22")
 CORE_DEST = REPO_ROOT / "build" / "intentumdiff-core"
 WASM_DEST = REPO_ROOT / "src" / "intentumdiff" / "wasm"
 
@@ -50,11 +43,11 @@ def stage_core(core_dir: str | None) -> None:
         print(f"staging engine from local checkout: {src}")
         shutil.copytree(src, CORE_DEST, ignore=shutil.ignore_patterns("target", ".git"))
     else:
-        print(f"cloning {CORE_REPO}@{CORE_REF}")
-        subprocess.run(
-            ["git", "clone", "--depth", "1", "--branch", CORE_REF, CORE_REPO, str(CORE_DEST)],
-            check=True,
-        )
+        print(f"fetching {CORE_REPO}@{CORE_REF}")
+        subprocess.run(["git", "init", str(CORE_DEST)], check=True)
+        subprocess.run(["git", "-C", str(CORE_DEST), "remote", "add", "origin", CORE_REPO], check=True)
+        subprocess.run(["git", "-C", str(CORE_DEST), "fetch", "--depth", "1", "origin", CORE_REF], check=True)
+        subprocess.run(["git", "-C", str(CORE_DEST), "checkout", "--detach", "FETCH_HEAD"], check=True)
     manifest = CORE_DEST / "crates" / "rust-core-host" / "Cargo.toml"
     if not manifest.exists():
         sys.exit(f"engine manifest missing after staging: {manifest}")

@@ -786,6 +786,20 @@ def try_rust_finalize_review(
         return None
 
 
+def enrich_literal_labels(tree: SemanticNode, source: str) -> SemanticNode:
+    """Source-label enrichment owned by the shared Rust engine."""
+    return SemanticNode.model_validate_json(
+        _load_backend().enrich_literal_labels_json(tree.model_dump_json(), source)
+    )
+
+
+def review_trees_equivalent(old_tree: SemanticNode, new_tree: SemanticNode) -> bool:
+    """Ask core for conservative review equivalence, including literal whitespace."""
+    return bool(json.loads(_load_backend().review_trees_equivalent_json(
+        old_tree.model_dump_json(), new_tree.model_dump_json()
+    )))
+
+
 def try_rust_profile_label_enrichment(
     tree: SemanticNode,
     source: str,
