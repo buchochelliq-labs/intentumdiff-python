@@ -1117,6 +1117,7 @@ def test_semantic_differ_batch_fallback_continues_python_pipeline(monkeypatch: A
         diff_batch=lambda *args: json.dumps(payload),
         apply_invariances_json=_passthrough_invariances_json,
         scope_trails_json=_empty_scope_trails_json,
+        enrich_literal_labels_json=lambda tree_json, source: tree_json,
     )
     monkeypatch.setattr(rust_core, "_load_backend", lambda: backend)
 
