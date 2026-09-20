@@ -29,7 +29,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 CORE_REPO = "https://github.com/buchochelliq-labs/intentumdiff-core"
 # Immutable reviewed engine candidate for this binding. Override for an explicit
 # integration build; never let a moving branch silently change the engine under CI.
-CORE_REF = os.environ.get("INTENTUMDIFF_CORE_REF", "57bb03beec88a0d4ba6e004a5c1fb2737739de2c")
+CORE_REF = os.environ.get("INTENTUMDIFF_CORE_REF", "2e58c19ca9d37a9a9c4d7ee96750af1a416c2765")
 CORE_DEST = REPO_ROOT / "build" / "intentumdiff-core"
 WASM_DEST = REPO_ROOT / "src" / "intentumdiff" / "wasm"
 
@@ -77,6 +77,24 @@ def stage_wasm(wasm_dir: str | None) -> None:
 # engine resolves every language to 'unknown', so the suite cannot run. This mode
 # pulls the latest successful artifact from each parser repo — the embryo of the
 # registry-pinned artifact flow (pinning by checksum lands with the registry wiring).
+
+def _successful_artifact_runs(get, api: str, org: str, repo: str, ref: str | None = None) -> list[dict]:
+    """Search bounded run history without losing pinned builds behind scheduled jobs."""
+    import json
+    query = "status=success&per_page=100"
+    if ref:
+        query += f"&head_sha={ref}"
+    result: list[dict] = []
+    for page in range(1, 11):
+        runs = json.loads(get(f"{api}/repos/{org}/{repo}/actions/runs?{query}&page={page}"))
+        batch = runs.get("workflow_runs") or []
+        result.extend(run for run in batch
+                      if (not ref or run.get("head_sha") == ref)
+                      and not run.get("path", "").startswith("dynamic/"))
+        if len(batch) < 100:
+            break
+    return result
+
 
 def stage_wasm_from_artifacts(token: str, org: str = "buchochelliq-labs") -> int:
     import hashlib as _hashlib
@@ -194,10 +212,7 @@ def stage_wasm_from_artifacts(token: str, org: str = "buchochelliq-labs") -> int
             # at a different build, and the checksum gate then fires for the wrong
             # reason, reporting "the component changed" when only the commit did.
             ref = refs.get(name)
-            query = (f"head_sha={ref}&status=success&per_page=20" if ref
-                     else "status=success&per_page=1")
-            runs = _json.loads(get(f"{api}/repos/{org}/{name}/actions/runs?{query}"))
-            wr = runs.get("workflow_runs") or []
+            wr = _successful_artifact_runs(get, api, org, name, ref)
             if not wr:
                 missing.append((name, f"no successful run at pinned ref {ref[:8]}" if ref
                                 else "no successful run")); continue
@@ -255,10 +270,7 @@ def stage_wasm_from_artifacts(token: str, org: str = "buchochelliq-labs") -> int
     # on degraded output, with nothing distinguishing those from real coverage (#22).
     stage = "renderers"
     try:
-        runs = _json.loads(
-            get(f"{api}/repos/{org}/intentumdiff-core/actions/runs"
-                f"?status=success&per_page=20")
-        ).get("workflow_runs", [])
+        runs = _successful_artifact_runs(get, api, org, "intentumdiff-core")
         art = None
         for run in runs:
             arts = _json.loads(get(run["artifacts_url"]))
