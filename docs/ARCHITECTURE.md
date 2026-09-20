@@ -24,3 +24,12 @@ The wheel bundles the engine cdylib
 components (`intentumdiff/wasm/*.wasm`) — both **provisioned build inputs**
 (`scripts/provision_build_inputs.py`), not sources of this repo. There is no Python fallback
 engine: if the cdylib is absent, the package fails loudly rather than degrading.
+
+### Incomplete code
+
+Incomplete-code detection and fallback comparison belong to Rust (core #21).
+The Python `_token_fallback_diff` name remains a compatibility adapter to
+`source_fallback_diff` over the C ABI; it does not tokenize or compare sources.
+Rust preserves exact source ranges, including whitespace, and labels semantic
+interpretation as unknown. Raw CST errors are checked before trivia equivalence.
+The same fallback is allowed by the Rust-only gate. Missing core still fails.

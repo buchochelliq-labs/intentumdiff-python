@@ -436,75 +436,21 @@ def _semantic_parent_map(root: SemanticNode) -> dict[str, SemanticNode]:
 
 
 def _has_error_node(tree: SemanticNode) -> bool:
-    """Return ``True`` when *tree* contains a tree-sitter ERROR node."""
-    return tree.node_type == "ERROR" or any(n.node_type == "ERROR" for n in tree.descendants())
+    """Ask Rust whether a semantic tree contains a parse error."""
+    from intentumdiff.rust_core import parse_errors_present
+    return parse_errors_present("", tree.model_dump_json(), "")
 
 
 def _token_fallback_diff(
-    old_content: str,
-    new_content: str,
-    old_filename: str,
-    new_filename: str,
-    language: str,
-    *,
-    metadata: dict[str, Any] | None = None,
+    old_content: str, new_content: str, old_filename: str, new_filename: str,
+    language: str, *, metadata: dict[str, Any] | None = None,
 ) -> SemanticDiff:
-    """
-    Coarse token-level diff used when the tree-sitter parse yields ERROR nodes.
-
-    Splits both sides on whitespace and uses ``difflib.SequenceMatcher`` to
-    produce ``ADDITION / DELETION / MODIFICATION`` changes with
-    ``confidence=0.5``.  The returned ``SemanticDiff`` has ``is_fallback=True``
-    so callers can distinguish it from a full semantic diff.
-    """
-    import difflib
-
-    old_tokens = old_content.split()
-    new_tokens = new_content.split()
-    changes: list[Change] = []
-    matcher = difflib.SequenceMatcher(None, old_tokens, new_tokens, autojunk=False)
-    for op, i1, i2, j1, j2 in matcher.get_opcodes():
-        if op == "equal":
-            continue
-        if op == "insert":
-            changes.append(
-                Change(
-                    change_type=ChangeType.ADDITION,
-                    description=f"token-level fallback: inserted {j2 - j1} token(s)",
-                    confidence=0.5,
-                )
-            )
-        elif op == "delete":
-            changes.append(
-                Change(
-                    change_type=ChangeType.DELETION,
-                    description=f"token-level fallback: deleted {i2 - i1} token(s)",
-                    confidence=0.5,
-                )
-            )
-        elif op == "replace":
-            changes.append(
-                Change(
-                    change_type=ChangeType.MODIFICATION,
-                    # ASCII arrow deliberately. A Windows console defaults to cp1252, which
-                    # cannot encode U+2192, and Rich raised UnicodeEncodeError while rendering
-                    # the row — so the fallback path printed "Error: 'charmap' codec can't
-                    # encode character" INSIDE the results table, on exactly the files that had
-                    # already failed to parse.
-                    description=f"token-level fallback: {i2 - i1} token(s) -> {j2 - j1} token(s)",
-                    confidence=0.5,
-                )
-            )
-    return SemanticDiff(
-        changes=changes,
-        old_filename=old_filename,
-        new_filename=new_filename,
-        language=language,
-        has_semantic_changes=bool(changes),
-        is_fallback=True,
-        parse_errors=["tree-sitter reported parse errors; token-level fallback used"],
-        metadata=metadata or {},
-    )
+    """Compatibility adapter for Rust's source-preserving fallback."""
+    from intentumdiff.rust_core import source_fallback_diff
+    details = metadata or {}
+    result = source_fallback_diff(old_content, new_content, old_filename,
+        new_filename, language, str(details.get("fallback_reason", "parse_errors")))
+    return result.model_copy(update={"metadata": {**details, **dict(result.metadata)}})
 
 
 def _annotate_text_diffs(changes: list[Change]) -> list[Change]:
