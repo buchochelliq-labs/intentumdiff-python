@@ -28,12 +28,10 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
+import json
+from collections.abc import Mapping
 
 logger = logging.getLogger(__name__)
-
-if TYPE_CHECKING:
-    import pathspec
 
 #: Conventional filename — place in the repo / directory root.
 DIFFIGNORE_FILENAME = ".diffignore"
@@ -56,32 +54,28 @@ def load_diffignore(root: str | Path) -> "DiffIgnore | None":
         logger.warning("Could not read %s: %s", path, exc)
         return None
 
-    import pathspec  # lazy — keep import-time fast when diffignore is absent
-
-    spec = pathspec.PathSpec.from_lines("gitignore", text.splitlines())
-    logger.debug("Loaded .diffignore from %s (%d pattern(s))", path, len(spec.patterns))
-    return DiffIgnore(spec)
+    return DiffIgnore(text)
 
 
 class DiffIgnore:
-    """
-    Wraps a ``pathspec.PathSpec`` to test whether relative file paths should
-    be excluded from the diff / index pipeline.
+    """Thin adapter over Rust ignore rules; construct with raw file contents."""
 
-    Instances are created by :func:`load_diffignore`; construct one directly
-    only in tests.
-    """
+    __slots__ = ("_files",)
 
-    __slots__ = ("_spec",)
+    def __init__(self, patterns: str = "", *, directory_rules: Mapping[str, str] | None = None) -> None:
+        if not isinstance(patterns, str):
+            raise TypeError("DiffIgnore requires raw ignore-file text")
+        self._files = [{"directory": "", "content": patterns}]
+        self._files.extend({"directory": directory, "content": content} for directory, content in (directory_rules or {}).items())
+        self._matches([])  # validate rules through the engine eagerly
 
-    def __init__(self, spec: "pathspec.PathSpec") -> None:
-        self._spec = spec
+    def _matches(self, paths: list[dict]) -> list[bool]:
+        from intentumdiff.rust_core import _required_engine_json
+        result = _required_engine_json("match_ignore_rules", json.dumps({"files": self._files, "paths": paths}), result_type=list)
+        if len(result) != len(paths) or any(type(value) is not bool for value in result):
+            raise RuntimeError("Rust ignore result has invalid fields")
+        return result
 
     def is_ignored(self, rel_path: str) -> bool:
-        """
-        Return ``True`` if *rel_path* is matched by any pattern in the file.
-
-        *rel_path* must use **forward slashes** (POSIX style), e.g.
-        ``"src/generated/foo.py"`` — not ``"src\\generated\\foo.py"``.
-        """
-        return bool(self._spec.match_file(rel_path))
+        """Test a repository-relative POSIX file path using Rust semantics."""
+        return self._matches([{"path": rel_path}])[0]
