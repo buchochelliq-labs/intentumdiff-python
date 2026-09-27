@@ -89,3 +89,15 @@ def test_commit_index_does_not_omit_engine_failure(monkeypatch):
     monkeypatch.setattr(differ._differ, 'parse', fail)
     with pytest.raises(RuntimeError, match='engine parse failed'):
         differ._build_index([('changed.py', 'python', 'x = 2')])
+
+
+def test_empty_sql_index_side_uses_canonical_tree(monkeypatch):
+    from intentumdiff.core.commit_differ import CommitDiffer
+    from intentumdiff._differ_presentation import _empty_semantic_tree
+
+    differ = CommitDiffer()
+    def reject_empty(*args, **kwargs):
+        raise AssertionError("absent source must not reach SQL parser")
+    monkeypatch.setattr(differ._differ, "parse", reject_empty)
+    tree = differ._parse_to_tree("new.sql", "sql", "")
+    assert tree == _empty_semantic_tree("sql")
