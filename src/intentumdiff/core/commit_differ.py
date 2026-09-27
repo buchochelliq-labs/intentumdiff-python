@@ -175,26 +175,15 @@ class CommitDiffer:
         Always uses the git backend (the ``backend`` parameter of
         :meth:`diff_commit` is not supported by this streaming entry point).
         """
-        def _looks_binary(text: str) -> bool:
-            # Content is decoded with errors="replace"; a NUL byte (valid UTF-8
-            # U+0000) survives and reliably marks binary/image assets, as does a
-            # high ratio of U+FFFD replacement characters. Feeding such content to
-            # a text parser (the generic catch-all) explodes the CST — e.g. a PNG
-            # producing >100 MB of output that the plugin host then rejects.
-            head = text[:8192]
-            if not head:
-                return False
-            if "\x00" in head:
-                return True
-            return head.count("�") / len(head) > 0.1
+        from intentumdiff.content_type import is_text_bytes
 
         for source in iter_changed_sources(repo_path, old_ref, new_ref):
             old_content, new_content, old_path, new_path, staging_status = source
             # Backstop: primary content-based routing happens at the git read
-            # boundary (magic-byte detection); this NUL-byte check catches any
+            # boundary (magic-byte detection); the same Rust detector catches any
             # binary that reaches the streaming path through another route,
             # before it explodes the text parser.
-            if _looks_binary(new_content) or _looks_binary(old_content):
+            if not is_text_bytes(new_content.encode("utf-8")) or not is_text_bytes(old_content.encode("utf-8")):
                 logger.debug("Skipping %r — binary/non-text asset", old_path)
                 continue
             try:

@@ -929,6 +929,30 @@ class TestDiffCommit:
         assert "image.png" not in paths
         assert "code.py" in paths
 
+    def test_iter_file_diffs_preserves_literal_replacement_characters(self):
+        """Literal replacement characters are valid text, not evidence of decode failure."""
+        cd = self._make_differ()
+        parsed: list[str] = []
+
+        def fake_pipeline(_old, _new, old_path, _hint, new_filename=None):
+            parsed.append(new_filename or old_path)
+            return MagicMock()
+
+        with self._patch_git_repo() as mock_git:
+            mock_git.Repo.return_value = MagicMock()
+            with self._patch_iter_changed_sources([
+                ("��� before", "��� after", "literal.txt", "literal.txt", None),
+                ("def a():\n    return 1\n", "def a():\n    return 2\n", "code.py", "code.py", None),
+            ]):
+                cd._differ._run_pipeline = MagicMock(side_effect=fake_pipeline)
+                streamed = list(cd.iter_file_diffs("."))
+
+        # Both valid text files reach the parser.
+        assert parsed == ["literal.txt", "code.py"]
+        paths = [getattr(item, "new_path", None) for item in streamed]
+        assert "literal.txt" in paths
+        assert "code.py" in paths
+
 
 # ---------------------------------------------------------------------------
 # _parse_to_tree
