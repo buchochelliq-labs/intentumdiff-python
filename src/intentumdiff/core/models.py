@@ -78,8 +78,8 @@ class DetectionResult(BaseModel, frozen=True):
         ge=0.0,
         le=1.0,
         description=(
-            "Relative confidence derived from parser priority order. "
-            "1.0 for the highest-priority match, lower for subsequent matches."
+            "Reciprocal rank from Rust content detection order, rounded to three decimals. "
+            "1.0 for the first match; this is not a measured probability."
         ),
     )
 
