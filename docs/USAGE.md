@@ -87,3 +87,5 @@ can establish a complete empty opposite side. An empty patch without an original
 also cannot establish complete file content.
 
 Filename inference follows the conventional `a/` old and `b/` new header pair; creation `b/` and deletion `a/` headers use the same convention. Plain headers naming the same `a/` or `b/` directory preserve it. Single-sided headers can be ambiguous: provide an explicit filename to preserve a literal prefix.
+
+`DiffIgnore(patterns)` accepts raw ignore-file text; optional `directory_rules={"src": "*.log"}` supplies nested rules. Rule parsing and matching run in Rust. An excluded parent cannot be overridden by a child negation unless the parent is re-included first. Paths use repository-relative forward slashes and matching is case-sensitive. The former test-oriented pathspec-object constructor is replaced by raw text.
