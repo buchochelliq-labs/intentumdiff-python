@@ -67,9 +67,9 @@ def main():
     parser.add_argument('--evidence', type=Path)
     args = parser.parse_args()
     core, native, wasm = args.core_dir.resolve(), args.native.resolve(), args.wasm_dir.resolve()
-    cases = json.loads((core / 'tests/fixtures/migration/markdown.json').read_text())
+    cases = json.loads((core / 'tests/fixtures/migration/markdown.json').read_text(encoding='utf-8'))
     cases = [dict(c, filename='doc.md', mode='text') for c in cases]
-    schema = json.loads((core / 'tests/corpus/schema_custom_identity.json').read_text())
+    schema = json.loads((core / 'tests/corpus/schema_custom_identity.json').read_text(encoding='utf-8'))
     cases.append(dict(schema, id='schema-custom-identity', mode='sources'))
     records = []
     original = Path.cwd()
@@ -77,13 +77,13 @@ def main():
         root = Path(directory)
         schemas = root / '.intentumdiff/schemas'
         schemas.mkdir(parents=True)
-        (schemas / 'acme.json').write_text(json.dumps(schema['descriptor']))
+        (schemas / 'acme.json').write_text(json.dumps(schema['descriptor']), encoding='utf-8')
         os.chdir(root)
         try:
             with closing(SemanticDiffer()) as differ:
                 for case in cases:
                     request = dict(case, repo=str(root), wasm=str(wasm))
-                    result = subprocess.run([str(native)], input=json.dumps(request), text=True, capture_output=True, check=True)
+                    result = subprocess.run([str(native)], input=json.dumps(request), text=True, encoding='utf-8', capture_output=True, check=True)
                     rust = json.loads(result.stdout)
                     python = (review_text(case['old'], case['new'], filename=case['filename']) if case['mode'] == 'text' else differ.diff_strings(case['old'], case['new'], case['filename'])).model_dump(mode='json')
                     check_expectations(case, rust)
@@ -93,8 +93,8 @@ def main():
         finally:
             os.chdir(original)
     from intentumdiff.rust_core import _c_abi_call
-    for case in json.loads((core / 'tests/fixtures/migration/utilities.json').read_text()):
-        rust = json.loads(subprocess.run([str(native)], input=json.dumps(case), text=True, capture_output=True, check=True).stdout)
+    for case in json.loads((core / 'tests/fixtures/migration/utilities.json').read_text(encoding='utf-8')):
+        rust = json.loads(subprocess.run([str(native)], input=json.dumps(case), text=True, encoding='utf-8', capture_output=True, check=True).stdout)
         if case['handler'] == 'infer_file_lifecycle':
             python = _c_abi_call(case['handler'], *case['args'])
         else:
@@ -107,7 +107,7 @@ def main():
         records.append(dict(case, rust=rust, python=python))
     if args.evidence:
         args.evidence.parent.mkdir(parents=True, exist_ok=True)
-        args.evidence.write_text(json.dumps(records, indent=2, ensure_ascii=False) + '\n')
+        args.evidence.write_text(json.dumps(records, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
     print(f'{len(records)} source-judged native Rust/Python cases passed')
 
 
