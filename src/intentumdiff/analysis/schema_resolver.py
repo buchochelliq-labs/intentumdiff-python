@@ -7,7 +7,6 @@ import ipaddress
 import json
 import logging
 import os
-import re
 import socket
 import ssl
 import subprocess
@@ -20,9 +19,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from intentumdiff.rust_core import _c_abi_call
+
 from intentumdiff.analysis.user_schemas import (
     load_user_schema_profiles,
-    match_user_profile,
+    _profile_payload,
 )
 
 logger = logging.getLogger(__name__)
@@ -152,33 +153,19 @@ def resolve_schema(
 ) -> SchemaResolution:
     values = env or os.environ
     mode = _schema_fetch_mode(values)
-    declared = discover_declared_schema(content, language)
-    # User-registered profiles (issue #63) outrank the embedded fetch and the
-    # built-in provider registry: a claimed $schema URL or a filename/marker
-    # match resolves OFFLINE from the local descriptor — no fetch, no logging
-    # of proprietary schema content.
     user_profiles, _user_errors = load_user_schema_profiles(values)
-    if user_profiles:
-        profile = match_user_profile(
-            user_profiles,
-            filename=filename,
-            content=content,
-            declared_url=declared,
-        )
-        if profile is not None:
-            return SchemaResolution(
-                provider_id=profile.provider_id,
-                status="user-profile",
-                source_url=profile.schema_path,
-                schema=profile.schema,
-                identity_fields=profile.identity_fields,
-                cache_fingerprint=profile.fingerprint,
-            )
-    candidate = (
-        SchemaCandidate("embedded", declared)
-        if declared
-        else provider_schema_candidate(filename, language, content)
+    decision = _schema_operation(
+        "resolve", profiles=[_profile_payload(p) for p in user_profiles],
+        filename=filename, language=language, content=content,
     )
+    if decision["profile_index"] is not None:
+        profile = user_profiles[decision["profile_index"]]
+        return SchemaResolution(
+            provider_id=profile.provider_id, status="user-profile",
+            source_url=profile.schema_path, schema=profile.schema,
+            identity_fields=profile.identity_fields, cache_fingerprint=profile.fingerprint,
+        )
+    candidate = _candidate_from_payload(decision["candidate"])
     if candidate is None:
         return SchemaResolution(provider_id="none", status="not_found")
     if candidate.status:
@@ -278,135 +265,31 @@ def resolve_schema(
         )
 
 
-def discover_declared_schema(content: str, language: str | None = None) -> str | None:
-    language_id = (language or "").lower()
-    if language_id in {"json", "adf"} or _looks_like_json(content):
-        try:
-            parsed = json.loads(content)
-        except json.JSONDecodeError:
-            parsed = None
-        if isinstance(parsed, dict):
-            value = parsed.get("$schema")
-            if isinstance(value, str) and value.strip():
-                return value.strip()
+def _schema_operation(operation: str, **payload: Any) -> Any:
+    return _c_abi_call("schema_profiles", json.dumps({"operation": operation, **payload}))
 
-    for line in content.splitlines()[:5]:
-        match = re.match(r"\s*#\s*yaml-language-server:\s*\$schema=(\S+)\s*$", line)
-        if match:
-            return match.group(1).strip()
-    return None
+
+def discover_declared_schema(content: str, language: str | None = None) -> str | None:
+    return _schema_operation("discover", content=content, language=language)
 
 
 def provider_schema_candidate(
-    filename: str,
-    language: str | None,
-    content: str = "",
+    filename: str, language: str | None, content: str = "",
 ) -> SchemaCandidate | None:
-    normalized_path = filename.replace("\\", "/").lower()
-    basename = normalized_path.rsplit("/", 1)[-1]
-    language_id = (language or "").lower()
+    value = _schema_operation("provider", filename=filename, language=language, content=content)
+    return _candidate_from_payload(value)
 
-    if url := _openapi_schema_url(basename, content):
-        version = "3.1" if url == OPENAPI_31_SCHEMA_URL else "3.0"
-        return SchemaCandidate(
-            f"openapi:{version}",
-            url,
-            identity_fields=frozenset({"operationId", "name"}),
-        )
-    if _looks_like_kubernetes_manifest(basename, content):
-        return SchemaCandidate(
-            "kubernetes:manifest",
-            KUBERNETES_SCHEMA_URL,
-            identity_fields=frozenset({"name"}),
-        )
-    if _looks_like_github_workflow(normalized_path, content):
-        return SchemaCandidate(
-            "github-actions:workflow",
-            GITHUB_WORKFLOW_SCHEMA_URL,
-            identity_fields=frozenset({"id", "name", "run", "runs-on", "uses"}),
-        )
-    if _looks_like_azure_pipeline(normalized_path, content):
-        return SchemaCandidate(
-            "azure-pipelines:pipeline",
-            AZURE_PIPELINES_SCHEMA_URL,
-            identity_fields=frozenset({"job", "stage", "task", "script", "displayName"}),
-        )
 
-    dbt_url = _dbt_schema_url(basename, language_id, content)
-    if dbt_url:
-        key = dbt_url.rsplit("/", 1)[-1].replace("-latest.json", "")
-        return SchemaCandidate(
-            f"dbt:{key}",
-            dbt_url,
-            identity_fields=DBT_IDENTITY_FIELDS,
-        )
-
-    if language_id in {"databricks", "databricks-workflow"} or basename in {
-        "databricks.yml",
-        "databricks.yaml",
-    }:
-        return SchemaCandidate(
-            "databricks:bundle",
-            DATABRICKS_BUNDLE_SCHEMA_URL,
-            command=("databricks", "bundle", "schema"),
-            identity_fields=frozenset(
-                {
-                    "depends_on",
-                    "job_cluster_key",
-                    "library",
-                    "libraries",
-                    "task_key",
-                }
-            ),
-        )
-
-    if language_id in {"adf"} or _looks_like_adf_path(basename):
-        return SchemaCandidate(
-            "adf:no_raw_schema",
-            None,
-            status="no_raw_schema",
-            advisory_url=ADVISORY_ADF_NO_RAW_SCHEMA_URL,
-        )
-    if language_id in {"hcl", "terraform"} or basename.endswith((".tf", ".hcl")):
+def _candidate_from_payload(value: dict[str, Any] | None) -> SchemaCandidate | None:
+    if value is None:
         return None
-    return None
+    value["command"] = tuple(value["command"])
+    value["identity_fields"] = frozenset(value["identity_fields"])
+    return SchemaCandidate(**value)
 
 
 def derive_identity_fields(schema: dict[str, Any] | None) -> frozenset[str]:
-    if not schema:
-        return frozenset()
-    found: set[str] = set()
-    stack: list[Any] = [schema]
-    seen: set[int] = set()
-    while stack:
-        current = stack.pop()
-        current_id = id(current)
-        if current_id in seen:
-            continue
-        seen.add(current_id)
-        if isinstance(current, dict):
-            properties = current.get("properties")
-            if isinstance(properties, dict):
-                for key, value in properties.items():
-                    normalized = _normalize_identity_field(key)
-                    if normalized in IDENTITY_FIELD_CANDIDATES:
-                        found.add(normalized)
-                    stack.append(value)
-            for key in (
-                "items",
-                "anyOf",
-                "oneOf",
-                "allOf",
-                "$defs",
-                "definitions",
-                "patternProperties",
-            ):
-                value = current.get(key)
-                if value is not None:
-                    stack.append(value)
-        elif isinstance(current, list):
-            stack.extend(current)
-    return frozenset(found)
+    return frozenset(_schema_operation("derive", schema=schema))
 
 
 def _identity_fields_for(
@@ -691,126 +574,3 @@ def _is_private_host(host: str) -> bool:
         ):
             return True
     return False
-
-
-def _dbt_schema_url(basename: str, language_id: str, content: str) -> str | None:
-    if basename in {"dbt_project.yml", "dbt_project.yaml"}:
-        return DBT_SCHEMA_URLS["dbt_project"]
-    if basename in {"packages.yml", "packages.yaml"}:
-        return DBT_SCHEMA_URLS["packages"]
-    if basename in {"dependencies.yml", "dependencies.yaml"}:
-        return DBT_SCHEMA_URLS["dependencies"]
-    if basename in {"selectors.yml", "selectors.yaml"}:
-        return DBT_SCHEMA_URLS["selectors"]
-    if basename in {"dbt_cloud.yml", "dbt_cloud.yaml"}:
-        return DBT_SCHEMA_URLS["dbt_cloud"]
-    if language_id in {"dbt-yaml", "dbt-config", "dbt-packages"}:
-        if language_id == "dbt-config":
-            return DBT_SCHEMA_URLS["dbt_project"]
-        if language_id == "dbt-packages":
-            return DBT_SCHEMA_URLS["packages"]
-        return DBT_SCHEMA_URLS["dbt_yml_files"]
-    markers = ("version", "models", "sources", "exposures", "seeds", "snapshots")
-    if basename.endswith((".yml", ".yaml")) and any(
-        re.search(rf"(?m)^\s*{re.escape(marker)}\s*:", content) for marker in markers
-    ):
-        return DBT_SCHEMA_URLS["dbt_yml_files"]
-    return None
-
-
-def _openapi_schema_url(basename: str, content: str) -> str | None:
-    if not basename.endswith((".json", ".yaml", ".yml")):
-        return None
-    lowered = basename.lower()
-    named_like_openapi = lowered in {
-        "openapi.json",
-        "openapi.yaml",
-        "openapi.yml",
-        "swagger.json",
-        "swagger.yaml",
-        "swagger.yml",
-    }
-    version = _top_level_scalar(content, "openapi")
-    if version:
-        if version.startswith("3.1"):
-            return OPENAPI_31_SCHEMA_URL
-        return OPENAPI_30_SCHEMA_URL
-    if _top_level_scalar(content, "swagger") or named_like_openapi:
-        return OPENAPI_30_SCHEMA_URL
-    return None
-
-
-def _looks_like_kubernetes_manifest(basename: str, content: str) -> bool:
-    if not basename.endswith((".json", ".yaml", ".yml")):
-        return False
-    return bool(
-        _top_level_scalar(content, "apiVersion")
-        and _top_level_scalar(content, "kind")
-        and re.search(r"(?m)^\s*metadata\s*:", content)
-    )
-
-
-def _looks_like_github_workflow(path: str, content: str) -> bool:
-    if not path.endswith((".yaml", ".yml")):
-        return False
-    if "/.github/workflows/" in f"/{path}":
-        return True
-    return bool(
-        re.search(r"(?m)^\s*on\s*:", content)
-        and re.search(r"(?m)^\s*jobs\s*:", content)
-        and (
-            re.search(r"(?m)^\s*uses\s*:", content)
-            or re.search(r"(?m)^\s*runs-on\s*:", content)
-        )
-    )
-
-
-def _looks_like_azure_pipeline(path: str, content: str) -> bool:
-    basename = path.rsplit("/", 1)[-1]
-    if not path.endswith((".yaml", ".yml")):
-        return False
-    if basename in {"azure-pipelines.yml", "azure-pipelines.yaml"}:
-        return True
-    return bool(
-        re.search(r"(?m)^\s*(trigger|pr)\s*:", content)
-        and re.search(r"(?m)^\s*(stages|jobs|steps)\s*:", content)
-        and (
-            re.search(r"(?m)^\s*pool\s*:", content)
-            or re.search(r"(?m)^\s*vmImage\s*:", content)
-            or re.search(r"(?m)^\s*task\s*:", content)
-        )
-    )
-
-
-def _top_level_scalar(content: str, key: str) -> str:
-    try:
-        parsed = json.loads(content)
-    except json.JSONDecodeError:
-        parsed = None
-    if isinstance(parsed, dict):
-        value = parsed.get(key)
-        return str(value).strip() if value is not None else ""
-    match = re.search(rf"(?m)^{re.escape(key)}\s*:\s*['\"]?([^'\"\n#]+)", content)
-    return match.group(1).strip() if match else ""
-
-
-def _looks_like_adf_path(basename: str) -> bool:
-    direct_names = {"pipeline.json", "dataset.json", "linkedservice.json", "factory.json"}
-    return basename in direct_names or any(
-        basename.endswith(suffix)
-        for suffix in (
-            ".pipeline.json",
-            ".dataset.json",
-            ".linkedservice.json",
-            ".trigger.json",
-        )
-    )
-
-
-def _normalize_identity_field(name: str) -> str:
-    return name.strip().lower().replace("-", "_")
-
-
-def _looks_like_json(content: str) -> bool:
-    stripped = content.lstrip()
-    return stripped.startswith("{")

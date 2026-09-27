@@ -16,6 +16,7 @@ Quick start::
         print(change.change_type, change.description)
 """
 
+from intentumdiff.api import review_text
 from intentumdiff.core.models import (
     Change,
     ChangeGroup,
@@ -56,6 +57,7 @@ from intentumdiff.live_server import LiveServer
 
 __all__ = [
     # Differ
+    "review_text",
     "SemanticDiffer",
     # Cross-file analysis
     "CommitDiffer",

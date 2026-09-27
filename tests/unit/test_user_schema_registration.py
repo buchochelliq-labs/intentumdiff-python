@@ -81,6 +81,15 @@ def test_descriptor_registration_changes_matching_behavior(
     assert schema["status"] == "user-profile"
     assert schema["identity_fields"] == ["route"]
     assert [change.change_type.name for change in diff.changes] == ["MODIFICATION"]
+    change = diff.changes[0]
+    assert change.old_node.label == "pay_v1"
+    assert change.new_node.label == "pay_v2"
+    assert (change.old_node.position.start_line, change.old_node.position.start_col) == (5, 14)
+    assert (change.new_node.position.start_line, change.new_node.position.start_col) == (9, 14)
+    assert diff.has_semantic_changes and not diff.is_style_only
+    meaningful = [group for group in diff.change_groups if group.kind == "MEANINGFUL_CHANGE"]
+    assert len(meaningful) == 1
+    assert meaningful[0].raw_change_indices == [0]
 
 
 def test_without_registration_the_same_edit_is_reorder_churn(
@@ -421,3 +430,70 @@ keyed_elements:
     )
 
     assert [change.change_type.name for change in diff.changes] == ["MODIFICATION"]
+
+
+def test_unicode_custom_keys_match_compact_json(tmp_path: Path) -> None:
+    registry = tmp_path / "schemas"
+    registry.mkdir()
+    (registry / "unicode.yml").write_text(
+        'language_id: unicode-routes\nmatch:\n  filename_patterns: ["routes.json"]\n'
+        '  root_markers: ["版本"]\nkeyed_arrays:\n  /routes: ["路径"]\n', encoding="utf-8"
+    )
+    profiles, errors = load_user_schema_profiles({"INTENTUMDIFF_USER_SCHEMA_DIR": str(registry)})
+    assert not errors
+    selected = match_user_profile(profiles, filename="routes.json", content='{"版本":1,"routes":[]}')
+    assert selected is not None
+    assert selected.identity_fields == {"路径"}
+
+
+def test_local_schema_edits_invalidate_identity_hints(tmp_path: Path) -> None:
+    registry = tmp_path / "schemas"
+    registry.mkdir()
+    schema = tmp_path / "schema.json"
+    (registry / "profile.yml").write_text(
+        'language_id: acme\nmatch: {filename_patterns: ["*.json"]}\nschema: ../schema.json\n'
+    )
+    env = {"INTENTUMDIFF_USER_SCHEMA_DIR": str(registry)}
+    schema.write_text('{"properties":{"task_key":{}}}')
+    first, errors = load_user_schema_profiles(env)
+    assert not errors and first[0].identity_fields == {"task_key"}
+    schema.write_text('{"properties":{"operationId":{}}}')
+    second, errors = load_user_schema_profiles(env)
+    assert not errors and second[0].identity_fields == {"operationid"}
+    assert first[0].fingerprint != second[0].fingerprint
+
+
+def test_descriptor_yaml_uses_shared_string_and_key_rules(tmp_path: Path) -> None:
+    registry = tmp_path / "schemas"
+    registry.mkdir()
+    descriptor = registry / "profile.yml"
+    descriptor.write_text('language_id: acme\nmatch: {filename_patterns: ["*.json"]}\nidentity_fields: [on, off, yes, no]\n')
+    env = {"INTENTUMDIFF_USER_SCHEMA_DIR": str(registry)}
+    profiles, errors = load_user_schema_profiles(env)
+    assert not errors and profiles[0].identity_fields == {"on", "off", "yes", "no"}
+    descriptor.write_text(descriptor.read_text() + 'language_id: duplicate\n')
+    profiles, errors = load_user_schema_profiles(env)
+    assert not profiles and errors
+    descriptor.write_text('language_id: acme\nmatch: {filename_patterns: ["*.json"]}\nkeyed_arrays: {1: [name]}\n')
+    profiles, errors = load_user_schema_profiles(env)
+    assert not profiles and any("mapping keys must be strings" in error for error in errors)
+
+
+def test_profile_markers_ignore_nested_yaml_keys() -> None:
+    from intentumdiff.analysis.user_schemas import UserSchemaProfile
+
+    profile = UserSchemaProfile(language_id="acme", source_path="", root_markers=("models",), identity_fields=frozenset({"name"}))
+    assert match_user_profile((profile,), filename="a.yml", content="app:\n  models: []") is None
+    assert match_user_profile((profile,), filename="a.yml", content="'models': []") is profile
+
+
+def test_descriptor_fingerprint_preserves_crlf_bytes(tmp_path: Path) -> None:
+    import hashlib
+
+    registry = tmp_path / "schemas"
+    registry.mkdir()
+    raw = b'language_id: acme\r\nmatch: {filename_patterns: ["*.json"]}\r\nidentity_fields: [name]\r\n'
+    (registry / "profile.yml").write_bytes(raw)
+    profiles, errors = load_user_schema_profiles({"INTENTUMDIFF_USER_SCHEMA_DIR": str(registry)})
+    assert not errors
+    assert profiles[0].fingerprint == f"user:acme:{hashlib.sha256(raw).hexdigest()[:16]}"

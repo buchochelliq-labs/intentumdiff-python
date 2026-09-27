@@ -308,21 +308,10 @@ def _pyo3_extension_module_name() -> str | None:
 
 
 def _load_backend() -> Any:
-    # Backend selection (Phase B / #82). The C ABI (`intentumdiff_call`) is the language-agnostic
-    # boundary; the PyO3 extension is the transitional in-process fast path. Order:
-    #   1. explicit override — `INTENTUMDIFF_RUST_CORE_CTYPES=1` forces the pure-ctypes proxy,
-    #      `INTENTUMDIFF_RUST_CORE_PYO3=1` forces PyO3.
-    #   2. auto — PyO3 when a compiled extension module is present (dev/maturin build; direct calls
-    #      are faster); otherwise the pure-ctypes proxy over the cdylib (the PyO3-free wheel).
-    if os.getenv("INTENTUMDIFF_RUST_CORE_CTYPES", "").strip() == "1":
-        return _ctypes_backend()
-    force_pyo3 = os.getenv("INTENTUMDIFF_RUST_CORE_PYO3", "").strip() == "1"
-    module_name = _pyo3_extension_module_name()
-    if module_name is not None:
-        return importlib.import_module(module_name)
-    if force_pyo3:
-        raise ModuleNotFoundError("intentumdiff_rust_core PyO3 extension (INTENTUMDIFF_RUST_CORE_PYO3=1)")
+    # Maturin packages a plain C-ABI cdylib. A .so suffix does not make it
+    # a Python extension; importing it would require a nonexistent PyInit export.
     return _ctypes_backend()
+
 
 
 # ── Stateless C-ABI accessor (intentumdiff_call) ───────────────────────────────────────────────

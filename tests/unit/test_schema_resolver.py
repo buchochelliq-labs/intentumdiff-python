@@ -528,3 +528,33 @@ def test_databricks_schema_command_is_disabled_without_explicit_opt_in(
 
     assert result.status == "fetched"
     assert result.provider_id == "databricks:bundle"
+
+
+def test_shared_schema_definitions_are_identity_sources() -> None:
+    from intentumdiff.analysis.schema_resolver import derive_identity_fields
+
+    assert derive_identity_fields({"$defs": {"Route": {"properties": {"task-key": {}, "body": {}}}}}) == {"task_key"}
+
+
+def test_json_kubernetes_metadata_is_detected() -> None:
+    candidate = provider_schema_candidate(
+        "pod.json", "json", '{"apiVersion":"v1","kind":"Pod","metadata":{"name":"web"}}'
+    )
+    assert candidate is not None
+    assert candidate.provider_id == "kubernetes:manifest"
+
+
+def test_schema_adapters_fail_loudly_without_engine(monkeypatch: pytest.MonkeyPatch) -> None:
+    import intentumdiff.analysis.schema_resolver as resolver
+
+    def unavailable(*args: object) -> object:
+        raise RuntimeError("engine unavailable")
+
+    monkeypatch.setattr(resolver, "_c_abi_call", unavailable)
+    with pytest.raises(RuntimeError, match="engine unavailable"):
+        resolver.discover_declared_schema('{"$schema":"https://example.org/schema"}', "json")
+
+
+@pytest.mark.parametrize("content", ["version: 1\nservices: {}", "app:\n  models: 42", "version: 2\nmodels: 42"])
+def test_generic_yaml_does_not_claim_dbt(content: str) -> None:
+    assert provider_schema_candidate("config.yml", "yaml", content) is None
