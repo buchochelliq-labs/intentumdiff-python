@@ -190,7 +190,7 @@ def test_hover_null_result() -> None:
                     req_id = msg.get("id")
                     if req_id is None:
                         continue
-                    writer.write(_response(req_id, None))
+                    writer.write(_response(req_id, _INIT_REPLY if msg.get("method") == "initialize" else None))
                     await writer.drain()
             except (asyncio.IncompleteReadError, asyncio.CancelledError):
                 pass
@@ -247,4 +247,15 @@ def test_multiple_concurrent_hovers() -> None:
                 )
         assert all(r == "int" for r in results)
 
+    run(_run())
+
+
+def test_server_cannot_select_unadvertised_position_encoding() -> None:
+    async def _run() -> None:
+        replies = {"initialize": {"capabilities": {"positionEncoding": "utf-8"}}}
+        async with FakeLspServer(replies) as srv:
+            cfg = LspServerConfig(host=srv.host, port=srv.port)
+            with pytest.raises(LspConnectionError, match="position encoding"):
+                async with AsyncLspClient(cfg, timeout=3.0):
+                    pass
     run(_run())
