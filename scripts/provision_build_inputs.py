@@ -9,7 +9,7 @@ The thin Python binding (#82 split) builds its wheel against:
 
 Sources (first match wins):
   --core-dir / INTENTUMDIFF_CORE_DIR      an existing local checkout (copied, not cloned)
-  otherwise                              `git clone --depth 1 --branch CORE_REF` of the repo
+  otherwise                              fetch CORE_REF (branch, tag or immutable SHA)
   --wasm-dir / INTENTUMDIFF_WASM_DIR      a dir of built .wasm components to stage
 
 Usage:
@@ -27,16 +27,9 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CORE_REPO = "https://github.com/buchochelliq-labs/intentumdiff-core"
-# Which intentumdiff-core to build against.
-#
-# NOT "main". `main` only moves when a release is cut, so a consumer pinned to it cannot verify
-# against an unreleased engine change — which is precisely what a release candidate exists to
-# allow. That gap is not theoretical: the provenance tests here assert facts added to the core
-# and failed in CI while passing locally, because CI was building an engine that predated them.
-#
-# Tracking a branch does make the build unreproducible, so this becomes a TAG the moment core
-# cuts one. Override for a one-off build without editing the file.
-CORE_REF = os.environ.get("INTENTUMDIFF_CORE_REF", "release/v0.0.2-rc")
+# Immutable reviewed engine candidate for this binding. Override for an explicit
+# integration build; never let a moving branch silently change the engine under CI.
+CORE_REF = os.environ.get("INTENTUMDIFF_CORE_REF", "449d233e57de2c9ae956f484ce26ad95837d20d7")
 CORE_DEST = REPO_ROOT / "build" / "intentumdiff-core"
 WASM_DEST = REPO_ROOT / "src" / "intentumdiff" / "wasm"
 
@@ -50,11 +43,11 @@ def stage_core(core_dir: str | None) -> None:
         print(f"staging engine from local checkout: {src}")
         shutil.copytree(src, CORE_DEST, ignore=shutil.ignore_patterns("target", ".git"))
     else:
-        print(f"cloning {CORE_REPO}@{CORE_REF}")
-        subprocess.run(
-            ["git", "clone", "--depth", "1", "--branch", CORE_REF, CORE_REPO, str(CORE_DEST)],
-            check=True,
-        )
+        print(f"fetching {CORE_REPO}@{CORE_REF}")
+        subprocess.run(["git", "init", str(CORE_DEST)], check=True)
+        subprocess.run(["git", "-C", str(CORE_DEST), "remote", "add", "origin", CORE_REPO], check=True)
+        subprocess.run(["git", "-C", str(CORE_DEST), "fetch", "--depth", "1", "origin", CORE_REF], check=True)
+        subprocess.run(["git", "-C", str(CORE_DEST), "checkout", "--detach", "FETCH_HEAD"], check=True)
     manifest = CORE_DEST / "crates" / "rust-core-host" / "Cargo.toml"
     if not manifest.exists():
         sys.exit(f"engine manifest missing after staging: {manifest}")
@@ -84,6 +77,24 @@ def stage_wasm(wasm_dir: str | None) -> None:
 # engine resolves every language to 'unknown', so the suite cannot run. This mode
 # pulls the latest successful artifact from each parser repo — the embryo of the
 # registry-pinned artifact flow (pinning by checksum lands with the registry wiring).
+
+def _successful_artifact_runs(get, api: str, org: str, repo: str, ref: str | None = None) -> list[dict]:
+    """Search bounded run history without losing pinned builds behind scheduled jobs."""
+    import json
+    query = "status=success&per_page=100"
+    if ref:
+        query += f"&head_sha={ref}"
+    result: list[dict] = []
+    for page in range(1, 11):
+        runs = json.loads(get(f"{api}/repos/{org}/{repo}/actions/runs?{query}&page={page}"))
+        batch = runs.get("workflow_runs") or []
+        result.extend(run for run in batch
+                      if (not ref or run.get("head_sha") == ref)
+                      and not run.get("path", "").startswith("dynamic/"))
+        if len(batch) < 100:
+            break
+    return result
+
 
 def stage_wasm_from_artifacts(token: str, org: str = "buchochelliq-labs") -> int:
     import hashlib as _hashlib
@@ -201,10 +212,7 @@ def stage_wasm_from_artifacts(token: str, org: str = "buchochelliq-labs") -> int
             # at a different build, and the checksum gate then fires for the wrong
             # reason, reporting "the component changed" when only the commit did.
             ref = refs.get(name)
-            query = (f"head_sha={ref}&status=success&per_page=20" if ref
-                     else "status=success&per_page=1")
-            runs = _json.loads(get(f"{api}/repos/{org}/{name}/actions/runs?{query}"))
-            wr = runs.get("workflow_runs") or []
+            wr = _successful_artifact_runs(get, api, org, name, ref)
             if not wr:
                 missing.append((name, f"no successful run at pinned ref {ref[:8]}" if ref
                                 else "no successful run")); continue
@@ -262,10 +270,7 @@ def stage_wasm_from_artifacts(token: str, org: str = "buchochelliq-labs") -> int
     # on degraded output, with nothing distinguishing those from real coverage (#22).
     stage = "renderers"
     try:
-        runs = _json.loads(
-            get(f"{api}/repos/{org}/intentumdiff-core/actions/runs"
-                f"?status=success&per_page=20")
-        ).get("workflow_runs", [])
+        runs = _successful_artifact_runs(get, api, org, "intentumdiff-core")
         art = None
         for run in runs:
             arts = _json.loads(get(run["artifacts_url"]))

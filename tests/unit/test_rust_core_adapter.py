@@ -1111,12 +1111,16 @@ def test_semantic_differ_batch_fallback_continues_python_pipeline(monkeypatch: A
         "engine": "rust_core_batch_v4",
         "diffs": [{"status": "fallback", "reason": "changed-file finalization pending"}],
     }
+    real_backend = rust_core._load_backend()
     backend = SimpleNamespace(
+        parse_errors_present_json=real_backend.parse_errors_present_json,
+        source_fallback_diff_json=real_backend.source_fallback_diff_json,
         version=lambda: "0.4.0",
         supports_language=lambda language: language == "python",
         diff_batch=lambda *args: json.dumps(payload),
         apply_invariances_json=_passthrough_invariances_json,
         scope_trails_json=_empty_scope_trails_json,
+        enrich_literal_labels_json=lambda tree_json, source: tree_json,
     )
     monkeypatch.setattr(rust_core, "_load_backend", lambda: backend)
 
@@ -1129,13 +1133,14 @@ def test_semantic_differ_batch_fallback_continues_python_pipeline(monkeypatch: A
         language_hint="python",
     )
 
-    assert "rust_core" not in diff.metadata
+    assert diff.metadata["engine_owner"] == "rust"
+    assert diff.metadata["semantic_contract"] == "rust_source_fallback_v1"
     assert diff.has_semantic_changes is True
     phases = [phase["name"] for phase in diff.metadata["phase_timings"]["phases"]]
     assert "rust_core_batch_execution" in phases
     # Post-retirement degradation chain (issue #57 payoff, stage 4b): batch declined ->
     # the per-stage Rust finalize is attempted next; this synthetic backend exposes no
-    # finalize_review_json, so the pipeline degrades to the coarse token-level diff
+    # finalize_review_json, so the pipeline degrades to the Rust source fallback
     # (the python stages are retired). A REAL backend serves at the finalize tier.
     assert "rust_finalize_review" in phases
     assert diff.metadata.get("fallback_reason") == "rust_finalize_declined"

@@ -560,61 +560,6 @@ def _bounded_plugin_text(plugin_id: str, export_name: str, value: Any) -> str:
     return text
 
 
-def _check_json_text_limits(cst_json: str) -> None:
-    size = len(cst_json.encode("utf-8"))
-    if size > _HOST_UTILS_MAX_JSON_BYTES:
-        raise _host_utils_error(
-            f"JSON payload is {size} bytes; limit is "
-            f"{_HOST_UTILS_MAX_JSON_BYTES} bytes"
-        )
-
-    depth = 0
-    in_string = False
-    escaped = False
-    for ch in cst_json:
-        if in_string:
-            if escaped:
-                escaped = False
-            elif ch == "\\":
-                escaped = True
-            elif ch == '"':
-                in_string = False
-            continue
-        if ch == '"':
-            in_string = True
-        elif ch in "[{":
-            depth += 1
-            if depth > _HOST_UTILS_MAX_JSON_DEPTH:
-                raise _host_utils_error(
-                    f"JSON nesting depth exceeds {_HOST_UTILS_MAX_JSON_DEPTH}"
-                )
-        elif ch in "]}":
-            depth = max(0, depth - 1)
-
-
-def _check_trivia_type_limits(trivia_types: list[str]) -> None:
-    if len(trivia_types) > _HOST_UTILS_MAX_TRIVIA_TYPES:
-        raise _host_utils_error(
-            f"trivia type count is {len(trivia_types)}; limit is "
-            f"{_HOST_UTILS_MAX_TRIVIA_TYPES}"
-        )
-
-    total = 0
-    for trivia_type in trivia_types:
-        size = len(str(trivia_type).encode("utf-8"))
-        if size > _HOST_UTILS_MAX_TRIVIA_TYPE_BYTES:
-            raise _host_utils_error(
-                f"trivia type is {size} bytes; limit is "
-                f"{_HOST_UTILS_MAX_TRIVIA_TYPE_BYTES} bytes"
-            )
-        total += size
-        if total > _HOST_UTILS_MAX_TRIVIA_BYTES:
-            raise _host_utils_error(
-                f"trivia type payload is {total} bytes; limit is "
-                f"{_HOST_UTILS_MAX_TRIVIA_BYTES} bytes"
-            )
-
-
 def _truncate_utf8(text: str, max_bytes: int) -> str:
     encoded = text.encode("utf-8")
     if len(encoded) <= max_bytes:
@@ -624,107 +569,22 @@ def _truncate_utf8(text: str, max_bytes: int) -> str:
     return encoded[:budget].decode("utf-8", errors="ignore") + marker.decode("ascii")
 
 
-def _load_limited_cst_json(cst_json: str) -> Any:
-    _check_json_text_limits(cst_json)
-    try:
-        data = json.loads(cst_json)
-    except json.JSONDecodeError as exc:
-        raise _host_utils_error(f"invalid JSON: {exc.msg}") from exc
-
-    stack: list[tuple[Any, int]] = [(data, 1)]
-    count = 0
-    while stack:
-        node, depth = stack.pop()
-        count += 1
-        if count > _HOST_UTILS_MAX_JSON_NODES:
-            raise _host_utils_error(
-                f"JSON node count exceeds {_HOST_UTILS_MAX_JSON_NODES}"
-            )
-        if depth > _HOST_UTILS_MAX_JSON_DEPTH:
-            raise _host_utils_error(
-                f"JSON nesting depth exceeds {_HOST_UTILS_MAX_JSON_DEPTH}"
-            )
-        if isinstance(node, dict):
-            stack.extend((value, depth + 1) for value in node.values())
-        elif isinstance(node, list):
-            stack.extend((value, depth + 1) for value in node)
-    return data
+def _host_limits() -> dict[str, int]:
+    return {"max_bytes": _HOST_UTILS_MAX_JSON_BYTES, "max_depth": _HOST_UTILS_MAX_JSON_DEPTH,
+            "max_nodes": _HOST_UTILS_MAX_JSON_NODES, "max_trivia_types": _HOST_UTILS_MAX_TRIVIA_TYPES,
+            "max_trivia_type_bytes": _HOST_UTILS_MAX_TRIVIA_TYPE_BYTES,
+            "max_trivia_bytes": _HOST_UTILS_MAX_TRIVIA_BYTES}
 
 
 def _strip_trivia_impl(cst_json: str, trivia_types: list[str]) -> str:
-    """Remove trivia nodes from a bounded CST JSON document."""
-    _check_trivia_type_limits(trivia_types)
-    trivia_set = set(trivia_types)
-    data = _load_limited_cst_json(cst_json)
-    if not isinstance(data, dict):
-        return json.dumps(data, separators=(",", ":"), ensure_ascii=False)
-
-    results: dict[int, Any] = {}
-    stack: list[tuple[Any, bool]] = [(data, False)]
-    while stack:
-        node, visited = stack.pop()
-        if not isinstance(node, dict):
-            results[id(node)] = node
-            continue
-        if not visited:
-            stack.append((node, True))
-            children = node.get("children")
-            if isinstance(children, list):
-                stack.extend((child, False) for child in reversed(children))
-            continue
-        if node.get("type") in trivia_set:
-            results[id(node)] = None
-            continue
-        children = node.get("children")
-        if isinstance(children, list):
-            filtered = [
-                results[id(child)]
-                for child in children
-                if results.get(id(child)) is not None
-            ]
-            results[id(node)] = dict(node, children=filtered)
-        else:
-            results[id(node)] = node
-
-    result = results[id(data)]
-    return json.dumps(result, separators=(",", ":"), ensure_ascii=False)
+    from intentumdiff.rust_core import _c_abi_call
+    return json.dumps(_c_abi_call("host_strip_trivia", cst_json, trivia_types, _host_limits()),
+                      separators=(",", ":"), ensure_ascii=False)
 
 
 def _structural_hash_impl(cst_json: str) -> str:
-    """
-    Compute a structural hash of a CST node (JSON object).
-
-    Algorithm matches the engine: SHA-256, hex-encoded.
-      leaf:     sha256(type + ":" + text)
-      internal: sha256(type + "|" + "|".join(hash(child) for child in children))
-    """
-
-    data = _load_limited_cst_json(cst_json)
-    hashes: dict[int, str] = {}
-    stack: list[tuple[Any, bool]] = [(data, False)]
-    while stack:
-        node, visited = stack.pop()
-        if not isinstance(node, dict):
-            hashes[id(node)] = hashlib.sha256(str(node).encode()).hexdigest()
-            continue
-        children = node.get("children")
-        has_children = isinstance(children, list) and bool(children)
-        if has_children and not visited:
-            stack.append((node, True))
-            stack.extend((child, False) for child in reversed(children))
-            continue
-        # Accept BOTH key spellings (#49 item 2, latent bug): CST nodes carry
-        # type/text, but FullParse SemanticNode trees carry node_type/label — the
-        # old type/text-only reads hashed FullParse trees as all-blank SHAPE.
-        node_type = node.get("node_type") or node.get("type", "")
-        if has_children:
-            child_hashes = "|".join(hashes[id(c)] for c in children)
-            payload = f"{node_type}|{child_hashes}"
-        else:
-            text = node.get("label", node.get("text", ""))
-            payload = f"{node_type}:{text}"
-        hashes[id(node)] = hashlib.sha256(payload.encode()).hexdigest()
-    return hashes[id(data)]
+    from intentumdiff.rust_core import _c_abi_call
+    return _c_abi_call("host_structural_hash", cst_json, _host_limits())
 
 
 def _log_impl(level: str, message: str) -> None:

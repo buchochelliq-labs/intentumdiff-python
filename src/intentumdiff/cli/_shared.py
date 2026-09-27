@@ -336,7 +336,7 @@ def _render_terminal(diff: SemanticDiff) -> None:
         elif diff.is_fallback:
             state_style = "yellow"
             state_title = "Token fallback used"
-            state_message = "Parse errors were detected, so IntentumDiff used token-level fallback."
+            state_message = "Semantic analysis was unavailable; source changes are shown for review."
         _console.print(
             Panel(
                 state_message,

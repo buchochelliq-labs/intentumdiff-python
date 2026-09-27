@@ -229,22 +229,14 @@ def test_strict_rust_gate_allows_commit_batch_decline_to_native(monkeypatch) -> 
     assert all(not d.is_fallback for d in diffs)
 
 
-def test_strict_rust_gate_blocks_token_fallback(monkeypatch) -> None:
+def test_strict_rust_gate_accepts_rust_source_fallback(monkeypatch) -> None:
+    from contextlib import closing
     monkeypatch.setenv(STRICT_GATE_ENV, "1")
-
-    with pytest.raises(
-        RuntimeError,
-        match=(
-            r"Rust-only engine gate prevented fallback: "
-            "parse errors require Rust token-level fallback"
-        ),
-    ):
-        SemanticDiffer(DiffConfig(experimental_rust_core=False)).diff_strings(
-            "def broken(",
-            "def broken(",
-            "broken.py",
-            language_hint="python",
-        )
+    with closing(SemanticDiffer(DiffConfig())) as differ:
+        diff = differ.diff_strings("def broken(", "def broken(x", "broken.py", language_hint="python")
+    assert diff.is_fallback
+    assert diff.metadata["engine_owner"] == "rust"
+    assert diff.has_semantic_changes
 
 
 def _strict_gate_enabled() -> bool:

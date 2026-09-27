@@ -100,22 +100,13 @@ from intentumdiff._differ_presentation import (
     _has_error_node as _has_error_node,
 )
 from intentumdiff._differ_presentation import (
-    _is_markdown_filename as _is_markdown_filename,
-)
-from intentumdiff._differ_presentation import (
     _is_named_entity_node as _is_named_entity_node,
-)
-from intentumdiff._differ_presentation import (
-    _markdown_section_body_hashes as _markdown_section_body_hashes,
 )
 from intentumdiff._differ_presentation import (
     _markdown_section_heading_rename_presentation as _markdown_section_heading_rename_presentation,
 )
 from intentumdiff._differ_presentation import (
     _markdown_section_move_presentation as _markdown_section_move_presentation,
-)
-from intentumdiff._differ_presentation import (
-    _markdown_sections as _markdown_sections,
 )
 from intentumdiff._differ_presentation import (
     _node_to_dict as _node_to_dict,
@@ -139,13 +130,7 @@ from intentumdiff._differ_presentation import (
     _validate_tree_ids as _validate_tree_ids,
 )
 from intentumdiff._differ_runtime import (
-    _ADDED_FILE_STATUSES as _ADDED_FILE_STATUSES,
-)
-from intentumdiff._differ_runtime import (
     _DEFAULT_PLUGIN_FUEL as _DEFAULT_PLUGIN_FUEL,
-)
-from intentumdiff._differ_runtime import (
-    _DELETED_FILE_STATUSES as _DELETED_FILE_STATUSES,
 )
 from intentumdiff._differ_runtime import (
     _EXPLICIT_FUEL_EXHAUSTION_TEST_CAP as _EXPLICIT_FUEL_EXHAUSTION_TEST_CAP,
@@ -238,6 +223,7 @@ from intentumdiff.rust_core import (
     apply_invariances,
     build_style_only_evidence,
     enrich_node_facts,
+    review_trees_equivalent,
     try_register_user_xml_dialects,
     try_rust_core_batch_diff,
     try_rust_core_batch_diffs,
@@ -1333,9 +1319,9 @@ class SemanticDiffer:
                 # routed finalize path below. This is a Rust→Rust transition (the
                 # routed path finalizes through the Rust core for every certified
                 # language), NOT a Python fallback, so the RUST_ONLY gate does NOT
-                # fire here. It fires only at the genuine token-level fallback sites
-                # (parse errors / finalize declined / rust core disabled), where the
-                # coarse Python token diff — the last non-Rust producer — takes over.
+                # fire here. Parse-error source comparison also runs in Rust;
+                # explicit core disabling and unexpected finalize declines still
+                # fail the strict gate.
                 logger.debug(
                     "Rust core batch declined for %r: %s; using routed finalize",
                     filename,
@@ -1398,6 +1384,21 @@ class SemanticDiffer:
                         "(DiffConfig.max_cst_bytes). Increase the limit or switch "
                         "to a full-parse plugin."
                     )
+
+            # Inspect raw CST before trivia equivalence can hide incomplete edits.
+            from intentumdiff.rust_core import parse_errors_present
+            if self._config.fallback_to_token_diff and (
+                parse_errors_present(old_raw, old_cst_json, language)
+                or parse_errors_present(new_raw, new_cst_json, language)
+            ):
+                diagnostics.record(stage="fallback", action="source_fallback",
+                    rule_id="pipeline.source_fallback", reason="incomplete or invalid syntax")
+                fallback_diff = _token_fallback_diff(old_raw, new_raw, filename,
+                    new_filename if new_filename is not None else filename, language,
+                    metadata={"diagnostics": diagnostics.snapshot()} if diagnostics.enabled else None)
+                fallback_diff = _apply_file_lifecycle_to_diff(fallback_diff, file_lifecycle)
+                return apply_guardrails_to_diff(fallback_diff, old_tree=None, new_tree=None,
+                    old_source=old_raw, new_source=new_raw, config=self._config, diagnostics=diagnostics)
 
             # ── 5. Trivia stripping ───────────────────────────────────────────
             with profiler.phase("trivia_stripping"):
@@ -1661,17 +1662,16 @@ class SemanticDiffer:
                 "new_nodes": _count_semantic_nodes(new_tree),
             },
         )
-        # ── 8.5. Token-level fallback for severe parse errors ───────────────
+        # ── 8.5. Rust source fallback for severe parse errors ───────────────
         # When tree-sitter produced ERROR nodes and fallback is enabled, skip
-        # the GumTree algorithm and return a coarse token-level diff instead.
+        # semantic matching and preserve the changed source range in Rust.
         if self._config.fallback_to_token_diff and (
             _has_error_node(old_tree) or _has_error_node(new_tree)
         ):
             logger.warning(
-                "Parse errors detected in %r - falling back to token-level diff",
+                "Parse errors detected in %r - using Rust source fallback",
                 filename,
             )
-            _raise_rust_only_gate_error("parse errors require Rust token-level fallback")
             diagnostics.record(
                 stage="fallback",
                 action="token_fallback",
@@ -1766,6 +1766,13 @@ class SemanticDiffer:
                     collect_trace=diagnostics.enabled,
                 )
             if finalize_result is not None:
+                if finalize_result.get("fallback_diff") is not None:
+                    fallback_diff = finalize_result["fallback_diff"].model_copy(update={
+                        "old_filename": filename,
+                        "new_filename": new_filename if new_filename is not None else filename})
+                    fallback_diff = _apply_file_lifecycle_to_diff(fallback_diff, file_lifecycle)
+                    return apply_guardrails_to_diff(fallback_diff, old_tree=None, new_tree=None,
+                        old_source=old_raw, new_source=new_raw, config=self._config, diagnostics=diagnostics)
                 diagnostics.record(
                     stage="finalize",
                     action="rust_finalize_review",
@@ -1872,35 +1879,16 @@ class SemanticDiffer:
                     # its own suppressions, which the replacement just discarded.
                     if not fin_changes:
 
-                        def _generic_norm(node: SemanticNode) -> tuple[Any, ...]:
-                            label = " ".join(node.label.split())
-                            return (
-                                node.node_type,
-                                label,
-                                tuple(_generic_norm(c) for c in node.children),
-                            )
-
                         fin_is_style_only = (
                             old_content == new_content
-                            or _generic_norm(old_tree) == _generic_norm(new_tree)
+                            or review_trees_equivalent(old_tree, new_tree)
                         )
-                # Stage-12 style-only resolution, language-agnostic (markdown #44 exposed
-                # it): ZERO surviving changes with identical (or whitespace-collapsed
-                # tree-equal) sources is a style-only diff for every routed language —
-                # the Rust finalize's flag only reflects its own suppressions.
+                # Generic presentation may replace the final change list. Core still
+                # owns the equivalence decision; Python only marshals the trees.
                 if not fin_changes and not fin_is_style_only:
-
-                    def _routed_norm(node: SemanticNode) -> tuple[Any, ...]:
-                        label = " ".join(node.label.split())
-                        return (
-                            node.node_type,
-                            label,
-                            tuple(_routed_norm(c) for c in node.children),
-                        )
-
                     fin_is_style_only = (
                         old_content == new_content
-                        or _routed_norm(old_tree) == _routed_norm(new_tree)
+                        or review_trees_equivalent(old_tree, new_tree)
                     )
                 metadata_fin: dict[str, Any] = {
                     "engine_owner": "rust",
@@ -1980,7 +1968,7 @@ class SemanticDiffer:
             # transitional python pipeline is retired (issue #57 payoff, stage 4b) —
             # degrade honestly to the coarse token-level diff, same as parse errors.
             logger.warning(
-                "Rust finalize declined for %r (%s) — token-level fallback",
+                "Rust finalize declined for %r (%s) — Rust source fallback",
                 filename,
                 language,
             )
@@ -2028,7 +2016,7 @@ class SemanticDiffer:
         # transitional python pipeline is retired (issue #57 payoff) — semantic
         # diffing REQUIRES the Rust core; degrade honestly to the token-level diff.
         logger.warning(
-            "Rust core disabled for %r — token-level fallback (python pipeline retired)",
+            "Rust core disabled for %r — Rust source fallback (python pipeline retired)",
             filename,
         )
         _raise_rust_only_gate_error("rust core disabled")

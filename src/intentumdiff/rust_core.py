@@ -308,21 +308,10 @@ def _pyo3_extension_module_name() -> str | None:
 
 
 def _load_backend() -> Any:
-    # Backend selection (Phase B / #82). The C ABI (`intentumdiff_call`) is the language-agnostic
-    # boundary; the PyO3 extension is the transitional in-process fast path. Order:
-    #   1. explicit override — `INTENTUMDIFF_RUST_CORE_CTYPES=1` forces the pure-ctypes proxy,
-    #      `INTENTUMDIFF_RUST_CORE_PYO3=1` forces PyO3.
-    #   2. auto — PyO3 when a compiled extension module is present (dev/maturin build; direct calls
-    #      are faster); otherwise the pure-ctypes proxy over the cdylib (the PyO3-free wheel).
-    if os.getenv("INTENTUMDIFF_RUST_CORE_CTYPES", "").strip() == "1":
-        return _ctypes_backend()
-    force_pyo3 = os.getenv("INTENTUMDIFF_RUST_CORE_PYO3", "").strip() == "1"
-    module_name = _pyo3_extension_module_name()
-    if module_name is not None:
-        return importlib.import_module(module_name)
-    if force_pyo3:
-        raise ModuleNotFoundError("intentumdiff_rust_core PyO3 extension (INTENTUMDIFF_RUST_CORE_PYO3=1)")
+    # Maturin packages a plain C-ABI cdylib. A .so suffix does not make it
+    # a Python extension; importing it would require a nonexistent PyInit export.
     return _ctypes_backend()
+
 
 
 # ── Stateless C-ABI accessor (intentumdiff_call) ───────────────────────────────────────────────
@@ -749,6 +738,7 @@ def try_rust_finalize_review(
                 "min_similarity": config.min_similarity,
                 "max_nodes": config.max_nodes,
                 "collect_trace": collect_trace,
+                "fallback_to_token_diff": config.fallback_to_token_diff,
             }
         )
         data = json.loads(
@@ -764,6 +754,7 @@ def try_rust_finalize_review(
         if not isinstance(data, dict) or not data.get("used"):
             return None
         return {
+            "fallback_diff": SemanticDiff.model_validate(data["fallback_diff"]) if data.get("fallback_diff") else None,
             "changes": [Change.model_validate(item) for item in data.get("changes") or []],
             "change_groups": [
                 ChangeGroup.model_validate(item) for item in data.get("change_groups") or []
@@ -784,6 +775,31 @@ def try_rust_finalize_review(
     except Exception as exc:  # noqa: BLE001 - strangler boundary must fall back.
         logger.debug("Rust finalize review unavailable: %s", exc, exc_info=True)
         return None
+
+
+def source_fallback_diff(old: str, new: str, old_filename: str, new_filename: str,
+                         language: str, reason: str = "parse_errors") -> SemanticDiff:
+    """Shared source comparison; Python only marshals the C ABI."""
+    return SemanticDiff.model_validate_json(_load_backend().source_fallback_diff_json(
+        old, new, old_filename, new_filename, language, reason))
+
+
+def parse_errors_present(source: str, tree_json: str, language: str) -> bool:
+    return bool(json.loads(_load_backend().parse_errors_present_json(source, tree_json, language)))
+
+
+def enrich_literal_labels(tree: SemanticNode, source: str) -> SemanticNode:
+    """Source-label enrichment owned by the shared Rust engine."""
+    return SemanticNode.model_validate_json(
+        _load_backend().enrich_literal_labels_json(tree.model_dump_json(), source)
+    )
+
+
+def review_trees_equivalent(old_tree: SemanticNode, new_tree: SemanticNode) -> bool:
+    """Ask core for conservative review equivalence, including literal whitespace."""
+    return bool(json.loads(_load_backend().review_trees_equivalent_json(
+        old_tree.model_dump_json(), new_tree.model_dump_json()
+    )))
 
 
 def try_rust_profile_label_enrichment(

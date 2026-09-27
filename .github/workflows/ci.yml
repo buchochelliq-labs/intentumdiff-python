@@ -120,6 +120,17 @@ jobs:
         continue-on-error: true
         run: python scripts/diagnose_platform.py
 
+      - name: Compare native Rust and public Python migration corpus
+        if: env.HAS_SPLIT_TOKEN == 'true'
+        shell: bash
+        run: |
+          cargo build --manifest-path build/intentumdiff-core/crates/rust-core-host/Cargo.toml --example migration_probe
+          probe=build/intentumdiff-core/crates/rust-core-host/target/debug/examples/migration_probe
+          if [ -f "$probe.exe" ]; then probe="$probe.exe"; fi
+          python scripts/check_migration_parity.py --core-dir build/intentumdiff-core --native "$probe" --wasm-dir src/intentumdiff/wasm
+        env:
+          INTENTUMDIFF_ALLOW_VULNERABLE_WASMTIME: "1"
+
       - name: Run the full unit suite
         if: env.HAS_SPLIT_TOKEN == 'true'
         run: python -m pytest tests/unit -q
