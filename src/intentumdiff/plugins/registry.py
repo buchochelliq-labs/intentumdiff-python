@@ -46,7 +46,7 @@ from intentumdiff.plugins.adapter import (
     ParserAdapter,
     RendererAdapter,
 )
-from intentumdiff.plugins.exceptions import PluginFuelExhausted, PluginNotFoundError, PluginLoadError
+from intentumdiff.plugins.exceptions import PluginFuelExhausted, PluginNotFoundError, PluginLoadError, PluginSandboxViolation, PluginSecurityError
 from intentumdiff.plugins.language_metadata import fallback_language_info
 from intentumdiff.plugins.loader import LoadedPlugin, load_plugin
 
@@ -525,6 +525,21 @@ class PluginRegistry:
                     self._parser_load_errors.extend(load_errors)
         return self._parser_catalog
 
+    @staticmethod
+    def _catalog_descriptors(entries):
+        descriptors = []
+        for entry in entries:
+            metadata = [_fallback_info_for_catalog(entry, language) for language in entry.language_guesses]
+            descriptors.append({
+                "id": entry.resolved_path,
+                "aliases": [entry.plugin_id, *entry.entry_names],
+                "languages": list(entry.language_guesses),
+                "filenames": [info.default_filename for info in metadata],
+                "extensions": [extension for info in metadata for extension in info.language_file_extensions],
+                "priority": 0,  # Discovery metadata has no declared priority; ignore cache warmth.
+            })
+        return descriptors
+
     def _candidate_entries(
         self,
         filename: str,
@@ -539,17 +554,7 @@ class PluginRegistry:
             import json
             from intentumdiff.rust_core import _required_engine_json
 
-            descriptors = []
-            for entry in entries:
-                metadata = [_fallback_info_for_catalog(entry, language) for language in entry.language_guesses]
-                descriptors.append({
-                    "id": entry.resolved_path,
-                    "aliases": [entry.plugin_id, *entry.entry_names],
-                    "languages": list(entry.language_guesses),
-                    "filenames": [info.default_filename for info in metadata],
-                    "extensions": [extension for info in metadata for extension in info.language_file_extensions],
-                    "priority": 0,  # Discovery metadata has no declared priority; ignore cache warmth.
-                })
+            descriptors = self._catalog_descriptors(entries)
             indices = _required_engine_json("parser_candidate_shortlist", json.dumps({
                 "entries": descriptors,
                 "query": {"filename": filename, "language_hint": language_hint, "plugin_id": plugin_id, "candidates": candidates or []},
@@ -614,111 +619,53 @@ class PluginRegistry:
 
         Raises ``PluginNotFoundError`` if no parser can handle the file.
         """
-        allowed = self._config.allowed_plugins
+        import json
+        from intentumdiff.rust_core import _required_engine_json
 
-        if plugin_id:
-            for entry in self._candidate_entries(
-                filename,
-                language_hint=language_hint,
-                plugin_id=plugin_id,
-                phase_recorder=phase_recorder,
-            ):
+        entries = self._catalog(phase_recorder)
+        request = {"entries": self._catalog_descriptors(entries), "filename": filename,
+                   "content": content, "language_hint": language_hint, "plugin_id": plugin_id,
+                   "strict": self._config.strict_plugins, "allowed_plugins": self._config.allowed_plugins}
+        events = []
+        parsers = {}
+        errors = {}
+        while True:
+            with _record_phase(phase_recorder, "parser_candidate_shortlist"):
+                action = _required_engine_json("filename_selection_next", json.dumps({
+                    "request": request, "events": events,
+                }), result_type=dict)
+            kind = action["kind"]
+            if kind == "load":
+                index = action["index"]
                 try:
-                    parser = self._load_catalog_entry(entry, phase_recorder=phase_recorder)
-                    if allowed is not None and parser.grammar_id not in allowed:
-                        continue
-                    if language_hint:
-                        if language_hint in parser.language_ids:
-                            return parser, language_hint
-                        continue
+                    parser = self._load_catalog_entry(entries[index], phase_recorder=phase_recorder)
+                    event = {"kind": "loaded", "index": index, "grammar_id": parser.grammar_id,
+                             "languages": list(parser.language_ids), "priority": parser.priority}
+                    parsers[index] = parser
+                except Exception as exc:
+                    errors[len(events)] = exc
+                    event = {"kind": "load_failed", "index": index,
+                             "terminal": isinstance(exc, (PluginFuelExhausted, PluginSandboxViolation, PluginSecurityError))}
+                events.append(event)
+            elif kind == "probe":
+                index = action["index"]
+                try:
                     with _record_phase(phase_recorder, "parser_plugin_language_detection"):
-                        lang = parser.detect_language(filename, content[:2048])
-                    if lang:
-                        return parser, lang
-                except PluginFuelExhausted:
-                    # Terminal, never a skip. Fuel exhaustion (now possible during
-                    # instantiation since the wasmtime 47 binding) means THIS plugin hit
-                    # the user's CPU cap — trying the next candidate would either
-                    # mis-parse the file or dress the fuel problem up as
-                    # PluginNotFoundError('unknown'). The whole point of the fuel
-                    # contract is to fail explicitly rather than degrade silently.
-                    raise
+                        language = parsers[index].detect_language(filename, action["sample"])
+                    event = {"kind": "probed", "index": index, "language": language}
                 except Exception as exc:
-                    logger.debug(
-                        "Skipping parser candidate %s after load failure: %s",
-                        ",".join(entry.entry_names),
-                        exc,
-                    )
-                    continue
-            raise PluginNotFoundError(plugin_id, filename)
-
-        if language_hint:
-            for entry in self._candidate_entries(
-                filename,
-                language_hint=language_hint,
-                phase_recorder=phase_recorder,
-            ):
-                try:
-                    parser = self._load_catalog_entry(entry, phase_recorder=phase_recorder)
-                except PluginFuelExhausted:
-                    # Terminal, never a skip. Fuel exhaustion (now possible during
-                    # instantiation since the wasmtime 47 binding) means THIS plugin hit
-                    # the user's CPU cap — trying the next candidate would either
-                    # mis-parse the file or dress the fuel problem up as
-                    # PluginNotFoundError('unknown'). The whole point of the fuel
-                    # contract is to fail explicitly rather than degrade silently.
-                    raise
-                except Exception as exc:
-                    logger.debug(
-                        "Skipping parser candidate %s after load failure: %s",
-                        ",".join(entry.entry_names),
-                        exc,
-                    )
-                    continue
-                if allowed is not None and parser.grammar_id not in allowed:
-                    continue
-                if language_hint in parser.language_ids:
-                    return parser, language_hint
-                if language_hint in entry.language_guesses and "generic" in parser.language_ids:
-                    return parser, language_hint
-            if self._config.strict_plugins:
-                raise PluginNotFoundError(language_hint, filename)
-
-        primary_entries = self._candidate_entries(filename, phase_recorder=phase_recorder)
-        matched_paths: set[str] = set()
-        for entries in (
-            primary_entries,
-            [entry for entry in self._catalog() if entry not in primary_entries],
-        ):
-            for entry in entries:
-                if entry.resolved_path in matched_paths:
-                    continue
-                matched_paths.add(entry.resolved_path)
-                try:
-                    parser = self._load_catalog_entry(entry, phase_recorder=phase_recorder)
-                except PluginFuelExhausted:
-                    # Terminal, never a skip. Fuel exhaustion (now possible during
-                    # instantiation since the wasmtime 47 binding) means THIS plugin hit
-                    # the user's CPU cap — trying the next candidate would either
-                    # mis-parse the file or dress the fuel problem up as
-                    # PluginNotFoundError('unknown'). The whole point of the fuel
-                    # contract is to fail explicitly rather than degrade silently.
-                    raise
-                except Exception as exc:
-                    logger.debug(
-                        "Skipping parser candidate %s after load failure: %s",
-                        ",".join(entry.entry_names),
-                        exc,
-                    )
-                    continue
-                if allowed is not None and parser.grammar_id not in allowed:
-                    continue
-                with _record_phase(phase_recorder, "parser_plugin_language_detection"):
-                    lang = parser.detect_language(filename, content[:2048])
-                if lang:
-                    return parser, lang
-            if entries is primary_entries and primary_entries:
+                    errors[len(events)] = exc
+                    event = {"kind": "probe_failed", "index": index}
+                events.append(event)
+            elif kind == "selected":
+                return parsers[action["index"]], action["language"]
+            elif kind == "failure":
+                raise errors[action["event"]]
+            elif kind == "not_found":
+                missing = action["identity"]
                 break
+            else:
+                raise RuntimeError(f"Invalid Rust filename selection action: {kind!r}")
 
         excluded = unavailable_parser_for(filename)
         if excluded is not None:
@@ -732,7 +679,7 @@ class PluginRegistry:
                 "%s. This file falls back to token-level diffing.",
                 filename, platform.system(), platform.machine(), name, reason,
             )
-        raise PluginNotFoundError("unknown", filename)
+        raise PluginNotFoundError(missing, filename)
 
     def detect_by_content(
         self,

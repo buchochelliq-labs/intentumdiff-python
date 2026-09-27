@@ -129,7 +129,7 @@ jobs:
           if [ -f "$probe.exe" ]; then probe="$probe.exe"; fi
           python scripts/check_migration_parity.py --core-dir build/intentumdiff-core --native "$probe" --wasm-dir src/intentumdiff/wasm
           export INTENTUMDIFF_NATIVE_PROBE="$probe"
-          python -m pytest tests/unit/test_detect.py tests/unit/test_shared_content_detection.py tests/unit/test_shared_cache_filtering.py tests/unit/test_shared_patch_source.py tests/unit/test_deletion_ignore_evidence.py tests/unit/test_lazy_parser_registry.py tests/unit/test_lsp_enricher.py tests/unit/test_shared_guardrail_policy.py tests/unit/test_content_type.py tests/unit/test_shared_reference_resolution.py tests/unit/test_routed_review.py tests/unit/test_diffignore.py -q
+          python -m pytest tests/unit/test_shared_filename_selection.py tests/unit/test_detect.py tests/unit/test_shared_content_detection.py tests/unit/test_shared_cache_filtering.py tests/unit/test_shared_patch_source.py tests/unit/test_deletion_ignore_evidence.py tests/unit/test_lazy_parser_registry.py tests/unit/test_lsp_enricher.py tests/unit/test_shared_guardrail_policy.py tests/unit/test_content_type.py tests/unit/test_shared_reference_resolution.py tests/unit/test_routed_review.py tests/unit/test_diffignore.py -q
         env:
           INTENTUMDIFF_ALLOW_VULNERABLE_WASMTIME: "1"
 
