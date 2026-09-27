@@ -582,6 +582,11 @@ class CommitDiffer:
         Re-uses the ``SemanticDiffer`` parser pipeline so both FullParse and
         host-CST parser plugins can participate in commit-wide symbol indexing.
         """
+        # Match the existing source-diff and native Rust empty-side contract. Some
+        # parsers reject empty input; that is not a missing symbol-table failure.
+        if not content:
+            from intentumdiff._differ_presentation import _empty_semantic_tree
+            return _empty_semantic_tree(language)
         try:
             tree, _language = self._differ.parse(
                 content,
