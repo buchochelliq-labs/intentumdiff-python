@@ -69,8 +69,13 @@ def test_guardrail_application_cannot_pass_on_engine_failure(tmp_path, monkeypat
                         position=NodePosition(start_line=0, start_col=0, end_line=0, end_col=2),
                         structural_hash='x')
     diff = SemanticDiff(old_filename='data.json', new_filename='data.json', language='json', changes=[])
-    monkeypatch.setattr(rust_core, '_load_backend', lambda: SimpleNamespace())
-    with pytest.raises(RuntimeError, match='evaluate_guardrail_rules_json'):
+    original_call = rust_core._c_abi_call
+    def fail_application(operation, *args):
+        if operation == 'apply_guardrail_policy':
+            raise RuntimeError('apply_guardrail_policy engine failed')
+        return original_call(operation, *args)
+    monkeypatch.setattr(rust_core, '_c_abi_call', fail_application)
+    with pytest.raises(RuntimeError, match='apply_guardrail_policy'):
         apply_guardrails_to_diff(diff, old_tree=tree, new_tree=tree,
                                 old_source='{}', new_source='{}',
                                 config=DiffConfig(guardrails_enabled=True, guardrail_policy_path=policy))

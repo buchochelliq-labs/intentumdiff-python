@@ -141,12 +141,13 @@ class SemanticIndex:
         refs = self._references.get(name, [])
         if not resolve:
             return refs
-        # Attach resolved definition when the match is unambiguous.
-        defs = self.find_definition(name)
-        resolved = defs[0] if len(defs) == 1 else None
-        return [
-            ref.model_copy(update={"resolved_definition": resolved}) for ref in refs
-        ]
+        from intentumdiff.rust_core import _c_abi_call
+        result = _c_abi_call(
+            "resolve_references",
+            json.dumps([definition.model_dump(mode="json") for definition in self._symbols.get(name, [])]),
+            json.dumps([reference.model_dump(mode="json") for reference in refs]),
+        )
+        return [ReferenceUsage.model_validate(reference) for reference in result]
 
     # ------------------------------------------------------------------
     # Serialisation helpers (feed the native index-engine primitives)
