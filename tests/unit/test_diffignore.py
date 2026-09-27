@@ -24,10 +24,7 @@ from intentumdiff.core.diffignore import DIFFIGNORE_FILENAME, DiffIgnore, load_d
 
 def _make_diffignore(patterns: str) -> DiffIgnore:
     """Build a :class:`DiffIgnore` directly from a pattern string (no file I/O)."""
-    import pathspec
-
-    spec = pathspec.PathSpec.from_lines("gitignore", patterns.splitlines())
-    return DiffIgnore(spec)
+    return DiffIgnore(patterns)
 
 
 def _make_stub_differ():
@@ -220,3 +217,31 @@ class TestIndexerDiffignoreIntegration:
         assert result.files_ignored == 2
         assert set(result.ignored_files) == {"b.py", "c.py"}
         assert result.files_indexed == 1
+
+
+def test_cannot_reinclude_child_of_excluded_directory():
+    assert _make_diffignore("build/\n!build/keep.py\n").is_ignored("build/keep.py")
+
+
+def test_source_judged_ignore_corpus():
+    import json
+    import os
+    import subprocess
+    cases = json.loads((Path(__file__).parents[1] / "fixtures/ignore_rules.json").read_text(encoding="utf-8"))
+    for case in cases:
+        root = next(file["content"] for file in case["files"] if file["directory"] == "")
+        nested = {file["directory"]:file["content"] for file in case["files"] if file["directory"]}
+        actual = DiffIgnore(root, directory_rules=nested).is_ignored(case["path"])
+        assert actual is case["expected"], case["name"]
+        if probe := os.environ.get("INTENTUMDIFF_NATIVE_PROBE"):
+            native = json.loads(subprocess.run([probe], input=json.dumps({"handler":"match_ignore_rules",**case}), text=True, encoding="utf-8", capture_output=True, check=True).stdout)
+            assert native is actual, case["name"]
+
+
+def test_required_ignore_engine_failure_propagates(monkeypatch):
+    from intentumdiff import rust_core
+    def failed():
+        raise RuntimeError("missing engine")
+    monkeypatch.setattr(rust_core, "_load_backend", failed)
+    with pytest.raises(RuntimeError, match="missing engine"):
+        DiffIgnore("*.log")
