@@ -17,9 +17,7 @@ repository snapshot (or any other collection of files).  It provides:
 The heavy lifting (symbol-table + reference-table extraction) is delegated to
 the Rust core (``index-engine-lib``, via the native ``build_symbol_table_json``
 / ``build_reference_table_json`` entrypoints). Rust is authoritative — the
-former pure-Python extraction mirror was deleted (#91); without the core the
-tables are simply empty ("if Python didn't exist, the engine still lives in
-Rust"). Cross-file diffing lives in ``intentumdiff.analysis.cross_file``, also a
+former pure-Python extraction mirror was deleted (#91); engine failures raise instead of manufacturing empty tables. Cross-file diffing lives in ``intentumdiff.analysis.cross_file``, also a
 thin wrapper over the same Rust core.
 """
 
@@ -81,24 +79,23 @@ class SemanticIndex:
         Rust-authoritative (#91): extraction runs in the native
         ``build_symbol_table_json`` / ``build_reference_table_json`` entrypoints
         (the same code the index-engine Wasm plugin wraps). The former Python
-        extraction mirror was deleted. When the core is unavailable the tables
-        stay empty rather than falling back — "if Python didn't exist, the
-        engine still lives in Rust".
+        extraction mirror was deleted. Required engine failures raise. Both tables are published atomically
+        only after successful engine calls and DTO validation.
         """
         from intentumdiff.rust_core import (
             try_rust_build_reference_table,
             try_rust_build_symbol_table,
         )
 
-        self._symbols = {}
-        self._references = {}
         files_json = self.to_files_json()
         symbol_json = try_rust_build_symbol_table(files_json)
-        if symbol_json is not None:
-            self.load_symbol_table_json(symbol_json)
         reference_json = try_rust_build_reference_table(files_json)
-        if reference_json is not None:
-            self.load_reference_table_json(reference_json)
+        # Validate DTOs on a temporary index before publishing either table.
+        candidate = SemanticIndex()
+        candidate.load_symbol_table_json(symbol_json)
+        candidate.load_reference_table_json(reference_json)
+        self._symbols = candidate._symbols
+        self._references = candidate._references
         self._built = True
         return self
 
