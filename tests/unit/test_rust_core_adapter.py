@@ -87,6 +87,7 @@ def test_rust_core_incomplete_result_falls_back_to_python(monkeypatch: Any) -> N
     monkeypatch.setattr(SemanticDiffer, "_run_stages_1_to_11", _python_fallback)
     backend = SimpleNamespace(
         detect_content_type_json=rust_core._load_backend().detect_content_type_json,
+        parser_candidate_shortlist=rust_core._load_backend().parser_candidate_shortlist,
         version=lambda: "0.1.0",
         supports_language=lambda language: language == "python",
         diff_python_json=lambda *args: SemanticDiff(
@@ -809,6 +810,7 @@ def test_semantic_differ_uses_rust_batch_metadata(monkeypatch: Any) -> None:
 
     backend = SimpleNamespace(
         detect_content_type_json=rust_core._load_backend().detect_content_type_json,
+        parser_candidate_shortlist=rust_core._load_backend().parser_candidate_shortlist,
         version=lambda: "0.4.0",
         supports_language=lambda language: language == "python",
         diff_batch=diff_batch,
@@ -861,6 +863,7 @@ def test_semantic_differ_uses_rust_batch_for_changed_complete_output(
 
     backend = SimpleNamespace(
         detect_content_type_json=rust_core._load_backend().detect_content_type_json,
+        parser_candidate_shortlist=rust_core._load_backend().parser_candidate_shortlist,
         version=lambda: "0.4.0",
         supports_language=lambda language: language == "python",
         diff_batch=diff_batch,
@@ -1115,6 +1118,7 @@ def test_semantic_differ_batch_fallback_continues_python_pipeline(monkeypatch: A
     real_backend = rust_core._load_backend()
     backend = SimpleNamespace(
         detect_content_type_json=rust_core._load_backend().detect_content_type_json,
+        parser_candidate_shortlist=rust_core._load_backend().parser_candidate_shortlist,
         parse_errors_present_json=real_backend.parse_errors_present_json,
         source_fallback_diff_json=real_backend.source_fallback_diff_json,
         version=lambda: "0.4.0",

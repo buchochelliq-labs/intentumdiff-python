@@ -200,3 +200,55 @@ def test_relevant_parser_load_failure_is_reported() -> None:
     summary = registry.parser_load_failure_summary()
     assert summary is not None
     assert "boom" in summary
+
+
+def test_unknown_filename_still_places_generic_last():
+    registry = PluginRegistry(DiffConfig())
+    with (
+        patch("intentumdiff.plugins.registry.importlib.metadata.entry_points", return_value=[_entry("generic"), _entry("python")]),
+        patch("intentumdiff.plugins.registry._wasm_path_from_ep", side_effect=_wasm_path),
+    ):
+        selected = registry._candidate_entries("unknown.extension")
+    assert [entry.entry_names for entry in selected] == [["python"], ["generic"]]
+
+
+def test_shared_routing_corpus():
+    import json
+    import os
+    import subprocess
+    from pathlib import Path
+    from intentumdiff.rust_core import _required_engine_json
+    cases = json.loads((Path(__file__).parents[1] / "fixtures/parser_routing.json").read_text(encoding="utf-8"))
+    for case in cases:
+        indices = _required_engine_json("parser_candidate_shortlist", json.dumps(case), result_type=list)
+        assert [case["entries"][index]["id"] for index in indices] == case["expected"], case["name"]
+        if probe := os.environ.get("INTENTUMDIFF_NATIVE_PROBE"):
+            native = json.loads(subprocess.run([probe], input=json.dumps({"handler":"parser_candidate_shortlist",**case}), text=True, encoding="utf-8", capture_output=True, check=True).stdout)
+            assert native == indices, case["name"]
+
+
+def test_special_filename_produces_source_judged_diff():
+    import json
+    import os
+    import subprocess
+    from pathlib import Path
+    from intentumdiff import SemanticDiffer
+    root = Path(__file__).parents[2]
+    case = json.loads((root / "tests/fixtures/parser_special_filename.json").read_text(encoding="utf-8"))
+    actual = SemanticDiffer().diff_strings(case["old"], case["new"], case["filename"]).model_dump(mode="json")
+    assert actual["language"] == case["language"]
+    assert actual["has_semantic_changes"] is True
+    assert actual["is_style_only"] is False
+    assert len(actual["changes"]) == 1
+    change = actual["changes"][0]
+    assert change["change_type"] == "MODIFICATION"
+    assert change["old_node"]["label"] == case["old_label"]
+    assert change["new_node"]["label"] == case["new_label"]
+    if probe := os.environ.get("INTENTUMDIFF_NATIVE_PROBE"):
+        request = {**case, "repo": str(root), "wasm": str(root / "src/intentumdiff/wasm")}
+        native = json.loads(subprocess.run([probe], input=json.dumps(request), text=True, encoding="utf-8", capture_output=True, check=True).stdout)
+        # Native omits optional null fields; deserialize both into the public DTO.
+        from intentumdiff.core.models import SemanticDiff
+        native = SemanticDiff.model_validate(native).model_dump(mode="json")
+        for field in ("language", "changes", "change_groups", "has_semantic_changes", "is_style_only"):
+            assert native[field] == actual[field], field

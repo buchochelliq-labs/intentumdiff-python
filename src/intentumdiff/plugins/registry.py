@@ -536,31 +536,27 @@ class PluginRegistry:
     ) -> list[_ParserCatalogEntry]:
         with _record_phase(phase_recorder, "parser_candidate_shortlist"):
             entries = self._catalog(phase_recorder)
-            language_filter = set(candidates or [])
-            if language_hint:
-                language_filter.add(language_hint)
+            import json
+            from intentumdiff.rust_core import _required_engine_json
 
-            result: list[_ParserCatalogEntry] = []
+            descriptors = []
             for entry in entries:
-                if plugin_id is not None:
-                    if plugin_id == entry.plugin_id or plugin_id in entry.entry_names:
-                        result.append(entry)
-                    continue
-                if language_filter:
-                    if language_filter.intersection(entry.language_guesses):
-                        result.append(entry)
-                    continue
-                if _entry_matches_filename(entry, filename):
-                    result.append(entry)
-
-            if result or plugin_id is not None or language_filter:
-                # The generic parser is the designated FALLBACK: when a specific parser
-                # also matched the filename (CMakeLists.txt matches both generic's .txt
-                # and the cmake plugin), catalog order must not let generic claim the
-                # file first — it detect-claims everything.
-                result.sort(key=lambda e: "generic" in e.language_guesses)
-                return result
-            return list(entries)
+                metadata = [_fallback_info_for_catalog(entry, language) for language in entry.language_guesses]
+                descriptors.append({
+                    "id": entry.resolved_path,
+                    "aliases": [entry.plugin_id, *entry.entry_names],
+                    "languages": list(entry.language_guesses),
+                    "filenames": [info.default_filename for info in metadata],
+                    "extensions": [extension for info in metadata for extension in info.language_file_extensions],
+                    "priority": 0,  # Discovery metadata has no declared priority; ignore cache warmth.
+                })
+            indices = _required_engine_json("parser_candidate_shortlist", json.dumps({
+                "entries": descriptors,
+                "query": {"filename": filename, "language_hint": language_hint, "plugin_id": plugin_id, "candidates": candidates or []},
+            }), result_type=list)
+            if any(type(index) is not int or not 0 <= index < len(entries) for index in indices) or len(set(indices)) != len(indices):
+                raise RuntimeError("Rust parser shortlist returned invalid indices")
+            return [entries[index] for index in indices]
 
     def _load_catalog_entry(
         self,
@@ -991,26 +987,6 @@ def _fallback_info_for_catalog(
         plugin_version=entry.package_version,
     )
 
-
-def _entry_matches_filename(entry: _ParserCatalogEntry, filename: str) -> bool:
-    if not filename:
-        return False
-    name = Path(filename).name.lower()
-    full = filename.replace("\\", "/").lower()
-    for language_id in entry.language_guesses:
-        info = _fallback_info_for_catalog(entry, language_id)
-        if name == info.default_filename.lower() or full.endswith(
-            "/" + info.default_filename.lower()
-        ):
-            return True
-        for extension in info.language_file_extensions:
-            normalized = extension.lower()
-            if normalized.startswith("."):
-                if name.endswith(normalized):
-                    return True
-            elif name == normalized:
-                return True
-    return False
 
 
 def _discover_parser_catalog(
