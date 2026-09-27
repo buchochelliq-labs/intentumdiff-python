@@ -681,32 +681,34 @@ def try_rust_markdown_section_review(
         return None
 
 
-def try_rust_collect_hover_targets(
-    root: SemanticNode,
-) -> list[tuple[str, int, int]] | None:
-    """Collect LSP hover targets in the Rust core (issue 100 S2); None -> Python walk.
+def try_rust_collect_hover_targets(root: SemanticNode) -> list[tuple[str, int, int]]:
+    """Decode Rust-owned hover targets; required engine failures propagate.
 
-    Returns ``(result_node_id, line, col)`` triples mirroring
-    ``TypeEnricher._collect_hover_targets``: name-type leaves hover at their own
-    position; declaration/parameter nodes hover at their first name-leaf but store
-    under the declaration node's id.
+    The historical name is retained for compatibility. There is no Python walker.
     """
-    try:
-        backend = _load_backend()
-        collect_fn = getattr(backend, "lsp_collect_hover_targets_json", None)
-        if not callable(collect_fn):
-            return None
-        data = json.loads(collect_fn(root.model_dump_json()))
-        if not isinstance(data, list):
-            return None
-        return [
-            (str(item["id"]), int(item["line"]), int(item["col"]))
-            for item in data
-            if isinstance(item, dict)
-        ]
-    except Exception as exc:  # noqa: BLE001 - strangler boundary must fall back.
-        logger.debug("Rust hover-target collection unavailable: %s", exc, exc_info=True)
-        return None
+    data = _required_engine_json(
+        "lsp_collect_hover_targets_json", root.model_dump_json(), result_type=list,
+    )
+    return _hover_target_dtos(data)
+
+
+def collect_lsp_hover_targets(root: SemanticNode, source: str) -> list[tuple[str, int, int]]:
+    """Rust-owned selection and UTF-8 byte to UTF-16 protocol conversion."""
+    data = _required_engine_json(
+        "lsp_collect_utf16_hover_targets_json", root.model_dump_json(), source, result_type=list,
+    )
+    return _hover_target_dtos(data)
+
+
+def _hover_target_dtos(data: list[Any]) -> list[tuple[str, int, int]]:
+    targets = []
+    for item in data:
+        if (not isinstance(item, dict) or not isinstance(item.get("id"), str)
+                or type(item.get("line")) is not int or type(item.get("col")) is not int
+                or item["line"] < 0 or item["col"] < 0):
+            raise RuntimeError("Rust hover-target response has an invalid target DTO")
+        targets.append((item["id"], item["line"], item["col"]))
+    return targets
 
 
 def try_rust_finalize_review(
