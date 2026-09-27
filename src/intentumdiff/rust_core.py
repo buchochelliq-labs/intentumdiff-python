@@ -1,10 +1,7 @@
-"""Rust core host adapter.
+"""Thin transport adapter over the authoritative Rust engine's C ABI.
 
-Release wheels ship the first-party ``intentumdiff_rust_core`` PyO3 extension
-inside the public ``intentumdiff`` package, and supported native paths use it by
-default.  The Python pipeline remains the fallback correctness path for
-unsupported configs, missing native modules, and third-party/untrusted Wasm
-plugin scenarios.
+Maturin packages the cffi wheel. Python marshals public DTOs and host inputs;
+shared decisions belong to Rust, never a Python fallback correctness engine.
 """
 
 from __future__ import annotations
@@ -826,101 +823,43 @@ def try_rust_profile_label_enrichment(
         return None
 
 
-def try_rust_build_symbol_table(files_json: str) -> str | None:
-    """Symbol-table extraction in the Rust core (index-engine-lib, #91).
-
-    *files_json* is a JSON array of ``{filename, language, tree}`` entries.
-    Returns the SymbolTable JSON, or None when the backend/entrypoint is
-    unavailable or the core reports an ``{"error": ...}`` envelope. This is the
-    Rust-authoritative replacement for the retired Python symbol extraction and
-    the index-engine Wasm-adapter round-trip.
-    """
+def _required_engine_json(handler: str, *args: Any, result_type: type) -> Any:
+    """Marshal a required engine operation; failures cannot become empty success."""
     try:
-        backend = _load_backend()
-        build_fn = getattr(backend, "build_symbol_table_json", None)
-        if not callable(build_fn):
-            return None
-        result = build_fn(files_json)
-        parsed = json.loads(result)
-        if isinstance(parsed, dict) and "error" in parsed:
-            logger.debug("Rust build_symbol_table error: %s", parsed["error"])
-            return None
-        return result
-    except Exception as exc:  # noqa: BLE001 - engine boundary must degrade, not crash.
-        logger.debug("Rust build_symbol_table unavailable: %s", exc, exc_info=True)
-        return None
-
-
-def try_rust_build_reference_table(files_json: str) -> str | None:
-    """Reference-table extraction in the Rust core (index-engine-lib, #91).
-
-    Returns the ReferenceTable JSON, or None when the backend is unavailable or
-    the core reports an error envelope.
-    """
-    try:
-        backend = _load_backend()
-        build_fn = getattr(backend, "build_reference_table_json", None)
-        if not callable(build_fn):
-            return None
-        result = build_fn(files_json)
-        parsed = json.loads(result)
-        if isinstance(parsed, dict) and "error" in parsed:
-            logger.debug("Rust build_reference_table error: %s", parsed["error"])
-            return None
-        return result
-    except Exception as exc:  # noqa: BLE001 - engine boundary must degrade, not crash.
-        logger.debug("Rust build_reference_table unavailable: %s", exc, exc_info=True)
-        return None
-
-
-def try_rust_diff_symbol_tables(
-    old_json: str, new_json: str
-) -> list[dict[str, Any]] | None:
-    """Cross-file diff in the Rust core (index-engine-lib, #91).
-
-    *old_json* / *new_json* are serialised symbol tables. Returns the parsed
-    list of cross-file change dicts (MOVE_TO_MODULE / SPLIT_MODULE /
-    CROSS_FILE_RENAME), or None when the backend is unavailable or the core
-    reports an error envelope.
-    """
-    try:
-        backend = _load_backend()
-        diff_fn = getattr(backend, "diff_symbol_tables_json", None)
-        if not callable(diff_fn):
-            return None
-        result = json.loads(diff_fn(old_json, new_json))
+        operation = getattr(_load_backend(), handler, None)
+        if not callable(operation):
+            raise RuntimeError("required handler is unavailable")
+        result = json.loads(operation(*args))
         if isinstance(result, dict) and "error" in result:
-            logger.debug("Rust diff_symbol_tables error: %s", result["error"])
-            return None
+            raise RuntimeError(str(result["error"]))
+        if not isinstance(result, result_type):
+            raise ValueError(f"expected {result_type.__name__} result")
         return result
-    except Exception as exc:  # noqa: BLE001 - engine boundary must degrade, not crash.
-        logger.debug("Rust diff_symbol_tables unavailable: %s", exc, exc_info=True)
-        return None
+    except Exception as exc:
+        raise RuntimeError(f"Rust engine operation {handler} failed: {exc}") from exc
 
 
-def try_rust_evaluate_guardrail_rules(
-    request: dict[str, Any],
-) -> list[dict[str, Any]] | None:
-    """Guardrail rule evaluation in the Rust core (#91 A1.3b).
+def try_rust_build_symbol_table(files_json: str) -> str:
+    """Extract a symbol table in Rust, raising on unavailable or invalid results.
 
-    *request* carries the diff language/filenames, the old/new trees, the diff's
-    changed-node ids, and the parsed policy rules. The core matches protected paths
-    against the changes and returns the list of violation dicts. Returns None when
-    the backend/entrypoint is unavailable or reports an error envelope.
+    The historical function name is retained for compatibility; failure is never None.
     """
-    try:
-        backend = _load_backend()
-        eval_fn = getattr(backend, "evaluate_guardrail_rules_json", None)
-        if not callable(eval_fn):
-            return None
-        result = json.loads(eval_fn(json.dumps(request)))
-        if isinstance(result, dict) and "error" in result:
-            logger.debug("Rust evaluate_guardrail_rules error: %s", result["error"])
-            return None
-        return result
-    except Exception as exc:  # noqa: BLE001 - engine boundary must degrade, not crash.
-        logger.debug("Rust guardrail evaluation unavailable: %s", exc, exc_info=True)
-        return None
+    return json.dumps(_required_engine_json("build_symbol_table_json", files_json, result_type=dict))
+
+
+def try_rust_build_reference_table(files_json: str) -> str:
+    """Extract a reference table in Rust or raise an actionable engine error."""
+    return json.dumps(_required_engine_json("build_reference_table_json", files_json, result_type=dict))
+
+
+def try_rust_diff_symbol_tables(old_json: str, new_json: str) -> list[dict[str, Any]]:
+    """Compare symbol tables in Rust; an empty list means successful no-change."""
+    return _required_engine_json("diff_symbol_tables_json", old_json, new_json, result_type=list)
+
+
+def try_rust_evaluate_guardrail_rules(request: dict[str, Any]) -> list[dict[str, Any]]:
+    """Evaluate in Rust; engine failure must never report a passed guardrail."""
+    return _required_engine_json("evaluate_guardrail_rules_json", json.dumps(request), result_type=list)
 
 
 def load_project_diff_config_data(

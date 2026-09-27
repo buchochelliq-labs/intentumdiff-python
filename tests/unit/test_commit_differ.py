@@ -944,11 +944,11 @@ class TestParseToTree:
         result = cd._parse_to_tree("file.unknown", "unknown", "content")
         assert result is None
 
-    def test_returns_none_on_parse_exception(self):
+    def test_propagates_engine_parse_exception(self):
         cd = CommitDiffer()
         cd._differ._registry.detect_parser = MagicMock(side_effect=RuntimeError("boom"))
-        result = cd._parse_to_tree("file.py", "python", "def foo(): pass")
-        assert result is None
+        with pytest.raises(RuntimeError, match="boom"):
+            cd._parse_to_tree("file.py", "python", "def foo(): pass")
 
 
 # ---------------------------------------------------------------------------

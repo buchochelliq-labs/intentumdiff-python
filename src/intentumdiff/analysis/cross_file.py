@@ -32,8 +32,8 @@ def detect_cross_file_changes(
 
     Both indices must have had ``build()`` called first. The comparison itself
     is performed by the Rust core over the flat symbol tables; this function only
-    marshals the tables in and the change list back out. Returns an empty list
-    when the core is unavailable.
+    marshals the tables in and the change list back out. Raises when the core is unavailable or fails; an empty list means
+    the engine successfully found no cross-file changes.
     """
     from intentumdiff.rust_core import try_rust_diff_symbol_tables
 
@@ -45,8 +45,6 @@ def detect_cross_file_changes(
     )
 
     result = try_rust_diff_symbol_tables(old_json, new_json)
-    if result is None:
-        return []
 
     changes: list[CrossFileChange] = []
     for item in result:

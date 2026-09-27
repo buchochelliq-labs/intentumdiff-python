@@ -557,12 +557,9 @@ class CommitDiffer:
         """
         index = SemanticIndex()
         for filename, language, content in file_contents:
-            try:
-                tree = self._parse_to_tree(filename, language, content)
-                if tree is not None:
-                    index.add_tree(filename, language, tree)
-            except Exception as exc:
-                logger.debug("Could not parse %r for index: %s", filename, exc)
+            tree = self._parse_to_tree(filename, language, content)
+            if tree is not None:
+                index.add_tree(filename, language, tree)
 
         if not index._files:  # type: ignore[attr-defined]  # pylint: disable=protected-access
             return None
@@ -585,6 +582,11 @@ class CommitDiffer:
         Re-uses the ``SemanticDiffer`` parser pipeline so both FullParse and
         host-CST parser plugins can participate in commit-wide symbol indexing.
         """
+        # Match the existing source-diff and native Rust empty-side contract. Some
+        # parsers reject empty input; that is not a missing symbol-table failure.
+        if not content:
+            from intentumdiff._differ_presentation import _empty_semantic_tree
+            return _empty_semantic_tree(language)
         try:
             tree, _language = self._differ.parse(
                 content,
@@ -593,7 +595,4 @@ class CommitDiffer:
             )
             return tree
         except PluginNotFoundError:
-            return None
-        except Exception as exc:
-            logger.debug("parse_to_tree failed for %r: %s", filename, exc)
             return None

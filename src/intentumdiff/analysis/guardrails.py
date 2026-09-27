@@ -241,7 +241,7 @@ def _evaluate_policy_rules(
     semantic-path derivation. Python marshals the parsed policy + the diff's
     changed-node ids in and rebuilds GuardrailViolation objects out; the Python
     matching mirror (rule loop, ``_semantic_paths``, ``_node_value_summary``,
-    ``_file_matches``) was deleted. Returns ``[]`` when the core is unavailable.
+    ``_file_matches``) was deleted. Engine failures raise; only a successful empty result means no violations.
     """
     from intentumdiff.rust_core import try_rust_evaluate_guardrail_rules
 
