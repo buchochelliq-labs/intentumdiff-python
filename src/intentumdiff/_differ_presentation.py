@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import bisect
 import hashlib
 import json
 import logging
@@ -95,331 +94,28 @@ def _empty_semantic_tree(language: str) -> SemanticNode:
     )
 
 
-def _is_markdown_filename(filename: str) -> bool:
-    return filename.replace("\\", "/").lower().endswith(".md")
-
-
-def _markdown_sections(source: str, *, side: str) -> list[SemanticNode]:
-    lines = source.splitlines()
-    heading_indices = [
-        idx
-        for idx, line in enumerate(lines)
-        if line.startswith("#") and line.lstrip("#").startswith(" ")
-    ]
-    sections: list[SemanticNode] = []
-    for order, start in enumerate(heading_indices):
-        end = heading_indices[order + 1] if order + 1 < len(heading_indices) else len(lines)
-        text = "\n".join(lines[start:end]).strip()
-        if not text:
-            continue
-        digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
-        sections.append(
-            SemanticNode(
-                id=f"markdown-{side}-{order}",
-                node_type="markdown_section",
-                label=lines[start].strip(),
-                position=NodePosition(
-                    start_line=start,
-                    start_col=0,
-                    end_line=max(start, end - 1),
-                    end_col=len(lines[end - 1]) if end > start else len(lines[start]),
-                ),
-                structural_hash=digest,
-                children=[],
-            )
-        )
-    return sections
-
-
-def _markdown_section_body_hashes(source: str, *, side: str) -> dict[str, str]:
-    lines = source.splitlines()
-    heading_indices = [
-        idx
-        for idx, line in enumerate(lines)
-        if line.startswith("#") and line.lstrip("#").startswith(" ")
-    ]
-    hashes: dict[str, str] = {}
-    for order, start in enumerate(heading_indices):
-        end = heading_indices[order + 1] if order + 1 < len(heading_indices) else len(lines)
-        body = "\n".join(lines[start + 1 : end]).strip()
-        hashes[f"markdown-{side}-{order}"] = hashlib.sha256(body.encode("utf-8")).hexdigest()
-    return hashes
-
-
-def _markdown_section_move_presentation(
-    presented: PresentationResult,
-    *,
-    old_source: str,
-    new_source: str,
-    old_filename: str,
-    new_filename: str,
-) -> PresentationResult:
-    if not (_is_markdown_filename(old_filename) or _is_markdown_filename(new_filename)):
-        return presented
-
-    from intentumdiff.rust_core import try_rust_markdown_section_review
-
-    rust_review = try_rust_markdown_section_review(old_source, new_source)
-    if rust_review is not None:
-        moves = list(rust_review["moves"])
-        if not moves:
-            return presented
-        moved_labels = set(rust_review["moved_labels"])
-        filtered_changes = [
-            change
-            for change in presented.changes
-            if not (
-                change.change_type in {ChangeType.ADDITION, ChangeType.DELETION}
-                and (
-                    change.old_node is not None
-                    and change.old_node.label in moved_labels
-                    or change.new_node is not None
-                    and change.new_node.label in moved_labels
-                )
-            )
-        ]
-        groups = list(presented.change_groups)
-        if rust_review["move_group"] is not None:
-            groups.append(rust_review["move_group"])
-        return PresentationResult(
-            changes=[*filtered_changes, *moves],
-            change_groups=groups,
-            ignored_style_changes=presented.ignored_style_changes,
-        )
-
-    # Python fallback — mirror of the Rust stage.
-    old_sections = _markdown_sections(old_source, side="old")
-    new_sections = _markdown_sections(new_source, side="new")
-    old_by_hash: dict[str, list[tuple[int, SemanticNode]]] = {}
-    new_by_hash: dict[str, list[tuple[int, SemanticNode]]] = {}
-    for idx, node in enumerate(old_sections):
-        old_by_hash.setdefault(node.structural_hash, []).append((idx, node))
-    for idx, node in enumerate(new_sections):
-        new_by_hash.setdefault(node.structural_hash, []).append((idx, node))
-
-    unique_common = [
-        digest
-        for digest, old_matches in old_by_hash.items()
-        if len(old_matches) == 1 and len(new_by_hash.get(digest, [])) == 1
-    ]
-    old_relative_order = {
-        digest: order
-        for order, digest in enumerate(
-            sorted(unique_common, key=lambda item: old_by_hash[item][0][0])
-        )
-    }
-    new_relative_order = {
-        digest: order
-        for order, digest in enumerate(
-            sorted(unique_common, key=lambda item: new_by_hash[item][0][0])
-        )
-    }
-
-    # Insertion-shift discrimination (issue #15, mirroring the Rust LIS rule from issues
-    # #12/#32): sections whose RELATIVE order is preserved (longest increasing subsequence of
-    # new order walked in old order) are stationary anchors; only order-breaking sections
-    # move. A swap of two sections is ONE move, not two.
-    ordered_digests = sorted(unique_common, key=lambda item: old_relative_order[item])
-    sequence = [new_relative_order[digest] for digest in ordered_digests]
-    tails: list[int] = []
-    predecessors: dict[int, int | None] = {}
-    tail_indices: list[int] = []
-    for idx, value in enumerate(sequence):
-        pos = bisect.bisect_left([sequence[i] for i in tail_indices], value)
-        predecessors[idx] = tail_indices[pos - 1] if pos > 0 else None
-        if pos == len(tail_indices):
-            tail_indices.append(idx)
-        else:
-            tail_indices[pos] = idx
-    stationary: set[int] = set()
-    cursor: int | None = tail_indices[-1] if tail_indices else None
-    while cursor is not None:
-        stationary.add(cursor)
-        cursor = predecessors[cursor]
-    stationary_digests = {ordered_digests[idx] for idx in stationary}
-
-    moves: list[Change] = []
-    moved_labels: set[str] = set()
-    moved_old_ids: list[str] = []
-    moved_new_ids: list[str] = []
-    for digest in unique_common:
-        old_matches = old_by_hash[digest]
-        new_matches = new_by_hash[digest]
-        _old_idx, old_node = old_matches[0]
-        _new_idx, new_node = new_matches[0]
-        if old_relative_order[digest] == new_relative_order[digest]:
-            continue
-        if digest in stationary_digests:
-            continue
-        moves.append(
-            Change(
-                change_type=ChangeType.MOVE,
-                old_node=old_node,
-                new_node=new_node,
-                confidence=0.9,
-                description=f"Move Markdown section {old_node.label!r}",
-            )
-        )
-        moved_labels.add(old_node.label)
-        moved_old_ids.append(old_node.id)
-        moved_new_ids.append(new_node.id)
-
-    if not moves:
-        return presented
-
-    filtered_changes = [
-        change
-        for change in presented.changes
-        if not (
-            change.change_type in {ChangeType.ADDITION, ChangeType.DELETION}
-            and (
-                change.old_node is not None
-                and change.old_node.label in moved_labels
-                or change.new_node is not None
-                and change.new_node.label in moved_labels
-            )
-        )
-    ]
-    move_group = ChangeGroup(
-        kind=ChangeGroupKind.MOVED_CODE,
-        raw_change_indices=[],
-        old_labels=sorted(moved_labels),
-        new_labels=sorted(moved_labels),
-        old_node_ids=moved_old_ids,
-        new_node_ids=moved_new_ids,
-        confidence=0.9,
-        rule_id="presentation.markdown_section_move",
-        metadata={"moved_section_count": len(moves)},
-    )
+def _markdown_presentation(presented: PresentationResult, *, old_source: str, new_source: str,
+                           old_filename: str, new_filename: str, phase: str) -> PresentationResult:
+    """DTO adapter for complete Rust reconciliation; core errors propagate."""
+    from intentumdiff.rust_core import _c_abi_call
+    result = _c_abi_call("reconcile_markdown", {
+        "changes": [change.model_dump(mode="json") for change in presented.changes],
+        "change_groups": [group.model_dump(mode="json") for group in presented.change_groups],
+        "ignored_style_changes": presented.ignored_style_changes,
+    }, old_source, new_source, old_filename, new_filename, phase)
     return PresentationResult(
-        changes=[*filtered_changes, *moves],
-        change_groups=[*presented.change_groups, move_group],
-        ignored_style_changes=presented.ignored_style_changes,
+        changes=[Change.model_validate(value) for value in result["changes"]],
+        change_groups=[ChangeGroup.model_validate(value) for value in result["change_groups"]],
+        ignored_style_changes=result["ignored_style_changes"],
     )
 
 
-def _markdown_section_heading_rename_presentation(
-    presented: PresentationResult,
-    *,
-    old_source: str,
-    new_source: str,
-    old_filename: str,
-    new_filename: str,
-) -> PresentationResult:
-    if not (_is_markdown_filename(old_filename) or _is_markdown_filename(new_filename)):
-        return presented
+def _markdown_section_move_presentation(presented: PresentationResult, **kwargs: Any) -> PresentationResult:
+    return _markdown_presentation(presented, phase="moves", **kwargs)
 
-    from intentumdiff.rust_core import try_rust_markdown_section_review
 
-    rust_review = try_rust_markdown_section_review(old_source, new_source)
-    if rust_review is not None:
-        modifications = list(rust_review["renames"])
-        if not modifications:
-            return presented
-        old_heading_lines = set(rust_review["old_heading_lines"])
-        new_heading_lines = set(rust_review["new_heading_lines"])
-        filtered_changes = [
-            change
-            for change in presented.changes
-            if not (
-                change.change_type
-                in {ChangeType.ADDITION, ChangeType.DELETION, ChangeType.MODIFICATION}
-                and (
-                    change.old_node is not None
-                    and change.old_node.position.start_line in old_heading_lines
-                    or change.new_node is not None
-                    and change.new_node.position.start_line in new_heading_lines
-                )
-            )
-        ]
-        groups = list(presented.change_groups)
-        if rust_review["rename_group"] is not None:
-            groups.append(rust_review["rename_group"])
-        return PresentationResult(
-            changes=[*filtered_changes, *modifications],
-            change_groups=groups,
-            ignored_style_changes=presented.ignored_style_changes,
-        )
-
-    # Python fallback — mirror of the Rust stage.
-    old_sections = _markdown_sections(old_source, side="old")
-    new_sections = _markdown_sections(new_source, side="new")
-    old_body_hashes = _markdown_section_body_hashes(old_source, side="old")
-    new_body_hashes = _markdown_section_body_hashes(new_source, side="new")
-    old_by_body: dict[str, list[SemanticNode]] = {}
-    new_by_body: dict[str, list[SemanticNode]] = {}
-    for node in old_sections:
-        old_by_body.setdefault(old_body_hashes.get(node.id, ""), []).append(node)
-    for node in new_sections:
-        new_by_body.setdefault(new_body_hashes.get(node.id, ""), []).append(node)
-
-    modifications: list[Change] = []
-    old_heading_lines: set[int] = set()
-    new_heading_lines: set[int] = set()
-    old_labels: list[str] = []
-    new_labels: list[str] = []
-    old_ids: list[str] = []
-    new_ids: list[str] = []
-    for body_hash, old_matches in old_by_body.items():
-        new_matches = new_by_body.get(body_hash, [])
-        if not body_hash or len(old_matches) != 1 or len(new_matches) != 1:
-            continue
-        old_node = old_matches[0]
-        new_node = new_matches[0]
-        if old_node.label == new_node.label:
-            continue
-        modifications.append(
-            Change(
-                change_type=ChangeType.MODIFICATION,
-                old_node=old_node,
-                new_node=new_node,
-                confidence=0.9,
-                description=(f"Rename Markdown section {old_node.label!r} -> {new_node.label!r}"),
-            )
-        )
-        old_heading_lines.add(old_node.position.start_line)
-        new_heading_lines.add(new_node.position.start_line)
-        old_labels.append(old_node.label)
-        new_labels.append(new_node.label)
-        old_ids.append(old_node.id)
-        new_ids.append(new_node.id)
-
-    if not modifications:
-        return presented
-
-    filtered_changes = [
-        change
-        for change in presented.changes
-        if not (
-            # A heading rename is now surfaced as one markdown_section MODIFICATION; drop the
-            # overlapping line-level change on the same heading line (add/delete OR the
-            # line-level modification the generic text diff produces) so it isn't duplicated.
-            change.change_type
-            in {ChangeType.ADDITION, ChangeType.DELETION, ChangeType.MODIFICATION}
-            and (
-                change.old_node is not None
-                and change.old_node.position.start_line in old_heading_lines
-                or change.new_node is not None
-                and change.new_node.position.start_line in new_heading_lines
-            )
-        )
-    ]
-    group = ChangeGroup(
-        kind=ChangeGroupKind.MEANINGFUL_CHANGE,
-        raw_change_indices=[],
-        old_labels=old_labels,
-        new_labels=new_labels,
-        old_node_ids=old_ids,
-        new_node_ids=new_ids,
-        confidence=0.9,
-        rule_id="presentation.markdown_section_heading_rename",
-        metadata={"renamed_section_count": len(modifications)},
-    )
-    return PresentationResult(
-        changes=[*filtered_changes, *modifications],
-        change_groups=[*presented.change_groups, group],
-        ignored_style_changes=presented.ignored_style_changes,
-    )
+def _markdown_section_heading_rename_presentation(presented: PresentationResult, **kwargs: Any) -> PresentationResult:
+    return _markdown_presentation(presented, phase="renames", **kwargs)
 
 
 def _all_semantic_nodes(root: SemanticNode) -> list[SemanticNode]:

@@ -100,22 +100,13 @@ from intentumdiff._differ_presentation import (
     _has_error_node as _has_error_node,
 )
 from intentumdiff._differ_presentation import (
-    _is_markdown_filename as _is_markdown_filename,
-)
-from intentumdiff._differ_presentation import (
     _is_named_entity_node as _is_named_entity_node,
-)
-from intentumdiff._differ_presentation import (
-    _markdown_section_body_hashes as _markdown_section_body_hashes,
 )
 from intentumdiff._differ_presentation import (
     _markdown_section_heading_rename_presentation as _markdown_section_heading_rename_presentation,
 )
 from intentumdiff._differ_presentation import (
     _markdown_section_move_presentation as _markdown_section_move_presentation,
-)
-from intentumdiff._differ_presentation import (
-    _markdown_sections as _markdown_sections,
 )
 from intentumdiff._differ_presentation import (
     _node_to_dict as _node_to_dict,
@@ -139,13 +130,7 @@ from intentumdiff._differ_presentation import (
     _validate_tree_ids as _validate_tree_ids,
 )
 from intentumdiff._differ_runtime import (
-    _ADDED_FILE_STATUSES as _ADDED_FILE_STATUSES,
-)
-from intentumdiff._differ_runtime import (
     _DEFAULT_PLUGIN_FUEL as _DEFAULT_PLUGIN_FUEL,
-)
-from intentumdiff._differ_runtime import (
-    _DELETED_FILE_STATUSES as _DELETED_FILE_STATUSES,
 )
 from intentumdiff._differ_runtime import (
     _EXPLICIT_FUEL_EXHAUSTION_TEST_CAP as _EXPLICIT_FUEL_EXHAUSTION_TEST_CAP,
