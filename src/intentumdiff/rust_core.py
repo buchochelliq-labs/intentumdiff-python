@@ -1015,6 +1015,25 @@ class _RustCacheStore:
             )
         )
 
+    def list_entries_filtered(
+        self,
+        table: str,
+        language: str | None,
+        since: int | None,
+        before: int | None,
+        min_size: int | None,
+        max_size: int | None,
+        limit: int,
+        file_glob: str | None,
+    ) -> str:
+        return json.dumps(
+            _c_abi_call(
+                "cache_list_entries_filtered",
+                self._p, self._t, self._m,
+                table, language, since, before, min_size, max_size, limit, file_glob,
+            )
+        )
+
     def get_entry_metadata(self, key: str, table: str) -> str | None:
         result = _c_abi_call("cache_get_entry_metadata", self._p, self._t, self._m, key, table)
         return json.dumps(result) if result is not None else None
