@@ -751,50 +751,32 @@ class PluginRegistry:
             Optional pre-filter.  When supplied, only parsers whose
             ``language_ids`` overlap with *candidates* are consulted.
         """
-        if plugin_id:
-            parser = self.get_parser_by_id(plugin_id)
-            allowed = self._config.allowed_plugins
-            if allowed is not None and parser.grammar_id not in allowed:
-                raise PluginNotFoundError(plugin_id)
-            if candidates and not any(c in parser.language_ids for c in candidates):
-                raise PluginNotFoundError(plugin_id)
-            lang = parser.detect_language("", content[:4096])
-            if not lang or (candidates and lang not in candidates):
-                raise PluginNotFoundError(plugin_id)
-            return [
-                DetectionResult(
-                    language=lang,
-                    grammar_id=parser.grammar_id,
-                    confidence=1.0,
-                )
-            ]
+        import json
+        from intentumdiff.rust_core import _required_engine_json
 
-        ranked = sorted(self.parsers, key=lambda p: p.priority, reverse=True)
-        allowed = self._config.allowed_plugins
-        raw_results: list[tuple[str, str, int, bool]] = []
-        for parser in ranked:
-            if allowed is not None and parser.grammar_id not in allowed:
-                continue
-            if candidates and not any(c in parser.language_ids for c in candidates):
-                continue
-            lang = parser.detect_language("", content[:4096])
-            if lang:
-                preferred = bool(
-                    preferred_plugins
-                    and preferred_plugins.get(lang) == parser.plugin_id
-                )
-                raw_results.append((lang, parser.grammar_id, parser.priority, preferred))
-        raw_results.sort(key=lambda item: (not item[3], -item[2], item[0], item[1]))
-        results: list[DetectionResult] = []
-        for rank, (lang, grammar_id, _priority, _preferred) in enumerate(raw_results):
-            results.append(
-                DetectionResult(
-                    language=lang,
-                    grammar_id=grammar_id,
-                    confidence=round(1.0 / (rank + 1), 3),
-                )
-            )
-        return results
+        parsers = self.parsers
+        request = {
+            "entries": [{"plugin_id": parser.plugin_id, "grammar_id": parser.grammar_id,
+                         "languages": list(parser.language_ids), "priority": parser.priority}
+                        for parser in parsers],
+            "content": content,
+            "allowed_plugins": self._config.allowed_plugins,
+            "candidates": candidates or [],
+            "preferred_plugins": preferred_plugins or {},
+            "plugin_id": plugin_id,
+        }
+        plan = _required_engine_json("content_detection_plan", json.dumps(request), result_type=dict)
+        # Loading and calling host adapters is I/O; probe eligibility and sample size
+        # come from Rust. Exceptions (including fuel exhaustion) propagate unchanged.
+        observations = [{"index": index,
+                         "language": parsers[index].detect_language("", plan["sample"])}
+                        for index in plan["indices"]]
+        outcome = _required_engine_json("content_detection_finish", json.dumps({
+            "request": request, "observations": observations,
+        }), result_type=dict)
+        if outcome["not_found"] is not None:
+            raise PluginNotFoundError(outcome["not_found"])
+        return [DetectionResult.model_validate(result) for result in outcome["results"]]
 
     def example_for(self, language: str, plugin_id: str | None = None) -> dict[str, str] | None:
         """Return the ``{old, new}`` playground example from the parser that
