@@ -31,7 +31,6 @@ dependencies = [
     "pyyaml>=6.0",
     "wasmtime>=47.0.1",
     "defusedxml>=0.7",
-    "pathspec>=0.12",
     "watchdog>=3.0",
 ]
 
