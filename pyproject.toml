@@ -27,7 +27,6 @@ dependencies = [
     "pydantic>=2.7",
     "rich>=13.0",
     "rich-click>=1.8",
-    "unidiff>=0.7",
     "pygments>=2.17",
     "pyyaml>=6.0",
     "wasmtime>=47.0.1",
