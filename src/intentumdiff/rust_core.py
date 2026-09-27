@@ -774,6 +774,23 @@ def try_rust_finalize_review(
         return None
 
 
+def complete_routed_review(*, finalized: dict[str, Any], old_tree: SemanticNode,
+                           new_tree: SemanticNode, old_source: str, new_source: str,
+                           old_filename: str, new_filename: str, language: str,
+                           schema_metadata: dict[str, Any] | None = None,
+                           compile_metadata: dict[str, Any] | None = None) -> SemanticDiff:
+    """Marshal routed review inputs; the Rust engine owns final meaning and evidence."""
+    payload = dict(finalized)
+    for field in ("changes", "change_groups"):
+        payload[field] = [item.model_dump(mode="json") for item in finalized[field]]
+    return SemanticDiff.model_validate(_c_abi_call("complete_routed_review", json.dumps({
+        "finalized": payload, "old_tree": old_tree.model_dump(mode="json"),
+        "new_tree": new_tree.model_dump(mode="json"), "old_source": old_source,
+        "new_source": new_source, "old_filename": old_filename, "new_filename": new_filename,
+        "language": language, "schema_metadata": schema_metadata, "compile_metadata": compile_metadata,
+    })))
+
+
 def source_fallback_diff(old: str, new: str, old_filename: str, new_filename: str,
                          language: str, reason: str = "parse_errors") -> SemanticDiff:
     """Shared source comparison; Python only marshals the C ABI."""

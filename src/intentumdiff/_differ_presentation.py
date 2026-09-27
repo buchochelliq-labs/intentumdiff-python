@@ -83,15 +83,8 @@ def _count_semantic_nodes(root: SemanticNode) -> int:
 
 
 def _empty_semantic_tree(language: str) -> SemanticNode:
-    digest = hashlib.sha256(f"intentumdiff-empty-tree:{language}".encode()).hexdigest()
-    return SemanticNode(
-        id="0",
-        node_type="source_file",
-        label="",
-        position=NodePosition(start_line=0, start_col=0, end_line=0, end_col=0),
-        structural_hash=digest,
-        children=[],
-    )
+    from intentumdiff.rust_core import _c_abi_call
+    return SemanticNode.model_validate(_c_abi_call("empty_semantic_tree", language))
 
 
 def _markdown_presentation(presented: PresentationResult, *, old_source: str, new_source: str,
