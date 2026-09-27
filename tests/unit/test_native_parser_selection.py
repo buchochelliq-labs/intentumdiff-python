@@ -1,0 +1,90 @@
+"""Real component selection and source-grounded native/public-Python comparisons."""
+import json
+import os
+from pathlib import Path
+import subprocess
+
+import pytest
+
+CASES = json.loads((Path(__file__).parents[1] / 'fixtures/native_parser_selection.json').read_text(encoding='utf-8'))
+
+
+def native(case, config=None, wasm_dir=None):
+    probe = os.environ.get('INTENTUMDIFF_NATIVE_PROBE')
+    if not probe:
+        pytest.skip('native migration probe is required by the cross-language CI gate')
+    root = Path(__file__).parents[2]
+    return json.loads(subprocess.check_output([probe], input=json.dumps({
+        **case, 'handler':'native_selection_diff', 'repo':str(root),
+        'wasm':str(wasm_dir or root/'src/intentumdiff/wasm'), 'config':config or {},
+    }), text=True, encoding='utf-8'))
+
+
+@pytest.mark.parametrize('case', CASES, ids=lambda case: case['name'])
+def test_actual_selection_and_produced_diff(case):
+    from intentumdiff import SemanticDiffer
+    from intentumdiff.core.models import SemanticDiff
+    result = native(case)
+    assert 'fallback' not in result and 'error' not in result, result
+    actual = SemanticDiff.model_validate(result['diff']).model_dump(mode='json')
+    python = SemanticDiffer().diff_strings(case['old'], case['new'], case['filename']).model_dump(mode='json')
+    assert actual['language'] == 'python'
+    assert actual['has_semantic_changes'] and not actual['is_style_only']
+    if case['old'] and case['new']:
+        assert len(actual['changes']) == 1
+        change = actual['changes'][0]
+        assert change['change_type'] == 'MODIFICATION'
+        assert change['old_node']['label'] == '1'
+        assert change['new_node']['label'] == '2'
+        assert change['new_node']['node_type'] == 'integer'
+        assert len(actual['change_groups']) == 1, 'one literal edit must not duplicate enclosing groups'
+    else:
+        assert actual['changes']
+        assert all(change['change_type'] == ('DELETION' if case['old'] else 'ADDITION') for change in actual['changes'])
+    for field in ('language','changes','change_groups','has_semantic_changes','is_style_only'):
+        assert actual[field] == python[field], field
+
+
+def test_component_fuel_failure_is_terminal_in_both_apis():
+    from intentumdiff.core.models import DiffConfig
+    from intentumdiff.plugins.registry import PluginRegistry
+    from intentumdiff.plugins.exceptions import PluginFuelExhausted
+    case = CASES[0]
+    result = native(case, {'plugin_fuel':1})
+    assert 'fallback' not in result and 'diff' not in result
+    assert 'fuel' in result['error']
+    with pytest.raises(PluginFuelExhausted):
+        PluginRegistry(DiffConfig(plugin_fuel=1)).detect_parser(case['filename'],case['new'])
+
+
+def test_real_probe_rejects_misleading_manifest_and_skips_missing_component(tmp_path):
+    import shutil
+    from intentumdiff import SemanticDiffer
+    from intentumdiff.core.models import SemanticDiff
+    root = Path(__file__).parents[2]
+    case = json.loads((root/'tests/fixtures/parser_special_filename.json').read_text(encoding='utf-8'))
+    for filename in ('python_parser.wasm','dockerfile_parser.wasm'):
+        shutil.copyfile(root/'src/intentumdiff/wasm'/filename, tmp_path/filename)
+    # The Python component is shortlisted first but must decline Dockerfile;
+    # another discovery hint points to a missing component. Dockerfile is found
+    # through the remaining-specific phase using actual guest metadata/probing.
+    (tmp_path/'parser_manifest.json').write_text(json.dumps({
+        'parsers': {
+            'python':{'plugin_id':'python','wasm':'python_parser.wasm','extensions':['Dockerfile']},
+            'missing':{'plugin_id':'missing','wasm':'missing.wasm','extensions':['Dockerfile']},
+            'dockerfile':{'plugin_id':'dockerfile','wasm':'dockerfile_parser.wasm','extensions':[]},
+        }, 'extension_index':{},
+    }), encoding='utf-8')
+    result = native(case, wasm_dir=tmp_path)
+    assert 'diff' in result, result
+    actual = SemanticDiff.model_validate(result['diff']).model_dump(mode='json')
+    python = SemanticDiffer().diff_strings(case['old'], case['new'], case['filename']).model_dump(mode='json')
+    assert actual['language'] == 'dockerfile'
+    assert len(actual['changes']) == 1
+    change = actual['changes'][0]
+    assert change['change_type'] == 'MODIFICATION'
+    assert change['old_node']['label'] == case['old_label']
+    assert change['new_node']['label'] == case['new_label']
+    assert actual['has_semantic_changes'] and not actual['is_style_only']
+    for field in ('language','changes','change_groups','has_semantic_changes','is_style_only'):
+        assert actual[field] == python[field], field
