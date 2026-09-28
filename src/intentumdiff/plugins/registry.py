@@ -68,75 +68,17 @@ PhaseRecorder = Callable[[str, float], None]
 # installs safe even when stale entry-point metadata still lists the plugin.
 _DISABLED_BUILTIN_PARSER_ENTRYPOINTS: frozenset[str] = frozenset({"freebasic"})
 
-# Parsers that CANNOT be loaded on a given OS + architecture, keyed by entry-point name.
-#
-# This is not a preference or a performance tweak. Loading one of these aborts the PROCESS:
-# wasmtime's compiler panics, and a Rust panic compiled with panic=abort cannot be caught from
-# Python. No try/except saves you - the interpreter is gone, without a traceback, taking the
-# CLI, the LSP server or the editor extension with it.
-#
-#   powershell on WINDOWS aarch64:
-#     thread '<unnamed>' panicked at crates/cranelift/src/obj.rs:332:17: function too large
-#
-# tree-sitter grammars compile to enormous switch-based state machines, and this one exceeds
-# what aarch64's branch/relocation range can address in a single function body. x86-64 has more
-# headroom and accepts it, and so does macOS on Apple Silicon - which is ALSO aarch64 and loads
-# all 73 components with zero aborts (measured). So the rule is OS-and-architecture, not
-# architecture alone. Confirmed on windows-11-arm: 72 of 73 components load, this one aborts
-# alone, and NO wasmtime setting avoids it - opt_level none and speed, simd off,
-# relaxed_simd off, parallel compilation off, tail_call off all abort identically.
-#
-# Excluding it is a stopgap, not a fix. The parser needs rebuilding so no single function is
-# that large, and components should be precompiled at build time so a compile failure becomes a
-# build error rather than a crash in a user's process. Until then, a documented missing language
-# beats an editor that dies on startup.
-# (systems, machines, file extensions, reason). ALL of systems and machines must match.
-_ARCH_INCOMPATIBLE_PARSERS: dict[str, tuple[frozenset[str], frozenset[str], frozenset[str], str]] = {
-    "powershell": (
-        # WINDOWS aarch64 only. macOS on Apple Silicon is also aarch64 and loads this
-        # component perfectly - measured, 73 of 73 with zero aborts. Gating on architecture
-        # alone took PowerShell away from every Mac for no reason, which is exactly the
-        # "guessing wider than the evidence" this table is supposed to prevent.
-        frozenset({"windows"}),
-        frozenset({"arm64", "aarch64"}),
-        frozenset({".ps1", ".psm1", ".psd1"}),
-        "cranelift cannot emit one of its functions on Windows/aarch64 "
-        "('function too large'); loading it aborts the process",
-    ),
-}
-
-
-def _machine() -> str:
-    """Normalised machine name. Windows reports ARM64; Linux and macOS report aarch64."""
-    return platform.machine().lower()
-
-
 def arch_incompatible_reason(entry_point_name: str) -> str | None:
-    """Why this parser cannot be loaded on THIS machine, or None if it can be."""
-    rule = _ARCH_INCOMPATIBLE_PARSERS.get(entry_point_name)
-    if rule is None:
-        return None
-    systems, machines, _exts, reason = rule
-    if platform.system().lower() not in systems:
-        return None
-    return reason if _machine() in machines else None
+    """Ask the shared Rust policy before compiling a discovered component."""
+    from intentumdiff.rust_core import _c_abi_call
+    return _c_abi_call("parser_availability", entry_point_name, "", platform.system(), platform.machine())["reason"]
 
 
 def unavailable_parser_for(filename: str) -> tuple[str, str] | None:
-    """(parser name, reason) if this file's language is excluded here, else None.
-
-    Used where a file fails to find a parser, so the message explains WHY rather than
-    reporting a generic "unknown language". Discovery deliberately does not warn: a user
-    diffing Python should not be told about PowerShell, and 0.0.1 taught us what alarming
-    text beside correct results does to trust.
-    """
-    suffix = Path(filename).suffix.lower()
-    for name, (_systems, _machines, exts, _reason) in _ARCH_INCOMPATIBLE_PARSERS.items():
-        if suffix in exts:
-            reason = arch_incompatible_reason(name)
-            if reason is not None:
-                return name, reason
-    return None
+    """Explain a platform exclusion at point of use; discovery stays silent."""
+    from intentumdiff.rust_core import _c_abi_call
+    result = _c_abi_call("parser_availability", "", filename, platform.system(), platform.machine())["unavailable"]
+    return tuple(result) if result is not None else None
 
 
 # Normalised names of first-party packages whose entry-point callables are
