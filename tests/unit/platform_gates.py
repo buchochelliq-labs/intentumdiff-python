@@ -3,7 +3,7 @@
 The condition is read from the PRODUCT, not restated here. `arch_incompatible_reason` is the
 same function the registry uses to decide whether to load the parser, so a test can never
 disagree with the shipping behaviour - and when the underlying defect is fixed and the entry
-is removed from `_ARCH_INCOMPATIBLE_PARSERS`, these tests start running again automatically,
+is removed from Rust's parser availability policy, these tests start running again automatically,
 with nobody having to remember they were gated.
 
 That property is the whole point. A skip condition duplicated by hand goes stale silently and
