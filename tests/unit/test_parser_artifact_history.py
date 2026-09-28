@@ -29,3 +29,31 @@ def test_history_lookup_preserves_pin_and_skips_github_internal_workflows():
     ]}
     get = lambda _: json.dumps(payload).encode()
     assert stage(get, 'https://api.github.com', 'org', 'repo', 'pinned') == [payload['workflow_runs'][2]]
+
+
+def test_empty_filtered_lookup_recovers_exact_pin_from_history():
+    stage = runpy.run_path(str(Path(__file__).resolve().parents[2] / 'scripts/provision_build_inputs.py'))['_successful_artifact_runs']
+    seen = []
+    pinned = {'id': 7, 'head_sha': 'pinned', 'path': '.github/workflows/ci.yml'}
+    def get(url):
+        seen.append(url)
+        if 'head_sha=' in url:
+            return json.dumps({'workflow_runs': []}).encode()
+        return json.dumps({'workflow_runs': [
+            {'id': 8, 'head_sha': 'newer', 'path': '.github/workflows/ci.yml'}, pinned,
+        ]}).encode()
+    assert stage(get, 'https://api.github.com', 'org', 'repo', 'pinned') == [pinned]
+    assert len(seen) == 2
+    assert all('status=success' in url for url in seen)
+
+
+def test_empty_filtered_lookup_never_substitutes_a_different_commit():
+    stage = runpy.run_path(str(Path(__file__).resolve().parents[2] / 'scripts/provision_build_inputs.py'))['_successful_artifact_runs']
+    seen = []
+    def get(url):
+        seen.append(url)
+        return json.dumps({'workflow_runs': [
+            {'id': 8, 'head_sha': 'other', 'path': '.github/workflows/ci.yml'},
+        ]}).encode()
+    assert stage(get, 'https://api.github.com', 'org', 'repo', 'pinned') == []
+    assert len(seen) == 2
