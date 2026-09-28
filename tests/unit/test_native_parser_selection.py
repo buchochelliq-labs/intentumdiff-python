@@ -134,3 +134,24 @@ def test_custom_and_certified_routes_own_meaningful_evidence_once(case, tmp_path
                 assert set(group[f'{side}_node_ids']) <= changed_ids
     for field in ('language','changes','change_groups','has_semantic_changes','is_style_only'):
         assert actual[field] == python[field], field
+
+
+@pytest.mark.parametrize('reverse', [False, True], ids=['insert', 'delete'])
+def test_statement_insertion_or_deletion_is_not_reorder(reverse):
+    from intentumdiff import SemanticDiffer
+    from intentumdiff.core.models import SemanticDiff
+    case = json.loads((Path(__file__).parents[1] / 'fixtures/reorder_insertion.json').read_text(encoding='utf-8'))[0]
+    if reverse:
+        case['old'], case['new'] = case['new'], case['old']
+    result = native(case)
+    assert 'diff' in result, result
+    actual = SemanticDiff.model_validate(result['diff']).model_dump(mode='json')
+    python = SemanticDiffer().diff_strings(case['old'], case['new'], case['filename']).model_dump(mode='json')
+    for diff in (actual, python):
+        assert sorted(c['change_type'] for c in diff['changes']) == sorted([
+            'DELETION' if reverse else 'ADDITION', 'MODIFICATION'])
+        assert len(diff['change_groups']) == 1
+        assert 'GREET' in diff['change_groups'][0]['old_labels']
+        assert sorted(diff['change_groups'][0]['raw_change_indices']) == [0, 1]
+    for field in ('language', 'changes', 'change_groups', 'has_semantic_changes', 'is_style_only'):
+        assert actual[field] == python[field], field
