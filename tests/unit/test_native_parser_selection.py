@@ -88,3 +88,49 @@ def test_real_probe_rejects_misleading_manifest_and_skips_missing_component(tmp_
     assert actual['has_semantic_changes'] and not actual['is_style_only']
     for field in ('language','changes','change_groups','has_semantic_changes','is_style_only'):
         assert actual[field] == python[field], field
+
+
+GROUP_CASES = json.loads((Path(__file__).parents[1] / 'fixtures/meaningful_group_ownership.json').read_text(encoding='utf-8'))
+
+
+@pytest.mark.parametrize('case', GROUP_CASES, ids=lambda case: case['name'])
+def test_custom_and_certified_routes_own_meaningful_evidence_once(case, tmp_path):
+    import shutil
+    from intentumdiff import SemanticDiffer
+    from intentumdiff.core.models import SemanticDiff
+    root = Path(__file__).parents[2]
+    shutil.copyfile(root/'src/intentumdiff/wasm/python_parser.wasm', tmp_path/'python.wasm')
+    (tmp_path/'parser_manifest.json').write_text(json.dumps({
+        'parsers':{'python':{'plugin_id':'custom-python','wasm':'python.wasm','extensions':['.py']}},
+        'extension_index':{'.py':'python'},
+    }), encoding='utf-8')
+    result = native({**case,'filename':'example.py'}, wasm_dir=tmp_path)
+    assert 'diff' in result, result
+    actual = SemanticDiff.model_validate(result['diff']).model_dump(mode='json')
+    python = SemanticDiffer().diff_strings(case['old'],case['new'],'example.py').model_dump(mode='json')
+    for diff in (actual, python):
+        groups = [g for g in diff['change_groups'] if g['kind'] == 'MEANINGFUL_CHANGE']
+        assert len(groups) == case['groups'], groups
+        if case['groups'] == 1:
+            assert 'answer' in groups[0]['old_labels']
+            assert 'answer' in groups[0]['new_labels']
+        if 'numeric spelling' in case['name']:
+            assert diff['is_style_only'] and not diff['has_semantic_changes']
+        if case['name'].startswith('equivalent literal and'):
+            assert len(diff['changes']) == 1
+            assert diff['changes'][0]['old_node']['label'] == '2'
+            assert diff['changes'][0]['new_node']['label'] == '3'
+            for side in ('old', 'new'):
+                for scope in diff['metadata'].get('scope_trails', {}).get(side, []):
+                    assert scope['change_index'] == 0
+                    assert scope['node_id'] == diff['changes'][0][f'{side}_node']['id']
+        evidence = [i for g in groups for i in g['raw_change_indices']]
+        assert sorted(evidence) == list(range(len(diff['changes'])))
+        # Entity context must not masquerade as additional changed-node evidence.
+        for group in groups:
+            for side in ('old','new'):
+                changed_ids = {diff['changes'][i][f'{side}_node']['id'] for i in group['raw_change_indices']
+                               if diff['changes'][i][f'{side}_node'] is not None}
+                assert set(group[f'{side}_node_ids']) <= changed_ids
+    for field in ('language','changes','change_groups','has_semantic_changes','is_style_only'):
+        assert actual[field] == python[field], field
