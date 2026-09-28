@@ -317,6 +317,13 @@ def test_stage3_python_style_is_review_clean_and_keeps_style_evidence() -> None:
     assert groups[0].metadata["reason"]
     assert groups[0].old_node_ids
     assert groups[0].new_node_ids
+    for group in groups:
+        assert group.metadata["evidence"] == "matched_call_source"
+        assert "foo" not in group.old_labels
+        assert not any("mergeboard.com" in label or "semanticdiff.com" in label
+                       for label in [*group.old_labels, *group.new_labels])
+        deleted_ids = {c.old_node.id for c in _changes(diff, ChangeType.DELETION) if c.old_node}
+        assert not deleted_ids.intersection(group.old_node_ids)
     assert not _groups_with_rule(diff, "presentation.ignored_style.python")
 
 

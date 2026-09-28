@@ -155,3 +155,35 @@ def test_statement_insertion_or_deletion_is_not_reorder(reverse):
         assert sorted(diff['change_groups'][0]['raw_change_indices']) == [0, 1]
     for field in ('language', 'changes', 'change_groups', 'has_semantic_changes', 'is_style_only'):
         assert actual[field] == python[field], field
+
+
+@pytest.mark.parametrize('case', json.loads((Path(__file__).parents[1] / 'fixtures/call_layout_evidence.json').read_text(encoding='utf-8')), ids=lambda c: c['name'])
+def test_call_layout_evidence_is_source_backed(case):
+    from intentumdiff import SemanticDiffer
+    from intentumdiff.core.models import SemanticDiff
+    result = native({**case, 'filename': 'example.py'})
+    assert 'diff' in result, result
+    actual = SemanticDiff.model_validate(result['diff']).model_dump(mode='json')
+    python = SemanticDiffer().diff_strings(case['old'], case['new'], 'example.py').model_dump(mode='json')
+    for diff in (actual, python):
+        groups = [g for g in diff['change_groups'] if g['rule_id'] == 'python.formatting.call_wrapping_equivalence']
+        assert bool(groups) == case['style']
+        for group in groups:
+            assert group['metadata']['evidence'] == 'matched_call_source'
+            assert 'send' in group['old_labels']
+            assert 'foo' not in group['old_labels'] and 'use' not in group['old_labels']
+        assert any(c['change_type'] == 'DELETION' for c in diff['changes'])
+        assert any(c['change_type'] == 'MODIFICATION' for c in diff['changes'])
+    for field in ('changes', 'change_groups', 'has_semantic_changes', 'is_style_only'):
+        assert actual[field] == python[field], field
+
+
+@pytest.mark.xfail(strict=True, reason='core #131: argument-list MOVE crosses unrelated calls after deletion')
+@pytest.mark.parametrize('case', json.loads((Path(__file__).parents[1] / 'fixtures/call_layout_evidence.json').read_text(encoding='utf-8')), ids=lambda c: c['name'])
+def test_deleted_call_arguments_do_not_move_into_surviving_call(case):
+    from intentumdiff import SemanticDiffer
+    result = native({**case, 'filename': 'example.py'})
+    assert 'diff' in result, result
+    python = SemanticDiffer().diff_strings(case['old'], case['new'], 'example.py').model_dump(mode='json')
+    for diff in (result['diff'], python):
+        assert not any(c['change_type'] == 'MOVE' for c in diff['changes'])

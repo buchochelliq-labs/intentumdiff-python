@@ -29,7 +29,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 CORE_REPO = "https://github.com/buchochelliq-labs/intentumdiff-core"
 # Immutable reviewed engine candidate for this binding. Override for an explicit
 # integration build; never let a moving branch silently change the engine under CI.
-CORE_REF = os.environ.get("INTENTUMDIFF_CORE_REF", "3e6acf0a54b3b1664e2a94fdc335254631f7865b")
+CORE_REF = os.environ.get("INTENTUMDIFF_CORE_REF", "0fee94821165741ef7cd07b5f464123e1974d4d4")
 CORE_DEST = REPO_ROOT / "build" / "intentumdiff-core"
 WASM_DEST = REPO_ROOT / "src" / "intentumdiff" / "wasm"
 
