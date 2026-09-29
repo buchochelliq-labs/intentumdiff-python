@@ -199,3 +199,16 @@ def test_argument_lists_follow_their_owning_calls(case):
         assert sorted(actual, key=str) == sorted(case['expected'], key=str)
     for field in ('changes', 'change_groups', 'has_semantic_changes', 'is_style_only'):
         assert rust[field] == python[field], field
+
+
+@pytest.mark.parametrize('case', json.loads((Path(__file__).parents[1] / 'fixtures/elixir_sibling_swap.json').read_text(encoding='utf-8')), ids=lambda c: c['name'])
+def test_elixir_sibling_swap_preserves_matched_definition_contents(case):
+    from intentumdiff import SemanticDiffer
+    from intentumdiff.core.models import SemanticDiff
+    rust = SemanticDiff.model_validate(native(case)['diff']).model_dump(mode='json')
+    python = SemanticDiffer().diff_strings(case['old'], case['new'], case['filename']).model_dump(mode='json')
+    for diff in (rust, python):
+        actual = [[c['change_type'], (c.get('old_node') or {}).get('node_type'), (c.get('old_node') or {}).get('label'), (c.get('new_node') or {}).get('node_type'), (c.get('new_node') or {}).get('label')] for c in diff['changes']]
+        assert actual == case['expected']
+    for field in ('changes', 'change_groups', 'has_semantic_changes', 'is_style_only'):
+        assert rust[field] == python[field], field

@@ -65,3 +65,17 @@ def test_construct_edit(source_path: Path, manifest: dict, expectation: dict, ve
             f"(was: {expectation['xfail']})"
         )
     assert status == "ok", f"{language} [{verb}]: {detail}"
+
+
+def test_elixir_swap_moves_whole_declarations():
+    from tests.unit.construct_edit_matrix import find_entities, derive_swap_siblings
+    source = (_CORPUS_ROOT / 'elixir/playground.ex').read_text(encoding='utf-8')
+    differ = SemanticDiffer()
+    entities, base = find_entities(differ, 'elixir', 'code.ex', source)
+    assert [(c.label, c.start_line, c.end_line) for c in entities] == [
+        ('Greeter', 0, 12), ('greet', 1, 3), ('farewell', 5, 7), ('shout', 9, 11)
+    ]
+    new, ctx = derive_swap_siblings(source, entities, base)
+    lines = source.splitlines()
+    assert new == '\n'.join(lines[:1] + lines[5:8] + lines[4:5] + lines[1:4] + lines[8:]) + '\n'
+    assert ctx == {'first': 'greet', 'second': 'farewell'}
