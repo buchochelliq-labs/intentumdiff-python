@@ -1,0 +1,9 @@
+[
+  {
+    "name": "inserted DATA does not reorder existing WRITE",
+    "language": "abap",
+    "filename": "code.abap",
+    "old": "REPORT z_demo.\nFORM greet.\n  WRITE: 'hello'.\nENDFORM.\n",
+    "new": "REPORT z_demo.\nFORM greet.\n  DATA(lv_msg) = 'hello'.\n  WRITE: lv_msg.\nENDFORM.\n"
+  }
+]

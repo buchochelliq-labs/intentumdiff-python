@@ -134,3 +134,81 @@ def test_custom_and_certified_routes_own_meaningful_evidence_once(case, tmp_path
                 assert set(group[f'{side}_node_ids']) <= changed_ids
     for field in ('language','changes','change_groups','has_semantic_changes','is_style_only'):
         assert actual[field] == python[field], field
+
+
+@pytest.mark.parametrize('reverse', [False, True], ids=['insert', 'delete'])
+def test_statement_insertion_or_deletion_is_not_reorder(reverse):
+    from intentumdiff import SemanticDiffer
+    from intentumdiff.core.models import SemanticDiff
+    case = json.loads((Path(__file__).parents[1] / 'fixtures/reorder_insertion.json').read_text(encoding='utf-8'))[0]
+    if reverse:
+        case['old'], case['new'] = case['new'], case['old']
+    result = native(case)
+    assert 'diff' in result, result
+    actual = SemanticDiff.model_validate(result['diff']).model_dump(mode='json')
+    python = SemanticDiffer().diff_strings(case['old'], case['new'], case['filename']).model_dump(mode='json')
+    for diff in (actual, python):
+        assert sorted(c['change_type'] for c in diff['changes']) == sorted([
+            'DELETION' if reverse else 'ADDITION', 'MODIFICATION'])
+        assert len(diff['change_groups']) == 1
+        assert 'GREET' in diff['change_groups'][0]['old_labels']
+        assert sorted(diff['change_groups'][0]['raw_change_indices']) == [0, 1]
+    for field in ('language', 'changes', 'change_groups', 'has_semantic_changes', 'is_style_only'):
+        assert actual[field] == python[field], field
+
+
+@pytest.mark.parametrize('case', json.loads((Path(__file__).parents[1] / 'fixtures/call_layout_evidence.json').read_text(encoding='utf-8')), ids=lambda c: c['name'])
+def test_call_layout_evidence_is_source_backed(case):
+    from intentumdiff import SemanticDiffer
+    from intentumdiff.core.models import SemanticDiff
+    result = native({**case, 'filename': 'example.py'})
+    assert 'diff' in result, result
+    actual = SemanticDiff.model_validate(result['diff']).model_dump(mode='json')
+    python = SemanticDiffer().diff_strings(case['old'], case['new'], 'example.py').model_dump(mode='json')
+    for diff in (actual, python):
+        groups = [g for g in diff['change_groups'] if g['rule_id'] == 'python.formatting.call_wrapping_equivalence']
+        assert bool(groups) == case['style']
+        for group in groups:
+            assert group['metadata']['evidence'] == 'matched_call_source'
+            assert 'send' in group['old_labels']
+            assert 'foo' not in group['old_labels'] and 'use' not in group['old_labels']
+        assert any(c['change_type'] == 'DELETION' for c in diff['changes'])
+        assert any(c['change_type'] == 'MODIFICATION' for c in diff['changes'])
+    for field in ('changes', 'change_groups', 'has_semantic_changes', 'is_style_only'):
+        assert actual[field] == python[field], field
+
+
+@pytest.mark.parametrize('case', json.loads((Path(__file__).parents[1] / 'fixtures/call_layout_evidence.json').read_text(encoding='utf-8')), ids=lambda c: c['name'])
+def test_deleted_call_arguments_do_not_move_into_surviving_call(case):
+    from intentumdiff import SemanticDiffer
+    result = native({**case, 'filename': 'example.py'})
+    assert 'diff' in result, result
+    python = SemanticDiffer().diff_strings(case['old'], case['new'], 'example.py').model_dump(mode='json')
+    for diff in (result['diff'], python):
+        assert not any(c['change_type'] == 'MOVE' for c in diff['changes'])
+
+
+@pytest.mark.parametrize('case', json.loads((Path(__file__).parents[1] / 'fixtures/argument_owner_matching.json').read_text(encoding='utf-8')), ids=lambda c: c['name'])
+def test_argument_lists_follow_their_owning_calls(case):
+    from intentumdiff import SemanticDiffer
+    from intentumdiff.core.models import SemanticDiff
+    rust = SemanticDiff.model_validate(native({**case, 'filename': 'example.py'})['diff']).model_dump(mode='json')
+    python = SemanticDiffer().diff_strings(case['old'], case['new'], 'example.py').model_dump(mode='json')
+    for diff in (rust, python):
+        actual = [[c['change_type'], (c.get('old_node') or {}).get('node_type'), (c.get('old_node') or {}).get('label'), (c.get('new_node') or {}).get('node_type'), (c.get('new_node') or {}).get('label')] for c in diff['changes']]
+        assert sorted(actual, key=str) == sorted(case['expected'], key=str)
+    for field in ('changes', 'change_groups', 'has_semantic_changes', 'is_style_only'):
+        assert rust[field] == python[field], field
+
+
+@pytest.mark.parametrize('case', json.loads((Path(__file__).parents[1] / 'fixtures/elixir_sibling_swap.json').read_text(encoding='utf-8')), ids=lambda c: c['name'])
+def test_elixir_sibling_swap_preserves_matched_definition_contents(case):
+    from intentumdiff import SemanticDiffer
+    from intentumdiff.core.models import SemanticDiff
+    rust = SemanticDiff.model_validate(native(case)['diff']).model_dump(mode='json')
+    python = SemanticDiffer().diff_strings(case['old'], case['new'], case['filename']).model_dump(mode='json')
+    for diff in (rust, python):
+        actual = [[c['change_type'], (c.get('old_node') or {}).get('node_type'), (c.get('old_node') or {}).get('label'), (c.get('new_node') or {}).get('node_type'), (c.get('new_node') or {}).get('label')] for c in diff['changes']]
+        assert actual == case['expected']
+    for field in ('changes', 'change_groups', 'has_semantic_changes', 'is_style_only'):
+        assert rust[field] == python[field], field
