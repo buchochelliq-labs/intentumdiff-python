@@ -27,7 +27,11 @@ def detect_content_type(head: bytes) -> ContentType:
     """Return Rust's detected content type; propagate required engine failures."""
     from intentumdiff.rust_core import _required_engine_json
 
-    result = _required_engine_json("detect_content_type_json", bytes(head), result_type=dict)
+    result = _required_engine_json(
+        "detect_content_type_json",
+        bytes(head[:HEAD_BYTES]),
+        result_type=dict,
+    )
     if any(not isinstance(result.get(key), str) for key in ("mime", "extension", "category")) or type(result.get("is_text")) is not bool:
         raise RuntimeError("Rust content-type result has invalid fields")
     return ContentType(**{key: result[key] for key in ContentType.__annotations__})
