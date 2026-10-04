@@ -84,3 +84,30 @@ def test_malformed_content_result_fails(monkeypatch):
     monkeypatch.setattr(rust_core, "_load_backend", lambda: Backend())
     with pytest.raises(RuntimeError, match="invalid fields"):
         detect_content_type(b"plain")
+
+
+def test_content_detection_bounds_bytes_before_abi(monkeypatch):
+    import json
+    from intentumdiff import rust_core
+    from intentumdiff.content_type import HEAD_BYTES
+
+    seen = {}
+
+    class Backend:
+        def detect_content_type_json(self, head):
+            seen["head"] = head
+            return json.dumps(
+                {
+                    "mime": "application/octet-stream",
+                    "extension": "",
+                    "category": "binary",
+                    "is_text": False,
+                }
+            )
+
+    monkeypatch.setattr(rust_core, "_load_backend", lambda: Backend())
+    payload = b"x" * (HEAD_BYTES + 4096)
+    detect_content_type(payload)
+
+    assert len(seen["head"]) == HEAD_BYTES
+    assert seen["head"] == payload[:HEAD_BYTES]
