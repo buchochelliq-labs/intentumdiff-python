@@ -638,9 +638,8 @@ def try_rust_generic_text_review(
         if group:
             groups.append(ChangeGroup.model_validate(group))
         return changes, groups
-    except Exception as exc:  # noqa: BLE001 - strangler boundary must fall back.
-        logger.debug("Rust generic-text review unavailable: %s", exc, exc_info=True)
-        return None
+    except Exception as exc:  # noqa: BLE001 - an engine failure is not an unsupported decline.
+        raise RuntimeError(f"Rust generic-text review failed: {exc}") from exc
 
 
 def try_rust_markdown_section_review(
@@ -676,9 +675,8 @@ def try_rust_markdown_section_review(
                 else None
             ),
         }
-    except Exception as exc:  # noqa: BLE001 - strangler boundary must fall back.
-        logger.debug("Rust markdown section review unavailable: %s", exc, exc_info=True)
-        return None
+    except Exception as exc:  # noqa: BLE001 - an engine failure is not an unsupported decline.
+        raise RuntimeError(f"Rust markdown section review failed: {exc}") from exc
 
 
 def try_rust_collect_hover_targets(
@@ -704,9 +702,8 @@ def try_rust_collect_hover_targets(
             for item in data
             if isinstance(item, dict)
         ]
-    except Exception as exc:  # noqa: BLE001 - strangler boundary must fall back.
-        logger.debug("Rust hover-target collection unavailable: %s", exc, exc_info=True)
-        return None
+    except Exception as exc:  # noqa: BLE001 - an engine failure is not an unsupported decline.
+        raise RuntimeError(f"Rust hover-target collection failed: {exc}") from exc
 
 
 def try_rust_finalize_review(
@@ -769,9 +766,8 @@ def try_rust_finalize_review(
                 if isinstance(item, dict)
             ],
         }
-    except Exception as exc:  # noqa: BLE001 - strangler boundary must fall back.
-        logger.debug("Rust finalize review unavailable: %s", exc, exc_info=True)
-        return None
+    except Exception as exc:  # noqa: BLE001 - an engine failure is not an unsupported decline.
+        raise RuntimeError(f"Rust finalize review failed: {exc}") from exc
 
 
 def source_fallback_diff(old: str, new: str, old_filename: str, new_filename: str,
@@ -818,9 +814,8 @@ def try_rust_profile_label_enrichment(
         return SemanticNode.model_validate_json(
             enrich_fn(tree.model_dump_json(), source, language, list(identity_fields))
         )
-    except Exception as exc:  # noqa: BLE001 - strangler boundary must fall back.
-        logger.debug("Rust profile enrichment unavailable: %s", exc, exc_info=True)
-        return None
+    except Exception as exc:  # noqa: BLE001 - an engine failure is not an unsupported decline.
+        raise RuntimeError(f"Rust profile enrichment failed: {exc}") from exc
 
 
 def _required_engine_json(handler: str, *args: Any, result_type: type) -> Any:
