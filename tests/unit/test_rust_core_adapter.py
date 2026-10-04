@@ -633,6 +633,76 @@ def _node(
     )
 
 
+@pytest.mark.parametrize(
+    ("handler", "call"),
+    [
+        ("generic_text_review_json", lambda root: rust_core.try_rust_generic_text_review("old", "new", 0)),
+        ("markdown_section_review_json", lambda root: rust_core.try_rust_markdown_section_review("old", "new")),
+        (
+            "finalize_review_json",
+            lambda root: rust_core.try_rust_finalize_review(
+                old_tree=root,
+                new_tree=root,
+                old_source="old",
+                new_source="new",
+                language="python",
+                config=DiffConfig(),
+            ),
+        ),
+        (
+            "enrich_profile_labels_json",
+            lambda root: rust_core.try_rust_profile_label_enrichment(root, "source", "python"),
+        ),
+    ],
+)
+def test_optional_rust_adapters_raise_on_engine_failure(
+    monkeypatch: Any,
+    handler: str,
+    call: Any,
+) -> None:
+    root = _node("root", "module", "module", line=0)
+
+    def fail(*args: Any, **kwargs: Any) -> str:
+        raise OSError("engine transport failed")
+
+    monkeypatch.setattr(rust_core, "_load_backend", lambda: SimpleNamespace(**{handler: fail}))
+
+    with pytest.raises(RuntimeError, match="failed"):
+        call(root)
+
+
+@pytest.mark.parametrize(
+    ("handler", "call"),
+    [
+        ("generic_text_review_json", lambda root: rust_core.try_rust_generic_text_review("old", "new", 0)),
+        ("markdown_section_review_json", lambda root: rust_core.try_rust_markdown_section_review("old", "new")),
+        (
+            "finalize_review_json",
+            lambda root: rust_core.try_rust_finalize_review(
+                old_tree=root,
+                new_tree=root,
+                old_source="old",
+                new_source="new",
+                language="python",
+                config=DiffConfig(),
+            ),
+        ),
+        (
+            "enrich_profile_labels_json",
+            lambda root: rust_core.try_rust_profile_label_enrichment(root, "source", "python"),
+        ),
+    ],
+)
+def test_optional_rust_adapters_still_decline_when_handler_is_absent(
+    monkeypatch: Any,
+    handler: str,
+    call: Any,
+) -> None:
+    root = _node("root", "module", "module", line=0)
+    monkeypatch.setattr(rust_core, "_load_backend", lambda: SimpleNamespace())
+    assert call(root) is None
+
+
 def test_rust_core_tree_reconstructs_matching_and_changes(monkeypatch: Any) -> None:
     old_child = _node("old.fn", "function", "total", line=0)
     new_child = _node("new.fn", "function", "sum_total", line=0)
