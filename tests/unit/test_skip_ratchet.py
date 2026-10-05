@@ -1,7 +1,7 @@
 """The skip ratchet (pre-release skip audit, 2026-07-27 maintainer directive).
 
 Every skip reason that appears in the test tree must match an ALLOWED pattern in
-`skip_reasons_baseline.json`, where it is classified (platform / env / split-guard /
+`skip_reasons_baseline.json`, where it is classified (platform / env /
 scenario-matrix / staging) and justified. A new skip with an unclassified reason fails
 this gate — skips cannot accumulate silently. Unused baseline entries fail too, so the
 allowlist cannot rot.
