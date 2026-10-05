@@ -165,6 +165,11 @@
       "pattern": "example has no structural add/delete evidence",
       "class": "scenario-matrix",
       "justification": "per-language example gaps — burn-down backlog"
+    },
+    {
+      "pattern": "^\\{parser_name\\} parser unavailable: \\{reason\\}$",
+      "class": "staging",
+      "justification": "registry-driven parser availability gate in intent truth tests; preserves the concrete parser name/reason at runtime and resumes automatically when the registry reports the parser available"
     }
   ]
 }

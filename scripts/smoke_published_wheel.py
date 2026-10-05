@@ -151,6 +151,35 @@ def main() -> int:
         r = s.run(str(script))
         s.check("SemanticDiffer produces a diff", "CHANGES" in r.stdout, r.stderr)
 
+        # 5b. Advertised Wasm renderer formats must work from the INSTALLED wheel.
+        # These all shipped broken in 0.0.2b1 because the CLI looked under
+        # intentumdiff/cli/wasm instead of the package's real component directory.
+        old_file = root / "old.py"
+        new_file = root / "new.py"
+        old_file.write_text(OLD_SRC, encoding="utf-8")
+        new_file.write_text(NEW_SRC, encoding="utf-8")
+        for fmt in ("patch", "html", "llm"):
+            rendered = subprocess.run(
+                [
+                    str(exe),
+                    "file",
+                    str(old_file),
+                    str(new_file),
+                    "--format",
+                    fmt,
+                ],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                cwd=root,
+            )
+            s.check(
+                f"installed wheel renders --format {fmt}",
+                rendered.returncode == 0 and bool(rendered.stdout.strip()),
+                (rendered.stderr or rendered.stdout).strip()[:400],
+            )
+
         # 5b. THE README'S OWN EXAMPLE, extracted and executed verbatim.
         #
         #     Check 5 above runs OLD_SRC/NEW_SRC — this file's PRIVATE copy of the example.
