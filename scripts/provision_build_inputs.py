@@ -83,22 +83,32 @@ def _successful_artifact_runs(get, api: str, org: str, repo: str, ref: str | Non
     import json
     base_query = "status=success&per_page=100"
     queries = [f"{base_query}&head_sha={ref}", base_query] if ref else [base_query]
-    for query in queries:
-        result: list[dict] = []
-        for page in range(1, 11):
-            runs = json.loads(get(f"{api}/repos/{org}/{repo}/actions/runs?{query}&page={page}"))
-            batch = runs.get("workflow_runs") or []
-            result.extend(run for run in batch
-                          if (not ref or run.get("head_sha") == ref)
-                          and not run.get("path", "").startswith("dynamic/"))
-            if len(batch) < 100:
-                break
-        if result:
-            return result
-        # CI observed an empty filtered lookup for a pinned Lua build that
-        # remained available in repository history. Search that bounded history
-        # once, still requiring the exact registry SHA above. Downloaded bytes
-        # must also pass the existing checksum verification before staging.
+    # A successful 200 response can temporarily omit a known pinned build from
+    # both views (observed for Haskell and Make in run 37341204158). Retry the
+    # exact lookup twice; never substitute another revision or bypass checksums.
+    import time
+    attempts = 3 if ref else 1
+    for attempt in range(attempts):
+        for query in queries:
+            result: list[dict] = []
+            for page in range(1, 11):
+                runs = json.loads(get(f"{api}/repos/{org}/{repo}/actions/runs?{query}&page={page}"))
+                batch = runs.get("workflow_runs") or []
+                result.extend(run for run in batch
+                              if (not ref or run.get("head_sha") == ref)
+                              and not run.get("path", "").startswith("dynamic/"))
+                if len(batch) < 100:
+                    break
+            if result:
+                return result
+            # CI observed an empty filtered lookup for a pinned Lua build that
+            # remained available in repository history. Search that bounded history
+            # once, still requiring the exact registry SHA above. Downloaded bytes
+            # must also pass the existing checksum verification before staging.
+        if attempt + 1 < attempts:
+            delay = 2 ** attempt
+            print(f"  no build at exact pin {ref} for {repo}; retry {attempt + 1}/{attempts - 1} in {delay}s")
+            time.sleep(delay)
     return []
 
 
