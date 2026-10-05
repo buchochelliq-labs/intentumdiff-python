@@ -1,0 +1,50 @@
+[
+  {
+    "name": "original Elixir swap",
+    "old": "defmodule Greeter do\n  def greet(name) do\n    \"Hello, \" <> name\n  end\n\n  def farewell(name) do\n    \"Goodbye, \" <> name\n  end\n\n  def shout(phrase) do\n    String.upcase(phrase)\n  end\nend\n",
+    "new": "defmodule Greeter do\n  def farewell(name) do\n    \"Goodbye, \" <> name\n  end\n\n  def greet(name) do\n    \"Hello, \" <> name\n  end\n\n  def shout(phrase) do\n    String.upcase(phrase)\n  end\nend\n",
+    "filename": "code.ex",
+    "language": "elixir",
+    "expected": [
+      [
+        "MODIFICATION",
+        "call",
+        "Greeter",
+        "call",
+        "Greeter"
+      ]
+    ]
+  },
+  {
+    "name": "swap with real value edit",
+    "old": "defmodule G do\n  def a(x), do: x + 1\n  def b(x), do: x + 2\nend\n",
+    "new": "defmodule G do\n  def b(x), do: x + 2\n  def a(x), do: x + 3\nend\n",
+    "filename": "code.ex",
+    "language": "elixir",
+    "expected": [
+      [
+        "MODIFICATION",
+        "integer",
+        "1",
+        "integer",
+        "3"
+      ]
+    ]
+  },
+  {
+    "name": "minimal Elixir swap",
+    "old": "defmodule G do\n  def a(x), do: x + 1\n  def b(x), do: x + 2\nend\n",
+    "new": "defmodule G do\n  def b(x), do: x + 2\n  def a(x), do: x + 1\nend\n",
+    "filename": "code.ex",
+    "language": "elixir",
+    "expected": [
+      [
+        "MODIFICATION",
+        "call",
+        "G",
+        "call",
+        "G"
+      ]
+    ]
+  }
+]

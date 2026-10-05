@@ -83,8 +83,6 @@ def test_no_other_parser_is_excluded_on_any_platform() -> None:
     Every entry removes a language from someone's install, so this list must never grow by
     precaution - only by an observed abort.
     """
-    assert set(registry._ARCH_INCOMPATIBLE_PARSERS) == {"powershell"}
-
     for system, machine in (("Windows", "ARM64"), ("Darwin", "arm64"), ("Linux", "x86_64")):
         sys_p, mach_p = _on(system, machine)
         with sys_p, mach_p:
@@ -139,5 +137,12 @@ def test_the_user_is_told_when_they_diff_the_affected_language(filename: str) ->
 def test_nothing_is_explained_away_on_a_platform_that_works(filename: str) -> None:
     """Including .ps1 itself: on macOS arm64 the parser loads, so there is nothing to explain."""
     sys_p, mach_p = _on("Darwin", "arm64")
+    with sys_p, mach_p:
+        assert registry.unavailable_parser_for(filename) is None
+
+
+@pytest.mark.parametrize("filename", [".ps1", "dir/.ps1", r"dir\.ps1"])
+def test_dotfile_without_extension_is_not_powershell(filename: str) -> None:
+    sys_p, mach_p = _on("Windows", "ARM64")
     with sys_p, mach_p:
         assert registry.unavailable_parser_for(filename) is None

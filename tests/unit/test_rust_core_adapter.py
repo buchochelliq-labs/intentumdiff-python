@@ -68,26 +68,27 @@ def test_rust_core_defaults_to_native_first_and_can_be_disabled(monkeypatch: Any
     assert DiffConfig().experimental_rust_core is True
 
 
-def test_rust_core_unavailable_falls_back_to_python(monkeypatch: Any) -> None:
+def test_rust_core_unavailable_raises_required_engine_error(monkeypatch: Any) -> None:
+    # Even a stubbed pipeline result cannot turn a missing required engine into success.
     monkeypatch.setattr(SemanticDiffer, "_run_stages_1_to_11", _python_fallback)
 
     def missing_backend() -> Any:
         raise ModuleNotFoundError("intentumdiff_rust_core")
 
     monkeypatch.setattr(rust_core, "_load_backend", missing_backend)
-
-    diff = SemanticDiffer(
-        DiffConfig(experimental_rust_core=True, profile_phases=True)
-    ).diff_strings("old", "new", "example.py")
-
-    assert diff.language == "python"
-    assert "rust_core" not in diff.metadata
-    assert diff.metadata["phase_timings"]["phases"] == []
+    with pytest.raises(RuntimeError, match="detect_content_type_json.*intentumdiff_rust_core") as error:
+        SemanticDiffer(DiffConfig(experimental_rust_core=True)).diff_strings(
+            "old", "new", "example.py"
+        )
+    assert isinstance(error.value.__cause__, ModuleNotFoundError)
 
 
 def test_rust_core_incomplete_result_falls_back_to_python(monkeypatch: Any) -> None:
     monkeypatch.setattr(SemanticDiffer, "_run_stages_1_to_11", _python_fallback)
     backend = SimpleNamespace(
+        detect_content_type_json=rust_core._load_backend().detect_content_type_json,
+        parser_candidate_shortlist=rust_core._load_backend().parser_candidate_shortlist,
+        filename_selection_next=rust_core._load_backend().filename_selection_next,
         version=lambda: "0.1.0",
         supports_language=lambda language: language == "python",
         diff_python_json=lambda *args: SemanticDiff(
@@ -632,13 +633,11 @@ def _node(
     )
 
 
-
 @pytest.mark.parametrize(
     ("handler", "call"),
     [
         ("generic_text_review_json", lambda root: rust_core.try_rust_generic_text_review("old", "new", 0)),
         ("markdown_section_review_json", lambda root: rust_core.try_rust_markdown_section_review("old", "new")),
-        ("lsp_collect_hover_targets_json", lambda root: rust_core.try_rust_collect_hover_targets(root)),
         (
             "finalize_review_json",
             lambda root: rust_core.try_rust_finalize_review(
@@ -656,7 +655,7 @@ def _node(
         ),
     ],
 )
-def test_transitional_rust_adapters_raise_on_engine_failure(
+def test_optional_rust_adapters_raise_on_engine_failure(
     monkeypatch: Any,
     handler: str,
     call: Any,
@@ -677,7 +676,6 @@ def test_transitional_rust_adapters_raise_on_engine_failure(
     [
         ("generic_text_review_json", lambda root: rust_core.try_rust_generic_text_review("old", "new", 0)),
         ("markdown_section_review_json", lambda root: rust_core.try_rust_markdown_section_review("old", "new")),
-        ("lsp_collect_hover_targets_json", lambda root: rust_core.try_rust_collect_hover_targets(root)),
         (
             "finalize_review_json",
             lambda root: rust_core.try_rust_finalize_review(
@@ -695,7 +693,7 @@ def test_transitional_rust_adapters_raise_on_engine_failure(
         ),
     ],
 )
-def test_transitional_rust_adapters_still_decline_when_handler_is_absent(
+def test_optional_rust_adapters_still_decline_when_handler_is_absent(
     monkeypatch: Any,
     handler: str,
     call: Any,
@@ -882,6 +880,9 @@ def test_semantic_differ_uses_rust_batch_metadata(monkeypatch: Any) -> None:
         return json.dumps(payload)
 
     backend = SimpleNamespace(
+        detect_content_type_json=rust_core._load_backend().detect_content_type_json,
+        parser_candidate_shortlist=rust_core._load_backend().parser_candidate_shortlist,
+        filename_selection_next=rust_core._load_backend().filename_selection_next,
         version=lambda: "0.4.0",
         supports_language=lambda language: language == "python",
         diff_batch=diff_batch,
@@ -933,6 +934,9 @@ def test_semantic_differ_uses_rust_batch_for_changed_complete_output(
         return json.dumps(payload)
 
     backend = SimpleNamespace(
+        detect_content_type_json=rust_core._load_backend().detect_content_type_json,
+        parser_candidate_shortlist=rust_core._load_backend().parser_candidate_shortlist,
+        filename_selection_next=rust_core._load_backend().filename_selection_next,
         version=lambda: "0.4.0",
         supports_language=lambda language: language == "python",
         diff_batch=diff_batch,
@@ -1186,6 +1190,9 @@ def test_semantic_differ_batch_fallback_continues_python_pipeline(monkeypatch: A
     }
     real_backend = rust_core._load_backend()
     backend = SimpleNamespace(
+        detect_content_type_json=rust_core._load_backend().detect_content_type_json,
+        parser_candidate_shortlist=rust_core._load_backend().parser_candidate_shortlist,
+        filename_selection_next=rust_core._load_backend().filename_selection_next,
         parse_errors_present_json=real_backend.parse_errors_present_json,
         source_fallback_diff_json=real_backend.source_fallback_diff_json,
         version=lambda: "0.4.0",

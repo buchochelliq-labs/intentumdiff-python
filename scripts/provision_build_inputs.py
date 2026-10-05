@@ -29,7 +29,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 CORE_REPO = "https://github.com/buchochelliq-labs/intentumdiff-core"
 # Immutable reviewed engine candidate for this binding. Override for an explicit
 # integration build; never let a moving branch silently change the engine under CI.
-CORE_REF = os.environ.get("INTENTUMDIFF_CORE_REF", "449d233e57de2c9ae956f484ce26ad95837d20d7")
+CORE_REF = os.environ.get("INTENTUMDIFF_CORE_REF", "6fa6e3942bcbc7b05759bcd253a22f1b503287a5")
 CORE_DEST = REPO_ROOT / "build" / "intentumdiff-core"
 WASM_DEST = REPO_ROOT / "src" / "intentumdiff" / "wasm"
 
@@ -81,19 +81,25 @@ def stage_wasm(wasm_dir: str | None) -> None:
 def _successful_artifact_runs(get, api: str, org: str, repo: str, ref: str | None = None) -> list[dict]:
     """Search bounded run history without losing pinned builds behind scheduled jobs."""
     import json
-    query = "status=success&per_page=100"
-    if ref:
-        query += f"&head_sha={ref}"
-    result: list[dict] = []
-    for page in range(1, 11):
-        runs = json.loads(get(f"{api}/repos/{org}/{repo}/actions/runs?{query}&page={page}"))
-        batch = runs.get("workflow_runs") or []
-        result.extend(run for run in batch
-                      if (not ref or run.get("head_sha") == ref)
-                      and not run.get("path", "").startswith("dynamic/"))
-        if len(batch) < 100:
-            break
-    return result
+    base_query = "status=success&per_page=100"
+    queries = [f"{base_query}&head_sha={ref}", base_query] if ref else [base_query]
+    for query in queries:
+        result: list[dict] = []
+        for page in range(1, 11):
+            runs = json.loads(get(f"{api}/repos/{org}/{repo}/actions/runs?{query}&page={page}"))
+            batch = runs.get("workflow_runs") or []
+            result.extend(run for run in batch
+                          if (not ref or run.get("head_sha") == ref)
+                          and not run.get("path", "").startswith("dynamic/"))
+            if len(batch) < 100:
+                break
+        if result:
+            return result
+        # CI observed an empty filtered lookup for a pinned Lua build that
+        # remained available in repository history. Search that bounded history
+        # once, still requiring the exact registry SHA above. Downloaded bytes
+        # must also pass the existing checksum verification before staging.
+    return []
 
 
 def stage_wasm_from_artifacts(token: str, org: str = "buchochelliq-labs") -> int:

@@ -10,6 +10,7 @@ import pytest
 
 from intentumdiff.core.models import NodePosition, SemanticNode
 from intentumdiff.lsp.enricher import TypeEnricher
+from intentumdiff.rust_core import try_rust_collect_hover_targets
 from intentumdiff.lsp.exceptions import LspConnectionError, LspTimeoutError
 
 
@@ -63,8 +64,8 @@ def test_collect_hover_targets_finds_function_name_leaf() -> None:
     leaf = _node("n1", "function_name")
     root = _node("root", "module", children=[leaf])
     enricher = TypeEnricher(_make_client({}), "python")  # type: ignore[arg-type]
-    targets = enricher._collect_hover_targets(root)
-    result_ids = [rn.id for rn, _pn in targets]
+    targets = try_rust_collect_hover_targets(root)
+    result_ids = [nid for nid, _line, _col in targets]
     assert "n1" in result_ids
 
 
@@ -73,8 +74,8 @@ def test_collect_hover_targets_ignores_non_name_types() -> None:
     leaf = _node("n1", "string_literal")
     root = _node("root", "module", children=[leaf])
     enricher = TypeEnricher(_make_client({}), "python")  # type: ignore[arg-type]
-    targets = enricher._collect_hover_targets(root)
-    assert not any(rn.id == "n1" for rn, _pn in targets)
+    targets = try_rust_collect_hover_targets(root)
+    assert not any(nid == "n1" for nid, _line, _col in targets)
 
 
 def test_collect_hover_targets_decl_node_uses_name_leaf_position() -> None:
@@ -83,11 +84,8 @@ def test_collect_hover_targets_decl_node_uses_name_leaf_position() -> None:
     decl = _node("decl1", "assignment", children=[name_leaf])
     root = _node("root", "module", children=[decl])
     enricher = TypeEnricher(_make_client({}), "python")  # type: ignore[arg-type]
-    targets = enricher._collect_hover_targets(root)
-    decl_targets = [(rn, pn) for rn, pn in targets if rn.id == "decl1"]
-    assert decl_targets, "expected assignment node in targets"
-    _rn, pn = decl_targets[0]
-    assert pn.id == "name", "position node should be the name leaf"
+    targets = try_rust_collect_hover_targets(root)
+    assert ("decl1", 3, 4) in targets
 
 
 def test_collect_hover_targets_ignores_non_leaf_name_types() -> None:
@@ -96,8 +94,8 @@ def test_collect_hover_targets_ignores_non_leaf_name_types() -> None:
     non_leaf = _node("outer", "function_name", children=[inner])
     root = _node("root", "module", children=[non_leaf])
     enricher = TypeEnricher(_make_client({}), "python")  # type: ignore[arg-type]
-    targets = enricher._collect_hover_targets(root)
-    result_ids = [rn.id for rn, _pn in targets]
+    targets = try_rust_collect_hover_targets(root)
+    result_ids = [nid for nid, _line, _col in targets]
     # inner is a leaf → included; outer is not a leaf → not added as name-leaf target
     assert "inner" in result_ids
     assert "outer" not in result_ids
@@ -113,7 +111,7 @@ def test_enrich_maps_position_to_node_id() -> None:
     root = _node("root", "module", children=[leaf])
     client = _make_client({(5, 3): "int"})
 
-    result = run(TypeEnricher(client, "python").enrich("/tmp/test.py", "x: int = 1", root))  # type: ignore[arg-type]
+    result = run(TypeEnricher(client, "python").enrich("/tmp/test.py", "\n" * 5 + "   f", root))  # type: ignore[arg-type]
     assert result == {"n1": "int"}
 
 
@@ -124,7 +122,7 @@ def test_enrich_multiple_nodes() -> None:
     root = _node("root", "module", children=[a, b, c])
     client = _make_client({(0, 0): "str", (1, 0): "int", (2, 0): "never"})
 
-    result = run(TypeEnricher(client, "python").enrich("/tmp/test.py", "", root))  # type: ignore[arg-type]
+    result = run(TypeEnricher(client, "python").enrich("/tmp/test.py", "a\nb\nc\n", root))  # type: ignore[arg-type]
     assert result == {"a": "str", "b": "int"}
 
 
@@ -134,7 +132,7 @@ def test_enrich_returns_empty_on_connection_error() -> None:
     client = MagicMock()
     client.did_open = AsyncMock(side_effect=LspConnectionError("refused"))
 
-    result = run(TypeEnricher(client, "python").enrich("/tmp/test.py", "", root))  # type: ignore[arg-type]
+    result = run(TypeEnricher(client, "python").enrich("/tmp/test.py", "a\nb\nc\n", root))  # type: ignore[arg-type]
     assert result == {}
 
 
@@ -153,14 +151,14 @@ def test_enrich_skips_nodes_on_timeout() -> None:
     client.did_close = AsyncMock()
     client.hover = AsyncMock(side_effect=_hover)
 
-    result = run(TypeEnricher(client, "python").enrich("/tmp/test.py", "", root))  # type: ignore[arg-type]
+    result = run(TypeEnricher(client, "python").enrich("/tmp/test.py", "a\nb\nc\n", root))  # type: ignore[arg-type]
     assert "a" not in result
     assert result.get("b") == "float"
 
 
 def test_enrich_empty_tree() -> None:
     root = _node("root", "module")
-    result = run(TypeEnricher(_make_client({}), "python").enrich("/tmp/test.py", "", root))  # type: ignore[arg-type]
+    result = run(TypeEnricher(_make_client({}), "python").enrich("/tmp/test.py", "a\nb\nc\n", root))  # type: ignore[arg-type]
     assert result == {}
 
 
@@ -174,7 +172,7 @@ def test_enrich_did_close_called_even_on_unexpected_error() -> None:
     client.did_close = AsyncMock()
     client.hover = AsyncMock(side_effect=RuntimeError("unexpected"))
 
-    result = run(TypeEnricher(client, "python").enrich("/tmp/test.py", "", root))  # type: ignore[arg-type]
+    result = run(TypeEnricher(client, "python").enrich("/tmp/test.py", "a\nb\nc\n", root))  # type: ignore[arg-type]
     client.did_close.assert_called_once()
     assert result == {}
 
@@ -183,7 +181,7 @@ def test_enrich_did_close_called_even_on_unexpected_error() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_rust_hover_target_collection_matches_python_walk() -> None:
+def test_rust_hover_target_collection_matches_known_expectations() -> None:
     """`lsp_collect_hover_targets_json` mirrors `_collect_hover_targets` triple-for-triple
     on a tree exercising every rule: name leaves (own position), generic identifiers
     (excluded), declarations/parameters (first-name-leaf position under the DECL id),
@@ -217,15 +215,7 @@ def test_rust_hover_target_collection_matches_python_walk() -> None:
     )
 
     rust_triples = try_rust_collect_hover_targets(root)
-    if rust_triples is None:
-        pytest.skip("rust core without lsp_collect_hover_targets_json")
-
-    enricher = TypeEnricher(_make_client({}), "python")  # type: ignore[arg-type]
-    python_triples = [
-        (rn.id, pn.position.start_line, pn.position.start_col)
-        for rn, pn in enricher._collect_hover_targets(root)
-    ]
-    assert rust_triples == python_triples
+    assert rust_triples == [("f1", 1, 4), ("decl1", 5, 2), ("v", 5, 2), ("p1", 7, 8), ("inner", 8, 1)]
     # The scenario itself stays meaningful: the dedupe + decl mapping actually fired.
     assert ("decl1", 5, 2) in rust_triples
     assert ("p1", 7, 8) in rust_triples
@@ -233,15 +223,14 @@ def test_rust_hover_target_collection_matches_python_walk() -> None:
 
 
 def test_enricher_query_all_prefers_rust_triples(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`_query_all` consumes the Rust triples when the core serves them — the Python walk
-    is the fallback/oracle only."""
+    """The async transport consumes the Rust triples without reinterpreting them."""
     import intentumdiff.rust_core as rust_core
 
     calls: list[str] = []
     monkeypatch.setattr(
         rust_core,
-        "try_rust_collect_hover_targets",
-        lambda root: calls.append("rust") or [("n1", 3, 4)],
+        "collect_lsp_hover_targets",
+        lambda root, source: calls.append("rust") or [("n1", 3, 4)],
     )
     client = _make_client({(3, 4): "int"})
     enricher = TypeEnricher(client, "python")  # type: ignore[arg-type]
@@ -249,3 +238,56 @@ def test_enricher_query_all_prefers_rust_triples(monkeypatch: pytest.MonkeyPatch
     result = run(enricher.enrich("/tmp/a.py", "x = 1\n", root))
     assert result == {"n1": "int"}
     assert calls == ["rust"]
+
+
+def test_engine_failure_never_uses_python_hover_oracle(monkeypatch):
+    from intentumdiff import rust_core
+    def unavailable():
+        raise RuntimeError("engine unavailable")
+    monkeypatch.setattr(rust_core, "_load_backend", unavailable)
+    root = _node("f", "function_name", line=1, col=4)
+    with pytest.raises(RuntimeError, match="engine unavailable"):
+        TypeEnricher(_make_client({}), "python")._hover_triples(root, "")
+
+
+@pytest.mark.parametrize("payload", [[None], [{"id":"x","line":True,"col":0}], [{"id":"x","line":0,"col":-1}], {}])
+def test_malformed_engine_targets_do_not_disappear(monkeypatch, payload):
+    import json
+    from intentumdiff import rust_core
+    backend = MagicMock()
+    backend.lsp_collect_utf16_hover_targets_json.return_value = json.dumps(payload)
+    monkeypatch.setattr(rust_core, "_load_backend", lambda: backend)
+    with pytest.raises(RuntimeError):
+        TypeEnricher(_make_client({}), "python")._hover_triples(_node("root", "module"), "")
+
+
+def test_source_judged_hover_corpus():
+    import json
+    import os
+    from pathlib import Path
+    import subprocess
+    from intentumdiff.rust_core import try_rust_collect_hover_targets
+    cases = json.loads((Path(__file__).parents[1] / "fixtures/hover_targets.json").read_text(encoding="utf-8"))
+    for case in cases:
+        targets = try_rust_collect_hover_targets(SemanticNode.model_validate(case["tree"]))
+        assert [list(target) for target in targets] == case["expected"]
+        from intentumdiff.rust_core import collect_lsp_hover_targets
+        protocol = collect_lsp_hover_targets(SemanticNode.model_validate(case["tree"]), case["source"])
+        assert [list(target) for target in protocol] == case["expected_utf16"]
+        client = _make_client({(line,col): "type" for _id,line,col in protocol})
+        result = run(TypeEnricher(client,"python").enrich("/tmp/fixture.py", case["source"], SemanticNode.model_validate(case["tree"])))
+        assert set(result) == {target[0] for target in protocol}
+        assert [list(call.args[1:]) for call in client.hover.call_args_list] == [target[1:] for target in case["expected_utf16"]]
+        if probe := os.environ.get("INTENTUMDIFF_NATIVE_PROBE"):
+            native = json.loads(subprocess.run([probe], input=json.dumps({"handler":"hover_targets","tree":case["tree"]}), text=True, encoding="utf-8", capture_output=True, check=True).stdout)
+            assert native == [list(target) for target in targets]
+            native_protocol = json.loads(subprocess.run([probe], input=json.dumps({"handler":"hover_targets_utf16","tree":case["tree"],"source":case["source"]}), text=True, encoding="utf-8", capture_output=True, check=True).stdout)
+            assert native_protocol == [list(target) for target in protocol]
+
+
+def test_unicode_hover_uses_utf16_protocol_column():
+    leaf = _node("value", "variable_name", line=0, col=6)
+    client = _make_client({(0, 5): "int"})
+    result = run(TypeEnricher(client, "python").enrich("/tmp/a.py", '"é"; value = 1', leaf))
+    assert result == {"value": "int"}
+    assert client.hover.call_args.args[1:] == (0, 5)

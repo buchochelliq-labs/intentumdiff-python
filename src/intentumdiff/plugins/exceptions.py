@@ -91,3 +91,7 @@ class PluginLoadError(PluginError):
     def __init__(self, wasm_path: str, detail: str) -> None:
         self.wasm_path = wasm_path
         super().__init__(f"Failed to load plugin from {wasm_path!r}: {detail}")
+
+
+class PluginSecurityError(PluginLoadError):
+    """A security gate denied loading; parser fallback must not bypass the denial."""

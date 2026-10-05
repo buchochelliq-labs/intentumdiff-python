@@ -190,10 +190,6 @@ from intentumdiff.analysis.schema_resolver import (
     schema_cache_fingerprint,
     schema_resolution_metadata,
 )
-from intentumdiff.analysis.text_review import (
-    PresentationResult,
-    normalize_generic_text_for_review,
-)
 from intentumdiff.analysis.user_schemas import (
     load_user_schema_profiles,
     user_xml_dialects_payload,
@@ -220,10 +216,8 @@ from intentumdiff.plugins.loader import _strip_trivia_impl
 from intentumdiff.plugins.registry import PluginRegistry
 from intentumdiff.rust_core import (
     RustCoreCommitJsonAttempt,
-    apply_invariances,
     build_style_only_evidence,
     enrich_node_facts,
-    review_trees_equivalent,
     try_register_user_xml_dialects,
     try_rust_core_batch_diff,
     try_rust_core_batch_diffs,
@@ -1795,157 +1789,18 @@ class SemanticDiffer:
                         reason="rust finalize pass completed",
                         count=int(entry.get("changes_after", 0)),
                     )
-                # Semantic invariances (css color / literal equivalence / yaml block↔flow / import
-                # reorder / …) are equivalences that must hold REGARDLESS of routing, but this
-                # short-circuit returns before the stage-12 apply_invariances. Run it here on the
-                # routed changes so canonical-value "zero-change" edits collapse under routing too
-                # (#57: unlocks json/yaml/css/python). No-op when no invariance fires.
-                fin_changes = finalize_result["changes"]
-                fin_is_style_only = finalize_result["is_style_only"]
-                fin_invariant_groups: list[Any] = []
-                fin_invariant_ignored: list[dict[str, Any]] = []
-                if fin_changes:
-                    _inv = apply_invariances(
-                        fin_changes,
-                        old_tree=old_tree,
-                        new_tree=new_tree,
-                        old_source=old_content,
-                        new_source=new_content,
-                        language=language,
-                    )
-                    if len(_inv.changes) != len(fin_changes) or _inv.change_groups:
-                        fin_changes = _inv.changes
-                        fin_invariant_groups = list(_inv.change_groups)
-                        # The invariance's own IGNORED_STYLE groups ARE the style evidence — carry
-                        # their rule_id/reason so metadata["ignored_style_changes"] leads with the
-                        # specific reason (css.color.canonical_equivalence), not the generic
-                        # source-equivalence fallback below.
-                        for group in fin_invariant_groups:
-                            diagnostics.record_group(stage="invariance", group=group)
-                        fin_invariant_ignored = [
-                            {"rule_id": g.rule_id, **dict(g.metadata)}
-                            for g in fin_invariant_groups
-                            if g.kind == ChangeGroupKind.IGNORED_STYLE
-                        ]
-                        if not fin_changes and old_content != new_content:
-                            fin_is_style_only = True
-                # Generic files are line-oriented from the user's point of view
-                # (#57 generic routing, mirroring the stage-12 orchestration): the routed
-                # finalize's parser-token churn is REPLACED wholesale by the Rust text
-                # review's stable line/character spans, then the (Rust-first) markdown
-                # section passes run for .md filenames. Parser-derived groups are dropped
-                # with the churn — carrying them forward invents fake pairings between
-                # unrelated lines.
-                fin_ignored_override: list[dict[str, Any]] | None = None
-                if language.lower() == "generic":
-                    generic_presented = normalize_generic_text_for_review(
-                        fin_changes,
-                        old_content,
-                        new_content,
-                    )
-                    presented_generic = PresentationResult(
-                        changes=generic_presented.changes,
-                        change_groups=generic_presented.change_groups,
-                        ignored_style_changes=[
-                            *generic_presented.ignored_style_changes,
-                        ],
-                    )
-                    presented_generic = _markdown_section_move_presentation(
-                        presented_generic,
-                        old_source=old_content,
-                        new_source=new_content,
-                        old_filename=filename,
-                        new_filename=(
-                            new_filename if new_filename is not None else filename
-                        ),
-                    )
-                    presented_generic = _markdown_section_heading_rename_presentation(
-                        presented_generic,
-                        old_source=old_content,
-                        new_source=new_content,
-                        old_filename=filename,
-                        new_filename=(
-                            new_filename if new_filename is not None else filename
-                        ),
-                    )
-                    fin_changes = presented_generic.changes
-                    fin_invariant_groups = list(presented_generic.change_groups)
-                    fin_ignored_override = list(presented_generic.ignored_style_changes)
-                    finalize_result["change_groups"] = []
-                    finalize_result["no_surviving_changes"] = False
-                    # Mirror the stage-12 style-only resolution: identical sources (or
-                    # whitespace-collapsed-equal trees) with no surviving line spans are a
-                    # style-only diff, not "no changes". The Rust finalize's flag reflects
-                    # its own suppressions, which the replacement just discarded.
-                    if not fin_changes:
+                from intentumdiff.rust_core import complete_routed_review
 
-                        fin_is_style_only = (
-                            old_content == new_content
-                            or review_trees_equivalent(old_tree, new_tree)
-                        )
-                # Generic presentation may replace the final change list. Core still
-                # owns the equivalence decision; Python only marshals the trees.
-                if not fin_changes and not fin_is_style_only:
-                    fin_is_style_only = (
-                        old_content == new_content
-                        or review_trees_equivalent(old_tree, new_tree)
-                    )
-                metadata_fin: dict[str, Any] = {
-                    "engine_owner": "rust",
-                    "semantic_contract": "rust_finalize_review_v1",
-                    "rust_core": {
-                        "engine": "rust_finalize_review_v1",
-                        "stage": "per_stage_finalize_routing",
-                        "used": True,
-                    },
-                }
-                # Context metadata the normal path attaches at stage 11 — the routed
-                # return must carry the same contracts (cpp compile_commands pilot gap).
-                if schema_metadata is not None:
-                    metadata_fin["schema"] = schema_metadata
-                if compile_metadata is not None:
-                    metadata_fin["compile_commands"] = compile_metadata
-                combined_ignored = (
-                    fin_ignored_override
-                    if fin_ignored_override is not None
-                    else [
-                        *fin_invariant_ignored,
-                        *finalize_result["ignored_style_changes"],
-                    ]
-                )
-                if combined_ignored:
-                    metadata_fin["ignored_style_changes"] = combined_ignored
-                if finalize_result["no_surviving_changes"]:
-                    metadata_fin["no_surviving_changes"] = True
-                routed_groups = [*finalize_result["change_groups"], *fin_invariant_groups]
-                if not fin_changes and old_content != new_content and not fin_invariant_ignored:
-                    # The normal path attaches a source-equivalence suppression group
-                    # post-diff when a diff nets to zero changes but the sources differ
-                    # (xml attribute reorder -> zero changes must still RECORD the
-                    # suppression, not merely be absent). The routed short-circuit returns
-                    # before that stage, so mirror it here.
-                    style_evidence = build_style_only_evidence(
-                        old_source=old_content,
-                        new_source=new_content,
-                        language=language,
-                    )
-                    for group in style_evidence.change_groups:
-                        diagnostics.record_group(stage="invariance", group=group)
-                    routed_groups.extend(style_evidence.change_groups)
-                    if style_evidence.ignored_style_changes:
-                        metadata_fin.setdefault("ignored_style_changes", []).extend(
-                            style_evidence.ignored_style_changes
-                        )
-                routed = SemanticDiff(
+                routed = complete_routed_review(
+                    finalized=finalize_result, old_tree=old_tree, new_tree=new_tree,
+                    old_source=old_content, new_source=new_content,
                     old_filename=filename,
                     new_filename=new_filename if new_filename is not None else filename,
-                    language=language,
-                    changes=fin_changes,
-                    change_groups=routed_groups,
-                    has_semantic_changes=bool(fin_changes) and not fin_is_style_only,
-                    is_style_only=fin_is_style_only,
-                    metadata=metadata_fin,
+                    language=language, schema_metadata=schema_metadata,
+                    compile_metadata=compile_metadata,
                 )
+                for group in routed.change_groups:
+                    diagnostics.record_group(stage="invariance", group=group)
                 routed = _apply_file_lifecycle_to_diff(routed, file_lifecycle)
                 routed = apply_guardrails_to_diff(
                     routed,

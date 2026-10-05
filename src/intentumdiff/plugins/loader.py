@@ -35,6 +35,7 @@ from wasmtime.component import Component, Linker
 from intentumdiff.plugins.exceptions import (
     PluginFuelExhausted,
     PluginLoadError,
+    PluginSecurityError,
     PluginOutputError,
     PluginSandboxViolation,
 )
@@ -88,7 +89,7 @@ def _verify_builtin_provenance(path: Path) -> None:
 
     Parallels hub.py's third-party checksum path, but for the first-party bundled parsers: a
     mismatch — or an artifact the manifest never saw (the #87 stale-artifact case) — is a
-    supply-chain red flag. It is logged as a warning, and raised as a ``PluginLoadError`` when
+    supply-chain red flag. It is logged as a warning, and raised as a ``PluginSecurityError`` (a ``PluginLoadError`` subtype) when
     ``INTENTUMDIFF_ENFORCE_WASM_PROVENANCE=1``. A missing/unreadable manifest (a dev build without
     the package-time provenance step) is skipped — verification is optional by design (#89).
     """
@@ -113,7 +114,7 @@ def _verify_builtin_provenance(path: Path) -> None:
     if problem is None:
         return
     if os.environ.get(_ENFORCE_PROVENANCE_ENV) == "1":
-        raise PluginLoadError(str(path), problem)
+        raise PluginSecurityError(str(path), problem)
     logger.warning(
         "Wasm provenance check: %s (set %s=1 to make this a hard failure).",
         problem,
@@ -159,7 +160,7 @@ def _check_wasmtime_version(
         )
         return
 
-    raise PluginLoadError(
+    raise PluginSecurityError(
         "<wasmtime-version-check>",
         f"wasmtime=={version} is in the known-vulnerable blocklist "
         f"({_WASMTIME_ADVISORY} — host-process panic on large table allocation "
@@ -430,7 +431,7 @@ def _check_osv_cache_or_block(
                 "plugins remain blocked without INTENTUMDIFF_ALLOW_VULNERABLE_WASMTIME=1."
             )
             return
-        raise PluginLoadError(
+        raise PluginSecurityError(
             "<osv-check>",
             "The OSV advisory check failed on its last attempt (network "
             "unavailable?). Plugin loading is blocked to protect against "
@@ -457,7 +458,7 @@ def _check_osv_cache_or_block(
                 )
                 return
             aliases = ", ".join(v.get("aliases", []))
-            raise PluginLoadError(
+            raise PluginSecurityError(
                 "<osv-check>",
                 f"OSV advisory {v['id']}"
                 + (f" ({aliases})" if aliases else "")

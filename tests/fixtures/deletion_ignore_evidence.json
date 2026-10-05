@@ -1,0 +1,7 @@
+{
+  "name": "real_deletion_coincident_with_ignore_edit",
+  "old_files": {"src/removed.py": "value = 1\n", ".gitignore": "# before\n"},
+  "new_files": {".gitignore": "*.py\n"},
+  "deleted_path": "src/removed.py",
+  "gitignore_excluded": false
+}

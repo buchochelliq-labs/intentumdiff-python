@@ -679,31 +679,34 @@ def try_rust_markdown_section_review(
         raise RuntimeError(f"Rust markdown section review failed: {exc}") from exc
 
 
-def try_rust_collect_hover_targets(
-    root: SemanticNode,
-) -> list[tuple[str, int, int]] | None:
-    """Collect LSP hover targets in the Rust core (issue 100 S2); None -> Python walk.
+def try_rust_collect_hover_targets(root: SemanticNode) -> list[tuple[str, int, int]]:
+    """Decode Rust-owned hover targets; required engine failures propagate.
 
-    Returns ``(result_node_id, line, col)`` triples mirroring
-    ``TypeEnricher._collect_hover_targets``: name-type leaves hover at their own
-    position; declaration/parameter nodes hover at their first name-leaf but store
-    under the declaration node's id.
+    The historical name is retained for compatibility. There is no Python walker.
     """
-    try:
-        backend = _load_backend()
-        collect_fn = getattr(backend, "lsp_collect_hover_targets_json", None)
-        if not callable(collect_fn):
-            return None
-        data = json.loads(collect_fn(root.model_dump_json()))
-        if not isinstance(data, list):
-            return None
-        return [
-            (str(item["id"]), int(item["line"]), int(item["col"]))
-            for item in data
-            if isinstance(item, dict)
-        ]
-    except Exception as exc:  # noqa: BLE001 - an engine failure is not an unsupported decline.
-        raise RuntimeError(f"Rust hover-target collection failed: {exc}") from exc
+    data = _required_engine_json(
+        "lsp_collect_hover_targets_json", root.model_dump_json(), result_type=list,
+    )
+    return _hover_target_dtos(data)
+
+
+def collect_lsp_hover_targets(root: SemanticNode, source: str) -> list[tuple[str, int, int]]:
+    """Rust-owned selection and UTF-8 byte to UTF-16 protocol conversion."""
+    data = _required_engine_json(
+        "lsp_collect_utf16_hover_targets_json", root.model_dump_json(), source, result_type=list,
+    )
+    return _hover_target_dtos(data)
+
+
+def _hover_target_dtos(data: list[Any]) -> list[tuple[str, int, int]]:
+    targets = []
+    for item in data:
+        if (not isinstance(item, dict) or not isinstance(item.get("id"), str)
+                or type(item.get("line")) is not int or type(item.get("col")) is not int
+                or item["line"] < 0 or item["col"] < 0):
+            raise RuntimeError("Rust hover-target response has an invalid target DTO")
+        targets.append((item["id"], item["line"], item["col"]))
+    return targets
 
 
 def try_rust_finalize_review(
@@ -768,6 +771,23 @@ def try_rust_finalize_review(
         }
     except Exception as exc:  # noqa: BLE001 - an engine failure is not an unsupported decline.
         raise RuntimeError(f"Rust finalize review failed: {exc}") from exc
+
+
+def complete_routed_review(*, finalized: dict[str, Any], old_tree: SemanticNode,
+                           new_tree: SemanticNode, old_source: str, new_source: str,
+                           old_filename: str, new_filename: str, language: str,
+                           schema_metadata: dict[str, Any] | None = None,
+                           compile_metadata: dict[str, Any] | None = None) -> SemanticDiff:
+    """Marshal routed review inputs; the Rust engine owns final meaning and evidence."""
+    payload = dict(finalized)
+    for field in ("changes", "change_groups"):
+        payload[field] = [item.model_dump(mode="json") for item in finalized[field]]
+    return SemanticDiff.model_validate(_c_abi_call("complete_routed_review", json.dumps({
+        "finalized": payload, "old_tree": old_tree.model_dump(mode="json"),
+        "new_tree": new_tree.model_dump(mode="json"), "old_source": old_source,
+        "new_source": new_source, "old_filename": old_filename, "new_filename": new_filename,
+        "language": language, "schema_metadata": schema_metadata, "compile_metadata": compile_metadata,
+    })))
 
 
 def source_fallback_diff(old: str, new: str, old_filename: str, new_filename: str,
@@ -988,6 +1008,25 @@ class _RustCacheStore:
                 "cache_list_entries",
                 self._p, self._t, self._m,
                 table, language, since, before, min_size, max_size, limit, with_glob,
+            )
+        )
+
+    def list_entries_filtered(
+        self,
+        table: str,
+        language: str | None,
+        since: int | None,
+        before: int | None,
+        min_size: int | None,
+        max_size: int | None,
+        limit: int,
+        file_glob: str | None,
+    ) -> str:
+        return json.dumps(
+            _c_abi_call(
+                "cache_list_entries_filtered",
+                self._p, self._t, self._m,
+                table, language, since, before, min_size, max_size, limit, file_glob,
             )
         )
 
