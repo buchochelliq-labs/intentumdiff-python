@@ -9,13 +9,6 @@ import pytest
 from intentumdiff import SemanticDiffer
 from intentumdiff.core.models import ChangeGroupKind, ChangeType, DiffConfig
 from intentumdiff.plugins.exceptions import PluginFuelExhausted
-from pathlib import Path
-
-pytestmark = pytest.mark.skipif(
-    not (Path(__file__).resolve().parents[2] / "crates" / "parsers").exists(),
-    reason="monorepo crates tree not present (#82 split python repo)",
-)
-
 
 @dataclass(frozen=True)
 class IntentScenario:
