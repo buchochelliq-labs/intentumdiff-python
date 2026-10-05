@@ -53,8 +53,6 @@ _KNOWN_PYTHON_ENGINE_DEBT_PATHS = {
 
 _KNOWN_PYTHON_TREE_SITTER_DEPS: set[str] = set()
 
-_KNOWN_INTERPRET_CST_CRATES: set[str] = set()
-
 
 def test_issue_specific_engine_helpers_stay_out_of_python_layer() -> None:
     banned_helpers = [
