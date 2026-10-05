@@ -17,6 +17,9 @@ _PYTHON_ENGINE_IMPORT_RE = re.compile(
     r"(^|\s)(from|import)\s+("
     r"intentumdiff\.analysis"
     r"|intentumdiff\.core\.engine"
+    r"|intentumdiff\.core\.cst_serializer"
+    r"|tree_sitter"
+    r"|tree-sitter"
     r")\b",
     re.MULTILINE,
 )
