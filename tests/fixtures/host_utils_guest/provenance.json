@@ -1,0 +1,11 @@
+{
+  "core_repository": "buchochelliq-labs/intentumdiff-core",
+  "core_commit": "0a12e7e79c71198cd7958dff9eacf6a95c9cf9e7",
+  "source_path": "crates/rust-core-host/tests/fixtures/host-utils-guest",
+  "rust_toolchain": "1.95.0",
+  "target": "wasm32-wasip2",
+  "command": "cargo build --locked --release --manifest-path crates/rust-core-host/tests/fixtures/host-utils-guest/Cargo.toml --target wasm32-wasip2 -j 1",
+  "wasm_sha256": "aa195b45375b0c43bab08b15075653274c89207248907bfc8d232e32dbcc802f",
+  "gzip_sha256": "65632765556c0be7d6725235706d0a225824c1316ecdc89cdcc64d0b4771e1f2",
+  "cases_sha256": "93f07adde6488fc5094b19202587ebc83b28109af39f56547322ed96f265b63f"
+}
