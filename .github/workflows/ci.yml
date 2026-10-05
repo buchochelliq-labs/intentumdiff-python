@@ -120,14 +120,25 @@ jobs:
         continue-on-error: true
         run: python scripts/diagnose_platform.py
 
+      - name: Record candidate source identities
+        if: env.HAS_SPLIT_TOKEN == 'true'
+        shell: bash
+        run: |
+          mkdir -p evidence
+          git rev-parse HEAD > evidence/python-tested-commit.txt
+          git -C build/intentumdiff-core rev-parse HEAD > evidence/core-commit.txt
+          rustc --version > evidence/rust-version.txt
+          python --version > evidence/python-version.txt
+
       - name: Compare native Rust and public Python migration corpus
         if: env.HAS_SPLIT_TOKEN == 'true'
         shell: bash
         run: |
+          set -o pipefail
           cargo build --manifest-path build/intentumdiff-core/crates/rust-core-host/Cargo.toml --example migration_probe
           probe=build/intentumdiff-core/crates/rust-core-host/target/debug/examples/migration_probe
           if [ -f "$probe.exe" ]; then probe="$probe.exe"; fi
-          python scripts/check_migration_parity.py --core-dir build/intentumdiff-core --native "$probe" --wasm-dir src/intentumdiff/wasm
+          python scripts/check_migration_parity.py --core-dir build/intentumdiff-core --native "$probe" --wasm-dir src/intentumdiff/wasm --evidence evidence/migration-parity.json 2>&1 | tee evidence/migration-parity.log
           export INTENTUMDIFF_NATIVE_PROBE="$probe"
           echo "INTENTUMDIFF_NATIVE_PROBE=$probe" >> "$GITHUB_ENV"
           python -m pytest tests/unit/test_native_parser_selection.py tests/unit/test_shared_filename_selection.py tests/unit/test_detect.py tests/unit/test_shared_content_detection.py tests/unit/test_shared_cache_filtering.py tests/unit/test_shared_patch_source.py tests/unit/test_deletion_ignore_evidence.py tests/unit/test_lazy_parser_registry.py tests/unit/test_lsp_enricher.py tests/unit/test_shared_guardrail_policy.py tests/unit/test_content_type.py tests/unit/test_shared_reference_resolution.py tests/unit/test_routed_review.py tests/unit/test_diffignore.py -q
@@ -136,7 +147,7 @@ jobs:
 
       - name: Run the full unit suite
         if: env.HAS_SPLIT_TOKEN == 'true'
-        run: python -m pytest tests/unit -q
+        run: python -m pytest tests/unit -q --junitxml=evidence/unit-suite.xml
         env:
           # Components were just staged, so an incomplete set is a provisioning failure, not
           # a reason to quietly cover less. Without this the suite ran with ZERO renderers
@@ -165,6 +176,14 @@ jobs:
         if: env.HAS_SPLIT_TOKEN == 'true'
         run: pip wheel . --no-deps --wheel-dir dist
 
+      - name: Record candidate artifact identities
+        if: env.HAS_SPLIT_TOKEN == 'true'
+        shell: bash
+        run: |
+          python scripts/wasm_provenance.py verify
+          cp src/intentumdiff/wasm/wasm_provenance.json evidence/wasm_provenance.json
+          python scripts/verify_artifacts.py --root . --manifest evidence/wheels.sha256 record --patterns "dist/*.whl"
+
       - name: Smoke the wheel this platform just built
         # Installs into a CLEAN venv and does what a user does in their first five minutes:
         # import, console script, python -m, a real diff, clean stderr, and every URL in the
@@ -175,7 +194,19 @@ jobs:
         run: |
           wheel=$(ls dist/*.whl | head -1)
           echo "smoking $wheel on $RUNNER_OS"
-          python scripts/smoke_published_wheel.py --wheel "$wheel"
+          set -o pipefail
+          python scripts/smoke_published_wheel.py --wheel "$wheel" 2>&1 | tee evidence/wheel-smoke.log
+
+      - name: Retain candidate outputs and wheels for independent review
+        if: always() && env.HAS_SPLIT_TOKEN == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: candidate-evidence-${{ matrix.os }}-${{ github.run_attempt }}
+          retention-days: 30
+          if-no-files-found: error
+          path: |
+            evidence/
+            dist/*.whl
 
   action-pins:
     name: Pins and links we ship
