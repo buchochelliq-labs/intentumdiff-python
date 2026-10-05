@@ -137,12 +137,13 @@ def _validate_wheel_entries(
 
 
 def _verify_wasm_provenance(zf: zipfile.ZipFile, names: set[str], wasm_files: list[str]) -> int:
-    """Enforce the #89 provenance manifest when the wheel embeds one: every bundled `.wasm`
-    must appear in the manifest with a matching SHA-256, and the manifest must list no artifact
-    the wheel is missing (the #87 stale-artifact sweep as a package gate). Returns the number
-    of verified artifacts, or ``-1`` when no manifest is embedded (optional this slice)."""
+    """Require provenance for every bundled Wasm component before publication.
+
+    Every component must have a matching SHA-256, with no extra or missing artifacts.
+    Returns the number of verified artifacts.
+    """
     if PROVENANCE_ENTRY not in names:
-        return -1
+        raise ValueError("wheel is missing required Wasm provenance manifest")
     try:
         manifest = json.loads(zf.read(PROVENANCE_ENTRY).decode("utf-8"))
     except (ValueError, KeyError) as exc:
