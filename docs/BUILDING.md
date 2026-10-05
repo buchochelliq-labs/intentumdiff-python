@@ -36,6 +36,17 @@ python scripts/provision_build_inputs.py --from-parser-artifacts
 Provisioning without either a component directory or `--from-parser-artifacts`
 skips component staging. That is not a complete release-wheel build.
 
+For local components, `--wasm-dir` copies `wasm_provenance.json` when supplied.
+If your component directory has no manifest, generate one from the staged files:
+
+```bash
+python scripts/wasm_provenance.py generate
+python scripts/wasm_provenance.py verify
+```
+
+Artifact-backed provisioning generates this manifest automatically. The wheel must
+include it; installed-wheel smoke verifies its complete component set and hashes.
+
 ## 2. Build
 
 ```bash
