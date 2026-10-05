@@ -1,27 +1,50 @@
 # Building intentumdiff (Python) from source
 
-Toolchains: **Python 3.12**, **Rust 1.93.0** (the wheel build compiles the engine).
+CI toolchains: **Python 3.12**, **Rust 1.95.0** (the wheel build compiles the engine).
 
 ## 1. Provision the build inputs
 
-The engine and the parser components are separate repos' artifacts:
+The engine and the parser/renderer components come from separate repositories.
+The split Python repository does not require the retired monorepo. To use local
+build inputs:
 
 ```bash
 python scripts/provision_build_inputs.py \
-    --core-dir /path/to/intentumdiff-core \      # or omit to clone the repo
-    --wasm-dir /path/to/built/components       # parser .wasm set to bundle
+    --core-dir /path/to/intentumdiff-core \
+    --wasm-dir /path/to/built/components
 ```
 
 This stages `build/intentumdiff-core/` (pyproject's `[tool.maturin] manifest-path` points into
-it) and `src/intentumdiff/wasm/*.wasm`.
+it) and `src/intentumdiff/wasm/*.wasm`. Include the renderer components needed for
+`--format patch`, `--format html` and `--format llm` in the component directory.
+By default, omitting `--core-dir` fetches the immutable `CORE_REF` pinned in the
+provisioning script. A local checkout (`--core-dir` or `INTENTUMDIFF_CORE_DIR`) or
+`INTENTUMDIFF_CORE_REF` is an explicit override of that pin.
+
+For the artifact-backed CI path, configure Git authentication for the sibling
+repositories and provide `GH_TOKEN` or `GITHUB_TOKEN` with read access to their
+Actions artifacts, then run:
+
+```bash
+python -m pip install "pyyaml>=6.0"
+python scripts/provision_build_inputs.py --from-parser-artifacts
+```
+
+Provisioning without either a component directory or `--from-parser-artifacts`
+skips component staging. That is not a complete release-wheel build.
 
 ## 2. Build
 
 ```bash
-pip install cffi          # REQUIRED before the build: maturin's cffi-bindings mode
-                          # needs the cffi module importable by the target interpreter
-pip install -e .[dev,serve]          # editable dev install (drops the cdylib in-tree)
-# or a wheel:
+python -m pip install cffi
+python -m pip install -e ".[dev,serve]"
+```
+
+Install `cffi` first: maturin needs it importable by the target interpreter.
+To build a wheel instead of an editable installation:
+
+```bash
+python -m pip install cffi "maturin>=1.14,<2"
 maturin build --release -b cffi --out dist
 ```
 
@@ -31,7 +54,12 @@ maturin build --release -b cffi --out dist
 python -m pytest tests/unit -q
 ```
 
-The suite runs entirely over the ctypes path. Verify the live backend if in doubt:
+Runtime semantic tests use provisioned components and the public API through the
+ctypes path. They do not depend on monorepo source files. Platform skips must be
+classified in `tests/unit/skip_reasons_baseline.json`; PowerShell scenarios on Windows
+ARM64 skip only when Rust explicitly reports the parser unavailable.
+
+Verify the live backend if in doubt:
 `python -c "import intentumdiff.rust_core as r; print(type(r._load_backend()).__name__)"`
 must print `_CtypesBackend`.
 

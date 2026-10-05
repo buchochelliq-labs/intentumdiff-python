@@ -1,9 +1,10 @@
 # intentumdiff (Python) architecture — the thin binding
 
-Everything semantic — parsing, matching, classification, finalize, guardrails, cache, config,
-VCS reads — happens in the engine
-([intentumdiff-core](https://github.com/buchochelliq-labs/intentumdiff-core)). This package is the
-Python skin: it does **zero functional work**.
+Rust is the semantic authority for parsing, matching, classification, review
+finalization, guardrail policy and shared routing decisions
+([intentumdiff-core](https://github.com/buchochelliq-labs/intentumdiff-core)). Python
+provides the public API, DTOs, transport, presentation and host I/O. Filesystem,
+network and subprocess orchestration may live here; semantic decisions do not.
 
 ## What lives here
 

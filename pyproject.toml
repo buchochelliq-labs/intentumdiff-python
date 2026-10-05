@@ -35,10 +35,10 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/buchochelliq-labs/intentumdiff"
-Repository = "https://github.com/buchochelliq-labs/intentumdiff"
-Issues = "https://github.com/buchochelliq-labs/intentumdiff/issues"
-Documentation = "https://github.com/buchochelliq-labs/intentumdiff/tree/main/docs"
+Homepage = "https://github.com/buchochelliq-labs/intentumdiff-python"
+Repository = "https://github.com/buchochelliq-labs/intentumdiff-python"
+Issues = "https://github.com/buchochelliq-labs/intentumdiff-python/issues"
+Documentation = "https://buchochelliq-labs.github.io/intentumdiff-docs/"
 
 [project.optional-dependencies]
 dev = [
