@@ -15,8 +15,11 @@ python scripts/provision_build_inputs.py \
 ```
 
 This stages `build/intentumdiff-core/` (pyproject's `[tool.maturin] manifest-path` points into
-it) and `src/intentumdiff/wasm/*.wasm`. Include the renderer components needed for
-`--format patch`, `--format html` and `--format llm` in the component directory.
+it) and `src/intentumdiff/wasm/*.wasm`. Alongside the parsers, include the complete
+four-renderer set in the component directory: `terminal_renderer.wasm`,
+`patch_renderer.wasm`, `html_renderer.wasm` and `llm_renderer.wasm`. All four are
+registered built-ins and are required for complete component discovery, including
+when `INTENTUMDIFF_REQUIRE_ALL_COMPONENTS=1`.
 By default, omitting `--core-dir` fetches the immutable `CORE_REF` pinned in the
 provisioning script. A local checkout (`--core-dir` or `INTENTUMDIFF_CORE_DIR`) or
 `INTENTUMDIFF_CORE_REF` is an explicit override of that pin.
