@@ -2,51 +2,13 @@
 
 from __future__ import annotations
 
-import re
 import tomllib
 from pathlib import Path
 
 from intentumdiff.plugins.adapter import ParserAdapter
 from intentumdiff.plugins.loader import _language_info_record_to_dict
-import pytest
-
-pytestmark = pytest.mark.skipif(
-    not (Path(__file__).resolve().parents[2] / "crates" / "parsers").exists(),
-    reason="monorepo crates tree not present (#82 split python repo)",
-)
-
 
 ROOT = Path(__file__).resolve().parents[2]
-PARSER_LIBS = [
-    path
-    for base in (ROOT / "crates", ROOT / "plugins" / "intentumdiff_dbt" / "crates")
-    for path in base.glob("*/src/lib.rs")
-    if re.search(
-        r"fn\s+language_info\(\)\s*->\s*Vec<LanguageInfoRecord>",
-        path.read_text(encoding="utf-8"),
-    )
-]
-RENDERER_LIBS = [
-    path
-    for path in (ROOT / "crates").glob("*-renderer/src/lib.rs")
-    if "world: \"renderer-plugin\"" in path.read_text(encoding="utf-8")
-]
-
-
-def _language_ids(source: str) -> list[str]:
-    match = re.search(
-        r"fn\s+language_ids\(\)\s*->\s*Vec<String>\s*\{(?P<body>.*?)\n\s*\}",
-        source,
-        re.S,
-    )
-    assert match is not None
-    return re.findall(r'"([^"]+)"\.to_string\(\)', match.group("body"))
-
-
-def _sections(metadata: str) -> set[str]:
-    return set(re.findall(r"^\[language\.([^\]]+)\]$", metadata, re.M))
-
-
 class _FakeParserPlugin:
     trusted = True
     wasm_path = "fake.wasm"
@@ -93,20 +55,6 @@ def _adapter_for(
     return adapter
 
 
-def test_parser_crates_bundle_metadata_for_every_language_id():
-    assert PARSER_LIBS
-    for lib in PARSER_LIBS:
-        source = lib.read_text(encoding="utf-8")
-        metadata_path = lib.parent.parent / "plugin_metadata.info"
-        assert metadata_path.exists(), f"missing {metadata_path}"
-        metadata = metadata_path.read_text(encoding="utf-8")
-
-        assert "include_str!(\"../plugin_metadata.info\")" in source
-        assert set(_language_ids(source)) <= _sections(metadata), metadata_path
-        assert "[plugin]" in metadata
-        assert "last_updated = 2026-05-19" in metadata
-
-
 def test_cli_entry_points_include_intentumdiff_name():
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     scripts = pyproject["project"]["scripts"]
@@ -114,34 +62,6 @@ def test_cli_entry_points_include_intentumdiff_name():
     assert scripts["intentumdiff"] == "intentumdiff.cli:main"
     assert set(scripts) == {"intentumdiff"}
 
-
-def test_parser_language_info_no_longer_hardcodes_display_metadata():
-    forbidden = (
-        'author: "IntentumDiff"',
-        'plugin_version: "0.1.0"',
-        'last_updated: "2026-05-19"',
-        "fn display_language_name(",
-        "fn monaco_language(",
-        "fn default_filename(",
-        "fn language_file_extensions(",
-    )
-
-    for lib in PARSER_LIBS:
-        source = lib.read_text(encoding="utf-8")
-        for text in forbidden:
-            assert text not in source, f"{text!r} still hardcoded in {lib}"
-
-
-def test_renderer_crates_bundle_metadata_for_future_host_use():
-    assert RENDERER_LIBS
-    for lib in RENDERER_LIBS:
-        source = lib.read_text(encoding="utf-8")
-        metadata_path = lib.parent.parent / "plugin_metadata.info"
-        assert metadata_path.exists(), f"missing {metadata_path}"
-        metadata = metadata_path.read_text(encoding="utf-8")
-        assert "include_str!(\"../plugin_metadata.info\")" in source
-        assert "[plugin]" in metadata
-        assert re.search(r"^\[renderer\.[^\]]+\]$", metadata, re.M), metadata_path
 
 
 def test_language_info_ignores_unclaimed_language_records():
