@@ -9,6 +9,7 @@ import pytest
 from intentumdiff import SemanticDiffer
 from intentumdiff.core.models import ChangeGroupKind, ChangeType, DiffConfig
 from intentumdiff.plugins.exceptions import PluginFuelExhausted
+from intentumdiff.plugins.registry import unavailable_parser_for
 
 @dataclass(frozen=True)
 class IntentScenario:
@@ -554,6 +555,11 @@ export const answer = 42;
 def test_intent_truth_for_insert_move_and_move_edit_scenarios(
     scenario: IntentScenario,
 ) -> None:
+    unavailable = unavailable_parser_for(scenario.filename)
+    if unavailable is not None:
+        parser_name, reason = unavailable
+        pytest.skip(f"{parser_name} parser unavailable: {reason}")
+
     diff = SemanticDiffer(DiffConfig(diagnostics=True)).diff_strings(
         scenario.old,
         scenario.new,
