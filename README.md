@@ -17,8 +17,12 @@ does: **meaningful**, **refactoring**, **moved**, or **ignored style**.
 pip install intentumdiff-python
 ```
 
-Requires **Python 3.12+**. The wheel is self-contained — the Rust engine and all 78 language
-parsers are included. There is no second download and nothing is fetched at runtime.
+Requires **Python 3.12+**. The wheel bundles the Rust engine and language parser
+components; built-in parsing needs no separate component download.
+
+**0.0.2 candidate platform limitation:** PowerShell is unavailable on Windows ARM64
+because of the tracked compiler limitation in [#42](https://github.com/buchochelliq-labs/intentumdiff-python/issues/42).
+Rust reports this parser as unavailable; the package does not substitute a Python engine.
 
 > The distribution is `intentumdiff-python`; the import package is `intentumdiff`.
 

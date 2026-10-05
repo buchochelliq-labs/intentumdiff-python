@@ -86,10 +86,14 @@ The wheel bundles two provisioned build inputs — the engine and the parser com
 
 ```bash
 python scripts/provision_build_inputs.py \
-    --core-dir /path/to/intentumdiff-core \      # or let it clone the repo
-    --wasm-dir /path/to/built/components       # built by the parser repos
-pip install -e .[dev]
+    --core-dir /path/to/intentumdiff-core \
+    --wasm-dir /path/to/built/components
+python -m pip install cffi
+python -m pip install -e ".[dev,serve]"
 ```
+
+See [Building from source](docs/BUILDING.md) for artifact-backed provisioning,
+renderer components and CI toolchains. The split repository needs no monorepo checkout.
 
 Released wheels on PyPI are pre-built per platform — installing from source is a
 development workflow, not the user path.
