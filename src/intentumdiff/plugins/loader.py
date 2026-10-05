@@ -1078,18 +1078,18 @@ def load_plugin(
         # Register host-utils imports using add_instance context manager.
         # root must be closed before instantiate() is called.
         root = linker.root()
-        with root.add_instance("intentdiff:plugin/host-utils") as host:
+        with root.add_instance("intentdiff:plugin/host-utils@1.0.0") as host:
             host.add_func(
                 "strip-trivia",
-                lambda store, args: _strip_trivia_impl(args[0], list(args[1])),
+                lambda store, cst_json, trivia_types: _strip_trivia_impl(cst_json, list(trivia_types)),
             )
             host.add_func(
                 "structural-hash",
-                lambda store, args: _structural_hash_impl(args[0]),
+                lambda store, cst_json: _structural_hash_impl(cst_json),
             )
             host.add_func(
                 "log",
-                lambda store, args: _log_impl(args[0], args[1]),
+                lambda store, level, message: _log_impl(level, message),
             )
         root.close()
 
