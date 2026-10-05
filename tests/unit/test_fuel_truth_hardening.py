@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-import re
 from typing import Any
 
 import pytest
@@ -15,11 +13,6 @@ from intentumdiff.core.models import ChangeType, DiffConfig
 # jitter across rebuilds (typescript tiny-file measured 20.45M, 2026-07).
 from intentumdiff.differ import _FUEL_HOTSPOT_ABSOLUTE
 from intentumdiff.plugins.exceptions import PluginFuelExhausted
-
-pytestmark = pytest.mark.skipif(
-    not (Path(__file__).resolve().parents[2] / "crates" / "parsers").exists(),
-    reason="monorepo crates tree not present (#82 split python repo)",
-)
 
 
 _MAIN_TS_BEFORE = """import { app, BrowserWindow } from "electron";
@@ -44,17 +37,6 @@ void app.whenReady().then(createWindow);
 """
 
 _MAIN_TS_AFTER = _MAIN_TS_BEFORE + "\n\nvoid app.whenReady().then(createWindow);\n"
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-_DUPLICATE_CHILD_TRAVERSAL = re.compile(
-    r"if !is_semantic\(&node\.node_type\) \{\s+"
-    r"let children: Vec<SemanticNode> = node.*?"
-    r"if children\.is_empty\(\) \{\s+return None;\s+\}\s+"
-    r"\}\s+"
-    r"let children: Vec<SemanticNode> = node",
-    re.S,
-)
-
-
 @pytest.fixture(scope="module")
 def differ() -> SemanticDiffer:
     return SemanticDiffer(DiffConfig(diagnostics=True))
@@ -190,24 +172,6 @@ def test_realistic_low_fuel_setting_adapts_for_rust_parser_sized_file() -> None:
     )
 
 
-def test_real_js_ts_parser_source_does_not_exhaust_configured_10m_fuel_floor() -> None:
-    parser_source_path = _REPO_ROOT / "crates" / "parsers" / "js-ts-parser" / "src" / "lib.rs"
-    old = parser_source_path.read_text(encoding="utf-8")
-    new = old + "\nfn intentumdiff_fuel_probe() -> i32 { 1 }\n"
-    differ = SemanticDiffer(DiffConfig(plugin_fuel=10_000_000, diagnostics=True))
-
-    diff = differ.diff_strings(
-        old,
-        new,
-        filename="crates/parsers/js-ts-parser/src/lib.rs",
-        language_hint="rust",
-    )
-
-    assert not diff.is_fallback
-    assert not diff.parse_errors
-    assert _change_types(diff) == {ChangeType.ADDITION.value}
-    assert _fuel_hotspots(diff) == []
-
 
 def test_repeated_powershell_functions_do_not_emit_fuel_hotspots(
     differ: SemanticDiffer,
@@ -319,15 +283,6 @@ def test_generated_repeated_constructs_do_not_emit_fuel_hotspots(
     assert diff.changes or diff.change_groups
     assert _fuel_hotspots(diff) == []
 
-
-def test_parser_sources_do_not_duplicate_nonsemantic_child_traversal() -> None:
-    offenders = []
-    for path in (_REPO_ROOT / "crates" / "parsers").glob("*/src/lib.rs"):
-        text = path.read_text(encoding="utf-8")
-        if _DUPLICATE_CHILD_TRAVERSAL.search(text):
-            offenders.append(str(path.relative_to(_REPO_ROOT)))
-
-    assert offenders == []
 
 
 def _default_filename(differ: SemanticDiffer, language: str) -> str:
