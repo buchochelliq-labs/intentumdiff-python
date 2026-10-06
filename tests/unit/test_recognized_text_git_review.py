@@ -20,12 +20,14 @@ def test_recognized_source_survives_working_tree_and_commit_review(tmp_path, fil
         return subprocess.check_output(["git", "-C", str(tmp_path), *args], stderr=subprocess.STDOUT)
 
     git("init")
+    git("config", "core.autocrlf", "false")
     source = tmp_path / filename
-    source.write_text(old, encoding="utf-8")
+    # Keep fixture bytes identical across platforms; do not translate LF on Windows.
+    source.write_bytes(old.encode("utf-8"))
     git("add", filename)
     git("-c", "user.name=Acceptance", "-c", "user.email=acceptance@example.invalid", "commit", "-m", "baseline")
     baseline = git("rev-parse", "HEAD").decode().strip()
-    source.write_text(new, encoding="utf-8")
+    source.write_bytes(new.encode("utf-8"))
     working = list(iter_changed_sources(tmp_path, baseline))
     assert [(a, b, c, d) for a, b, c, d, _ in working] == [(old, new, filename, filename)]
     git("add", filename)
