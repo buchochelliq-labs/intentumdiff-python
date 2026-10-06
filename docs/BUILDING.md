@@ -83,8 +83,9 @@ pip install shadows the fresh cdylib — remove/uninstall them after rebuilds.
 
 ### Reviewed parser registry for 0.0.2
 
-Wheel provisioning pins registry commit `839b616c2f82b344028dfe75a9dd7f736452169d`
-(registry PR #7). This reconciles the post-rebrand component set with the reviewed
+Wheel provisioning pins registry commit `fb89a47423622d3ee5c38a46904d1b47499a6e53`
+(registry PR #8), including the Svelte inline-script source-span fix. It retains
+the reconciliation of the post-rebrand component set with the reviewed
 JS/TS incomplete-source fix; reading the registry default branch had silently
 omitted that fix. An incomplete `function f(` → `function g(` edit must produce
 Rust-owned source fallback with an explicit parse-error indication, never empty
