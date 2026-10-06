@@ -55,3 +55,9 @@ def test_parity_harness_uses_utf8_for_files_and_native_transport(tmp_path, monke
     records = json.loads(evidence.read_text(encoding='utf-8'))
     assert len(records) == 2
     assert all(record['old'] == case['old'] for record in records)
+
+    assert records[0]["filename"] == "doc.md"
+    assert records[0]["mode"] == "text"
+    assert records[0]["exact_changes"] == 1
+    assert records[0]["required_labels"] == case["required_labels"]
+    assert records[1]["descriptor"] == {}
