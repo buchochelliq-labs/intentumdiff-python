@@ -8,8 +8,11 @@
     ".asm": "asm",
     ".astro": "astro",
     ".c": "c",
+    ".cfg": "ini",
     ".cjs": "javascript",
     ".clj": "clojure",
+    ".cmake": "cmake",
+    ".conf": "ini",
     ".cpp": "cpp",
     ".cs": "csharp",
     ".css": "css",
@@ -20,9 +23,11 @@
     ".ddl": "sql",
     ".dml": "sql",
     ".dockerignore": "gitignore",
+    ".editorconfig": "ini",
     ".eslintignore": "gitignore",
     ".ex": "elixir",
     ".gcloudignore": "gitignore",
+    ".gitconfig": "ini",
     ".gitignore": "gitignore",
     ".go": "go",
     ".gql": "graphql",
@@ -33,6 +38,7 @@
     ".hs": "haskell",
     ".htm": "html",
     ".html": "html",
+    ".ini": "ini",
     ".java": "java",
     ".js": "javascript",
     ".json": "json",
@@ -41,11 +47,13 @@
     ".latex": "latex",
     ".lua": "lua",
     ".m": "m",
+    ".make": "make",
     ".markdown": "markdown",
     ".md": "markdown",
     ".mdown": "markdown",
     ".mdx": "mdx",
     ".mjs": "javascript",
+    ".mk": "make",
     ".mkd": "markdown",
     ".mkdn": "markdown",
     ".ml": "ocaml",
@@ -61,6 +69,7 @@
     ".pot": "po",
     ".pp": "puppet",
     ".prettierignore": "gitignore",
+    ".proto": "proto",
     ".ps": "postscript",
     ".ps1": "powershell",
     ".py": "python",
@@ -79,6 +88,7 @@
     ".svelte": "svelte",
     ".swift": "swift",
     ".tex": "latex",
+    ".toml": "toml",
     ".ts": "typescript",
     ".tsql": "tsql",
     ".tsx": "tsx",
@@ -86,12 +96,17 @@
     ".vb": "vbnet",
     ".vscodeignore": "gitignore",
     ".vue": "vue",
+    ".wast": "wast",
     ".wat": "wat",
     ".xml": "xml",
     ".yaml": "yaml",
     ".yml": "yaml",
     ".zig": "zig",
-    "Dockerfile": "dockerfile"
+    "CMakeLists.txt": "cmake",
+    "Dockerfile": "dockerfile",
+    "GNUmakefile": "make",
+    "Makefile": "make",
+    "go.mod": "gomod"
   },
   "parsers": {
     "abap": {
@@ -159,6 +174,14 @@
       "plugin_id": "clojure",
       "wasm": "clojure_parser.wasm"
     },
+    "cmake": {
+      "extensions": [
+        "CMakeLists.txt",
+        ".cmake"
+      ],
+      "plugin_id": "cmake",
+      "wasm": "cmake_parser.wasm"
+    },
     "cpp": {
       "extensions": [
         ".cpp"
@@ -186,6 +209,11 @@
       ],
       "plugin_id": "dart",
       "wasm": "dart_parser.wasm"
+    },
+    "databricks": {
+      "extensions": [],
+      "plugin_id": "databricks-workflow",
+      "wasm": "databricks_parser.wasm"
     },
     "databricks-workflow": {
       "extensions": [
@@ -251,6 +279,13 @@
       "plugin_id": "go",
       "wasm": "go_parser.wasm"
     },
+    "gomod": {
+      "extensions": [
+        "go.mod"
+      ],
+      "plugin_id": "gomod",
+      "wasm": "gomod_parser.wasm"
+    },
     "graphql": {
       "extensions": [
         ".gql",
@@ -287,6 +322,17 @@
       ],
       "plugin_id": "html",
       "wasm": "html_parser.wasm"
+    },
+    "ini": {
+      "extensions": [
+        ".ini",
+        ".cfg",
+        ".conf",
+        ".editorconfig",
+        ".gitconfig"
+      ],
+      "plugin_id": "ini",
+      "wasm": "ini_parser.wasm"
     },
     "java": {
       "extensions": [
@@ -340,6 +386,16 @@
       ],
       "plugin_id": "m",
       "wasm": "dax_parser.wasm"
+    },
+    "make": {
+      "extensions": [
+        "Makefile",
+        "GNUmakefile",
+        ".mk",
+        ".make"
+      ],
+      "plugin_id": "make",
+      "wasm": "make_parser.wasm"
     },
     "markdown": {
       "extensions": [
@@ -416,6 +472,13 @@
       ],
       "plugin_id": "powershell",
       "wasm": "powershell_parser.wasm"
+    },
+    "proto": {
+      "extensions": [
+        ".proto"
+      ],
+      "plugin_id": "proto",
+      "wasm": "proto_parser.wasm"
     },
     "puppet": {
       "extensions": [
@@ -519,6 +582,13 @@
       "plugin_id": "swift",
       "wasm": "swift_parser.wasm"
     },
+    "toml": {
+      "extensions": [
+        ".toml"
+      ],
+      "plugin_id": "toml",
+      "wasm": "toml_parser.wasm"
+    },
     "tsql": {
       "extensions": [
         ".tsql"
@@ -555,6 +625,13 @@
       ],
       "plugin_id": "vue",
       "wasm": "vue_parser.wasm"
+    },
+    "wast": {
+      "extensions": [
+        ".wast"
+      ],
+      "plugin_id": "wat",
+      "wasm": "wat_parser.wasm"
     },
     "wat": {
       "extensions": [
