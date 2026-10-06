@@ -88,6 +88,7 @@
     ".svelte": "svelte",
     ".swift": "swift",
     ".tex": "latex",
+    ".tf": "hcl",
     ".toml": "toml",
     ".ts": "typescript",
     ".tsql": "tsql",
@@ -310,7 +311,8 @@
     },
     "hcl": {
       "extensions": [
-        ".hcl"
+        ".hcl",
+        ".tf"
       ],
       "plugin_id": "hcl",
       "wasm": "terraform_parser.wasm"

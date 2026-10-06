@@ -19,7 +19,7 @@ def test_special_filename_and_alias_discovery_hints():
     for filename, language in [('CMakeLists.txt', 'cmake'), ('go.mod', 'gomod'),
                                ('Makefile', 'make'), ('GNUmakefile', 'make'),
                                ('.toml', 'toml'), ('.proto', 'proto'), ('.ini', 'ini'),
-                               ('.wast', 'wast')]:
+                               ('.wast', 'wast'), ('.tf', 'hcl')]:
         assert manifest['extension_index'][filename] == language
         assert filename in manifest['parsers'][language]['extensions']
     assert manifest['parsers']['wast']['wasm'] == manifest['parsers']['wat']['wasm']
