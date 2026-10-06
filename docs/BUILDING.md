@@ -83,7 +83,7 @@ pip install shadows the fresh cdylib — remove/uninstall them after rebuilds.
 
 ### Reviewed parser registry for 0.0.2
 
-Wheel provisioning pins registry commit `29c70ac53b4c47b2f8036ccb6a8ad989de5e8c9f`
+Wheel provisioning pins registry commit `fb89a47423622d3ee5c38a46904d1b47499a6e53`
 (registry PR #8), including the Svelte inline-script source-span fix. It retains
 the reconciliation of the post-rebrand component set with the reviewed
 JS/TS incomplete-source fix; reading the registry default branch had silently

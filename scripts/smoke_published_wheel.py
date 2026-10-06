@@ -133,6 +133,16 @@ diffs = SemanticDiffer().diff_commit(str(repo), "HEAD", "")
 assert {Path(d.new_filename).name for d in diffs} == set(cases), [(d.new_filename, d.language) for d in diffs]
 assert all(d.changes and not d.is_style_only and d.language != "binary" for d in diffs)
 print("All seven recognized text formats retain their actual Git changes")
+from intentumdiff.plugins.exceptions import PluginOutputError
+for tag in ("script", "style"):
+    for text in ("é", "漢", "😀", "\né", "é\n"):
+        try:
+            diff = SemanticDiffer().diff_strings(f"<{tag}>{text}", f"<{tag}>{text}x", "App.svelte")
+        except PluginOutputError as error:
+            assert "Unclosed script or style block" in str(error), str(error)
+        else:
+            assert diff.changes and diff.parse_errors and not diff.is_style_only, diff
+print("Unfinished Unicode Svelte blocks report explicit errors, never empty success")
 '''
 
 def _repo_readme() -> str | None:

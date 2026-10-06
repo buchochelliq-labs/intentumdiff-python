@@ -31,7 +31,7 @@ CORE_REPO = "https://github.com/buchochelliq-labs/intentumdiff-core"
 # integration build; never let a moving branch silently change the engine under CI.
 CORE_REF = os.environ.get("INTENTUMDIFF_CORE_REF", "820227c8e441abb7761ec0b56274a74873b45fcb")
 # Reviewed registry RC: post-rebrand pins plus the JS/TS incomplete-source fix.
-REGISTRY_REF = "29c70ac53b4c47b2f8036ccb6a8ad989de5e8c9f"
+REGISTRY_REF = "fb89a47423622d3ee5c38a46904d1b47499a6e53"
 
 
 def load_reviewed_registry(get, api: str, org: str):
