@@ -89,7 +89,7 @@ def main():
                     check_expectations(case, rust)
                     check_expectations(case, python)
                     assert projection(rust) == projection(python), (case['id'], projection(rust), projection(python))
-                    records.append({'id': case['id'], 'old': case['old'], 'new': case['new'], 'rust': rust, 'python': python})
+                    records.append(dict(case, rust=rust, python=python))
         finally:
             os.chdir(original)
     from intentumdiff.rust_core import _c_abi_call
