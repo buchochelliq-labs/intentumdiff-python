@@ -91,3 +91,18 @@ Rust-owned source fallback with an explicit parse-error indication, never empty
 style-only success. Installed-wheel smoke checks cover Python, JavaScript and
 TypeScript with exact changed identifier ranges. Parser bytes remain checksum
 verified and the wheel includes its complete Wasm provenance.
+
+
+### Rust-owned terminal presentation
+
+Default diff output and `--format terminal --output FILE` use the same Rust
+`rs-rich` renderer as the native CLI. Python passes the authoritative diff DTO,
+terminal width and colour preference through the existing C ABI, then writes the
+returned text without interpreting markup. `NO_COLOR` and redirected output
+remain colour-free. Narrow terminals use wrapping and stacked panels so protected
+values and identifiers remain visible. Source fallback explicitly says semantic
+equivalence is unknown. JSON, patch, HTML, LLM and SARIF do not use this renderer.
+
+This is bounded adoption for diff summaries, change tables and their guardrail
+rows. Command help, banners and other CLI screens still use the existing host
+presentation; their migration is separate from this change.

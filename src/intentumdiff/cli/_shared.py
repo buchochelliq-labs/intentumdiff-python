@@ -300,102 +300,17 @@ def _record_diagnostics_db(
 
 
 def _render_terminal(diff: SemanticDiff) -> None:
-    if diff.guardrail_violations:
-        guardrail_table = Table(
-            title="Protected semantic changes",
-            title_style="bold red",
-            box=box.SIMPLE_HEAVY,
-            border_style="red",
-        )
-        guardrail_table.add_column("Severity", style="bold", no_wrap=True)
-        guardrail_table.add_column("Location", style="cyan")
-        guardrail_table.add_column("Message")
-        guardrail_table.add_column("Value", style="dim")
-        for violation in diff.guardrail_violations:
-            color = "red" if violation.severity == GuardrailSeverity.IMMUTABLE else "yellow"
-            old_new = ""
-            if violation.old_value or violation.new_value:
-                old_new = f"{violation.old_value!r} -> {violation.new_value!r}"
-            guardrail_table.add_row(
-                f"[{color}]{violation.severity.value.upper()}[/{color}]",
-                f"{violation.file}::{violation.semantic_path}",
-                violation.message,
-                old_new,
-            )
-        _console.print(guardrail_table)
-        _console.print()
+    from intentumdiff.rust_core import render_cli_review
 
-    if not diff.has_semantic_changes:
-        state_style = "green"
-        state_title = "No changes detected"
-        state_message = "IntentumDiff found no semantic differences."
-        if diff.is_style_only:
-            state_style = "yellow"
-            state_title = "Style-only change"
-            state_message = "Formatting changed, but no semantic differences were found."
-        elif diff.is_fallback:
-            state_style = "yellow"
-            state_title = "Token fallback used"
-            state_message = "Semantic analysis was unavailable; source changes are shown for review."
-        _console.print(
-            Panel(
-                state_message,
-                title=f"[bold {state_style}]{state_title}[/bold {state_style}]",
-                border_style=state_style,
-                box=box.ROUNDED,
-                expand=False,
-            )
-        )
-        return
-    header = Table.grid(padding=(0, 2))
-    header.add_column(style="bold")
-    header.add_column()
-    header.add_row("Old", diff.old_filename or "<unknown>")
-    header.add_row("New", diff.new_filename or "<unknown>")
-    header.add_row("Language", diff.language or "unknown")
-    # Only a git-backed diff has a staging scope. Defaulting to "working tree" told
-    # someone comparing two local files that a working tree was involved when none was.
-    if diff.staging_status:
-        header.add_row("Scope", diff.staging_status.replace("_", " "))
-    header.add_row("Changes", str(len(diff.changes)))
-    _console.print(
-        Panel(
-            header,
-            title="[bold cyan]Semantic diff[/bold cyan]",
-            border_style="cyan",
-            box=box.ROUNDED,
-            expand=False,
-        )
+    # Python owns host I/O and terminal settings; Rust owns all presentation layout.
+    rendered = render_cli_review(
+        diff,
+        width=max(16, min(300, _console.width)),
+        color=bool(_console.is_terminal and _console.color_system and "NO_COLOR" not in os.environ),
     )
-    _console.print()
+    _console.file.write(rendered)
+    _console.file.flush()
 
-    changes_table = Table(
-        box=box.SIMPLE,
-        border_style="dim",
-        header_style="bold",
-        show_header=True,
-    )
-    changes_table.add_column("Type", no_wrap=True)
-    changes_table.add_column("Description", overflow="fold")
-    for change in diff.changes:
-        from intentumdiff.core.models import ChangeType
-        ct = (
-            change.change_type.value
-            if isinstance(change.change_type, ChangeType)
-            else str(change.change_type)
-        )
-        color_map = {
-            "ADDITION": "green",
-            "DELETION": "red",
-            "MODIFICATION": "yellow",
-            "MOVE": "cyan",
-            "REFACTORING": "magenta",
-            "STYLE_ONLY": "dim",
-        }
-        color = color_map.get(ct, "white")
-        changes_table.add_row(f"[{color}]{ct}[/{color}]", change.description)
-    _console.print(changes_table)
-    return
 
 def _render(diff: SemanticDiff, fmt: str, output: str | None, fuel: int | None = None) -> None:
     if fmt == "terminal" and not output:
@@ -403,20 +318,9 @@ def _render(diff: SemanticDiff, fmt: str, output: str | None, fuel: int | None =
         return
 
     if fmt == "terminal":
-        # Render to plain text file (no ANSI)
-        with open(output, "w", encoding="utf-8") as fh:
-            plain = Console(file=fh, highlight=False)
-            plain.print(
-                f"Semantic diff: {diff.old_filename} -> "
-                f"{diff.new_filename} ({diff.language})"
-            )
-            for violation in diff.guardrail_violations:
-                plain.print(
-                    f"  GUARDRAIL      {violation.severity.value.upper()} "
-                    f"{violation.file}::{violation.semantic_path} {violation.message}"
-                )
-            for change in diff.changes:
-                plain.print(f"  {change.change_type.value:14} {change.description}")
+        from intentumdiff.rust_core import render_cli_review
+
+        Path(output).write_text(render_cli_review(diff, width=80, color=False), encoding="utf-8")
         return
 
     if fmt == "json":
