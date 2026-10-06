@@ -31,9 +31,11 @@ def test_required_renderer_failure_propagates(monkeypatch):
         rust_core.render_cli_review(sample(), width=80, color=False)
 
 
-def test_terminal_writes_rust_text_verbatim_and_honors_no_color(monkeypatch):
+@pytest.mark.parametrize("legacy_windows,expected_width", [(False, 48), (True, 47)])
+def test_terminal_writes_rust_text_verbatim_and_honors_no_color(monkeypatch, legacy_windows, expected_width):
     stream = io.StringIO()
-    monkeypatch.setattr(_shared, '_console', Console(file=stream, force_terminal=True, width=48, height=24))
+    monkeypatch.setattr(_shared, '_console', Console(file=stream, force_terminal=True, width=48, height=24,
+                                                     legacy_windows=legacy_windows))
     monkeypatch.setenv('NO_COLOR', '1')
     requests = []
     def render(diff, **options):
@@ -42,7 +44,8 @@ def test_terminal_writes_rust_text_verbatim_and_honors_no_color(monkeypatch):
     monkeypatch.setattr(rust_core, 'render_cli_review', render)
     _shared._render_terminal(sample())
     assert stream.getvalue() == 'literal [red] label\n'
-    assert requests == [{"width": 48, "color": False}]
+    # Rich reserves the last column on legacy Windows consoles.
+    assert requests == [{"width": expected_width, "color": False}]
 
 
 @pytest.mark.parametrize("legacy_windows,expected_color", [(True, False), (False, True)])
