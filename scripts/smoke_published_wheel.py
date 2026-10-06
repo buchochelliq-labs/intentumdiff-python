@@ -104,6 +104,37 @@ class Smoke:
 
 
 
+RECOGNIZED_TEXT_REVIEW_SCRIPT = r'''
+import subprocess
+from pathlib import Path
+from intentumdiff import SemanticDiffer
+
+repo = Path("recognized-text-review").resolve()
+repo.mkdir()
+cases = {
+    "code.sh": "#!/bin/bash\necho One\n",
+    "index.html": "<!DOCTYPE html><html><title>One</title></html>",
+    "data.xml": '<?xml version="1.0"?><root>One</root>',
+    "Component.svelte": "<script>let name = 'One';</script><h1>{name}</h1>",
+    "module.wat": '(module (func (export "One") (result i32) i32.const 1))',
+    "module.wast": '(module (func (export "One") (result i32) i32.const 1))',
+    "code.ps": "%!PS\n(One) show\nshowpage\n",
+}
+def git(*args):
+    subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
+git("init")
+for name, old in cases.items():
+    (repo / name).write_text(old, encoding="utf-8")
+git("add", ".")
+git("-c", "user.name=Acceptance", "-c", "user.email=acceptance@example.invalid", "commit", "-m", "baseline")
+for name, old in cases.items():
+    (repo / name).write_text(old.replace("One", "Two"), encoding="utf-8")
+diffs = SemanticDiffer().diff_commit(str(repo), "HEAD", "")
+assert {Path(d.new_filename).name for d in diffs} == set(cases), [(d.new_filename, d.language) for d in diffs]
+assert all(d.changes and not d.is_style_only and d.language != "binary" for d in diffs)
+print("All seven recognized text formats retain their actual Git changes")
+'''
+
 def _repo_readme() -> str | None:
     """The README a user reads. Checked in preference order, nearest first."""
     here = Path(__file__).resolve()
@@ -218,6 +249,10 @@ def main() -> int:
                 valid = False
             s.check(f"installed wheel preserves incomplete {extension} edit", valid,
                     (result.stderr or result.stdout)[:1000])
+
+        r = s.run("-c", RECOGNIZED_TEXT_REVIEW_SCRIPT, timeout=180)
+        s.check("installed wheel Git review retains seven recognized text formats",
+                r.returncode == 0, (r.stderr or r.stdout)[:2000])
 
         # 5b. Advertised Wasm renderer formats must work from the INSTALLED wheel.
         # These all shipped broken in 0.0.2b1 because the CLI looked under
