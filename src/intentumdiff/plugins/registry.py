@@ -552,6 +552,7 @@ class PluginRegistry:
         language_hint: str | None = None,
         plugin_id: str | None = None,
         phase_recorder: PhaseRecorder | None = None,
+        old_content: str = "",
     ) -> tuple[ParserAdapter, str]:
         """
         Return ``(parser, language)`` for a given file.
@@ -566,7 +567,7 @@ class PluginRegistry:
 
         entries = self._catalog(phase_recorder)
         request = {"entries": self._catalog_descriptors(entries), "filename": filename,
-                   "content": content, "language_hint": language_hint, "plugin_id": plugin_id,
+                   "content": content[:2048], "old_content": old_content[:2048], "language_hint": language_hint, "plugin_id": plugin_id,
                    "strict": self._config.strict_plugins, "allowed_plugins": self._config.allowed_plugins}
         events = []
         parsers = {}

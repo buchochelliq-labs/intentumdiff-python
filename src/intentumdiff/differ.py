@@ -1161,6 +1161,7 @@ class SemanticDiffer:
                 language_hint,
                 plugin_id=parser_plugin_id,
                 phase_recorder=profiler.record if profiler.enabled else None,
+                old_content=old_content,
             )
         logger.debug("Using parser %r for %r (language=%r)", parser.grammar_id, filename, language)
 
