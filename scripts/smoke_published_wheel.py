@@ -33,6 +33,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import shutil
 import subprocess
@@ -179,6 +180,44 @@ def main() -> int:
         script.write_text(USE_SCRIPT.format(old=OLD_SRC, new=NEW_SRC), encoding="utf-8")
         r = s.run(str(script))
         s.check("SemanticDiffer produces a diff", "CHANGES" in r.stdout, r.stderr)
+
+        # Incomplete identifiers are real edits, never formatting-only success.
+        # This catches stale parser pins in the installed package, not just source tests.
+        for extension, old, new, offset in (
+            ("py", "def f(", "def g(", 4),
+            ("js", "function f(", "function g(", 9),
+            ("ts", "function f(", "function g(", 9),
+        ):
+            before = root / f"incomplete-before.{extension}"
+            after = root / f"incomplete-after.{extension}"
+            before.write_text(old, encoding="utf-8")
+            after.write_text(new, encoding="utf-8")
+            result = subprocess.run(
+                [str(exe), "diff", "--json", str(before), str(after)],
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+                cwd=root, timeout=120,
+            )
+            try:
+                diff = json.loads(result.stdout)
+                changes = diff["changes"]
+                metadata = diff["metadata"]
+                valid = (
+                    result.returncode == 0 and diff["is_fallback"] is True
+                    and diff["is_style_only"] is False and bool(diff["parse_errors"])
+                    and metadata["engine_owner"] == "rust"
+                    and metadata["semantic_contract"] == "rust_source_fallback_v1"
+                    and len(changes) == 1
+                    and changes[0]["old_node"]["label"] == "f"
+                    and changes[0]["new_node"]["label"] == "g"
+                    and metadata["source_ranges"] == {
+                        "old_start_byte": offset, "old_end_byte": offset + 1,
+                        "new_start_byte": offset, "new_end_byte": offset + 1,
+                    }
+                )
+            except (ValueError, KeyError, TypeError):
+                valid = False
+            s.check(f"installed wheel preserves incomplete {extension} edit", valid,
+                    (result.stderr or result.stdout)[:1000])
 
         # 5b. Advertised Wasm renderer formats must work from the INSTALLED wheel.
         # These all shipped broken in 0.0.2b1 because the CLI looked under

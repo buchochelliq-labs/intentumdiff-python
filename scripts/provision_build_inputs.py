@@ -30,6 +30,16 @@ CORE_REPO = "https://github.com/buchochelliq-labs/intentumdiff-core"
 # Immutable reviewed engine candidate for this binding. Override for an explicit
 # integration build; never let a moving branch silently change the engine under CI.
 CORE_REF = os.environ.get("INTENTUMDIFF_CORE_REF", "cb497d91422d0ac15d50f2438653103b296e9584")
+# Reviewed registry RC: post-rebrand pins plus the JS/TS incomplete-source fix.
+REGISTRY_REF = "839b616c2f82b344028dfe75a9dd7f736452169d"
+
+
+def load_reviewed_registry(get, api: str, org: str):
+    import yaml
+    url = f"{api}/repos/{org}/intentumdiff-registry/contents/registry.yaml?ref={REGISTRY_REF}"
+    return yaml.safe_load(get(url, accept="application/vnd.github.raw").decode("utf-8"))
+
+
 CORE_DEST = REPO_ROOT / "build" / "intentumdiff-core"
 WASM_DEST = REPO_ROOT / "src" / "intentumdiff" / "wasm"
 
@@ -189,12 +199,8 @@ def stage_wasm_from_artifacts(token: str, org: str = "buchochelliq-labs") -> int
     # supply-chain control rather than "whatever the parser repo last built". Builds are
     # reproducible, so a mismatch means the component genuinely changed and the fix is a
     # registry PR through the vet gate — never a bypass here.
-    import yaml  # pyyaml is already a runtime dep (hub.py)
-
-    registry = yaml.safe_load(
-        get(f"{api}/repos/{org}/intentumdiff-registry/contents/registry.yaml",
-            accept="application/vnd.github.raw").decode("utf-8")
-    )
+    registry = load_reviewed_registry(get, api, org)
+    print(f"registry commit: {REGISTRY_REF}")
     pins: dict[str, str] = {}
     refs: dict[str, str] = {}
     for plugin, entry in (registry.get("plugins") or {}).items():
