@@ -306,7 +306,13 @@ def _render_terminal(diff: SemanticDiff) -> None:
     rendered = render_cli_review(
         diff,
         width=max(16, min(300, _console.width)),
-        color=bool(_console.is_terminal and _console.color_system and "NO_COLOR" not in os.environ),
+        # Direct writes bypass Rich's Win32 renderer on legacy consoles.
+        color=bool(
+            _console.is_terminal
+            and _console.color_system
+            and not _console.legacy_windows
+            and "NO_COLOR" not in os.environ
+        ),
     )
     _console.file.write(rendered)
     _console.file.flush()
