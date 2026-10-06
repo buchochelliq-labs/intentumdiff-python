@@ -184,7 +184,7 @@ llm      = "intentumdiff.plugins.builtins:llm_renderer_entry"
 # IntentumDiff is shipped as one native platform wheel. The wheel contains:
 # - the Python public API/CLI packages from src/
 # - pre-built first-party Wasm parser/renderer components
-# - the PyO3 Rust core host extension module
+# - the Rust core cdylib loaded through the C ABI
 #
 # Do NOT publish an sdist for the first public release. Installing from source
 # requires Rust, maturin, and the wasm32-wasip2 target, which is the opposite of
@@ -208,6 +208,7 @@ python-packages = ["intentumdiff"]
 bindings = "cffi"
 include = [
     { path = "src/intentumdiff/wasm/*.wasm", format = "wheel" },
+    { path = "src/intentumdiff/wasm/wasm_provenance.json", format = "wheel" },
     { path = "src/intentumdiff/invariances/*.yaml", format = "wheel" },
     { path = "src/intentumdiff/invariances/*.json", format = "wheel" },
     # The published plugin-registry schema (#95) — loaded at runtime via resources.files.

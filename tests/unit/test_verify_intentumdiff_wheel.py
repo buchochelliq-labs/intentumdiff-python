@@ -32,6 +32,11 @@ def _write_wheel(path: Path, names: list[str]) -> Path:
                 )
             else:
                 zf.writestr(name, "")
+        artifacts = _artifacts({Path(name).name: b"" for name in names if name.endswith(".wasm")})
+        zf.writestr(
+            "intentumdiff/wasm/wasm_provenance.json",
+            _json.dumps({"schema_version": 1, "artifacts": artifacts}),
+        )
     return path
 
 
@@ -193,6 +198,12 @@ def test_verify_wheel_rejects_metadata_identity_mismatch(tmp_path: Path) -> None
             else:
                 zf.writestr(name, "")
 
+    with zipfile.ZipFile(wheel, "a") as zf:
+        zf.writestr(
+            "intentumdiff/wasm/wasm_provenance.json",
+            _json.dumps({"schema_version": 1, "artifacts": _artifacts({"python_parser.wasm": b""})}),
+        )
+
     with pytest.raises(ValueError, match="METADATA Name"):
         verify_wheel(wheel)
 
@@ -254,7 +265,7 @@ def _write_wheel_with_provenance(
     manifest_artifacts: dict[str, dict] | None,
 ) -> Path:
     """A wheel whose wasm entries carry real bytes, optionally embedding a provenance manifest
-    (None = no manifest embedded, the optional-this-slice case)."""
+    (None exercises the missing-manifest rejection)."""
     with zipfile.ZipFile(path, "w") as zf:
         zf.writestr("intentumdiff/__init__.py", "")
         zf.writestr("intentumdiff/intentumdiff_rust_core.cp312-win_amd64.pyd", "")
@@ -288,11 +299,11 @@ def _prov_wheel_name(tmp_path: Path) -> Path:
     return tmp_path / "intentumdiff_python-0.0.1-cp312-cp312-win_amd64.whl"
 
 
-def test_provenance_absent_is_optional_this_slice(tmp_path: Path) -> None:
+def test_provenance_absent_is_rejected(tmp_path: Path) -> None:
     wasm = {"python_parser.wasm": b"\x00asm py"}
     wheel = _write_wheel_with_provenance(_prov_wheel_name(tmp_path), wasm, None)
-    summary = verify_wheel(wheel)
-    assert summary["provenance_verified"] == -1  # -1 = no manifest embedded
+    with pytest.raises(ValueError, match="missing required Wasm provenance manifest"):
+        verify_wheel(wheel)
 
 
 def test_provenance_matching_manifest_passes(tmp_path: Path) -> None:

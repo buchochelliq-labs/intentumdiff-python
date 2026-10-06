@@ -54,6 +54,31 @@ print("CHANGES", len(diff.changes))
 """
 
 
+# Executed by the clean installed interpreter, never against source-tree assets.
+PROVENANCE_SCRIPT = """
+import hashlib
+import json
+from importlib.resources import files
+
+root = files('intentumdiff').joinpath('wasm')
+manifest = json.loads(root.joinpath('wasm_provenance.json').read_text(encoding='utf-8'))
+if manifest.get('schema_version') != 1:
+    raise ValueError('unsupported Wasm provenance schema')
+artifacts = manifest['artifacts']
+actual = {p.name: p for p in root.iterdir() if p.name.endswith('.wasm')}
+if not actual or set(actual) != set(artifacts):
+    raise ValueError('installed Wasm set differs from provenance manifest')
+if manifest.get('artifact_count') != len(actual):
+    raise ValueError('Wasm provenance artifact count mismatch')
+for name, path in actual.items():
+    data = path.read_bytes()
+    expected = artifacts[name]
+    if len(data) != expected['size_bytes'] or hashlib.sha256(data).hexdigest() != expected['sha256']:
+        raise ValueError('installed Wasm provenance mismatch: ' + name)
+print('VERIFIED', len(actual), 'installed Wasm components')
+"""
+
+
 class Smoke:
     def __init__(self, root: Path) -> None:
         self.root = root
@@ -134,6 +159,10 @@ def main() -> int:
         r = s.run("-c", "import intentumdiff; print(intentumdiff.__version__)")
         s.check("import intentumdiff", r.returncode == 0, r.stderr)
         version = r.stdout.strip()
+
+        r = s.run("-c", PROVENANCE_SCRIPT)
+        s.check("installed Wasm provenance matches every bundled component",
+                r.returncode == 0, r.stderr)
 
         # 3. Console script — the documented entry point.
         exe = s.py.parent / ("intentumdiff.exe" if sys.platform == "win32" else "intentumdiff")
