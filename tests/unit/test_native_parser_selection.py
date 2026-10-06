@@ -212,3 +212,41 @@ def test_elixir_sibling_swap_preserves_matched_definition_contents(case):
         assert actual == case['expected']
     for field in ('changes', 'change_groups', 'has_semantic_changes', 'is_style_only'):
         assert rust[field] == python[field], field
+
+
+@pytest.mark.parametrize('case', json.loads((Path(__file__).parents[1] / 'fixtures/deleted_content_selection.json').read_text()), ids=lambda case: case['name'])
+def test_deleted_content_retains_parser_identity(case):
+    from intentumdiff import SemanticDiffer
+    from intentumdiff.core.models import SemanticDiff
+    result = native(case)
+    assert 'diff' in result, result
+    actual = SemanticDiff.model_validate(result['diff']).model_dump(mode='json')
+    from contextlib import closing
+    with closing(SemanticDiffer()) as differ:
+        python = differ.diff_strings(case['old'], case['new'], case['filename']).model_dump(mode='json')
+    for diff in (actual, python):
+        assert diff['language'] == case['language']
+        assert not diff['is_fallback'] and not diff['parse_errors']
+        assert diff['has_semantic_changes']
+        assert len(diff['changes']) == 1
+        assert diff['changes'][0]['change_type'] == 'DELETION'
+        assert diff['changes'][0]['new_node'] is None
+        pending = [diff['changes'][0]['old_node']]
+        labels = set()
+        while pending:
+            node = pending.pop()
+            labels.add(node['label'])
+            pending.extend(node['children'])
+        assert set(case['deleted_labels']) <= labels
+    def canonical(value):
+        # DTO construction may expand absent facts to an all-null object.
+        # Preserve every populated fact, tree node, position and change field.
+        if isinstance(value, list):
+            return [canonical(item) for item in value]
+        if isinstance(value, dict):
+            return {key: (None if key == 'facts' and isinstance(item, dict)
+                          and all(v is None for v in item.values()) else canonical(item))
+                    for key, item in value.items()}
+        return value
+    for field in ('language', 'changes', 'change_groups', 'has_semantic_changes', 'is_style_only'):
+        assert canonical(actual[field]) == canonical(python[field]), field
