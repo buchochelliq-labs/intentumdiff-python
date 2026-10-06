@@ -854,6 +854,12 @@ def _required_engine_json(handler: str, *args: Any, result_type: type) -> Any:
         raise RuntimeError(f"Rust engine operation {handler} failed: {exc}") from exc
 
 
+def render_cli_review(diff: SemanticDiff, *, width: int, color: bool) -> str:
+    """Transport an authoritative DTO to Rust's rs-rich presentation renderer."""
+    request = {"diff": diff.model_dump(mode="json"), "width": width, "color": color}
+    return _required_engine_json("render_cli_review", json.dumps(request), result_type=str)
+
+
 def try_rust_build_symbol_table(files_json: str) -> str:
     """Extract a symbol table in Rust, raising on unavailable or invalid results.
 
