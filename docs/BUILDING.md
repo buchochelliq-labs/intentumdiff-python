@@ -79,3 +79,15 @@ must print `_CtypesBackend`.
 
 Gotcha: a leftover pyo3-era `src/intentumdiff/*.pyd` or a standalone `intentumdiff_rust_core`
 pip install shadows the fresh cdylib — remove/uninstall them after rebuilds.
+
+
+### Reviewed parser registry for 0.0.2
+
+Wheel provisioning pins registry commit `839b616c2f82b344028dfe75a9dd7f736452169d`
+(registry PR #7). This reconciles the post-rebrand component set with the reviewed
+JS/TS incomplete-source fix; reading the registry default branch had silently
+omitted that fix. An incomplete `function f(` → `function g(` edit must produce
+Rust-owned source fallback with an explicit parse-error indication, never empty
+style-only success. Installed-wheel smoke checks cover Python, JavaScript and
+TypeScript with exact changed identifier ranges. Parser bytes remain checksum
+verified and the wheel includes its complete Wasm provenance.
