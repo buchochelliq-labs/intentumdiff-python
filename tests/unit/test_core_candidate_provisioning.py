@@ -35,7 +35,7 @@ def test_stage_core_accepts_immutable_commit(tmp_path, monkeypatch):
 def test_registry_uses_reviewed_immutable_commit():
     script = Path(__file__).resolve().parents[2] / "scripts" / "provision_build_inputs.py"
     namespace = runpy.run_path(str(script))
-    expected = "fb89a47423622d3ee5c38a46904d1b47499a6e53"
+    expected = "59d7c91fa4e466b4130628202e6a126792b6f9d7"
     seen = []
     def get(url, **kwargs):
         seen.append(url)

@@ -131,7 +131,11 @@ for name, old in cases.items():
     (repo / name).write_text(old.replace("One", "Two"), encoding="utf-8")
 diffs = SemanticDiffer().diff_commit(str(repo), "HEAD", "")
 assert {Path(d.new_filename).name for d in diffs} == set(cases), [(d.new_filename, d.language) for d in diffs]
-assert all(d.changes and not d.is_style_only and d.language != "binary" for d in diffs)
+assert all(d.changes and not d.is_style_only and d.language != "binary" for d in diffs), [
+    {"filename": d.new_filename, "language": d.language,
+     "change_count": len(d.changes), "is_style_only": d.is_style_only,
+     "parse_errors": d.parse_errors} for d in diffs
+]
 print("All seven recognized text formats retain their actual Git changes")
 from intentumdiff.plugins.exceptions import PluginOutputError
 for tag in ("script", "style"):
@@ -262,6 +266,12 @@ def main() -> int:
 
         r = s.run("-c", RECOGNIZED_TEXT_REVIEW_SCRIPT, timeout=180)
         s.check("installed wheel Git review retains seven recognized text formats",
+                r.returncode == 0, (r.stderr or r.stdout)[:2000])
+
+        # Use only installed engine/components; the script has no overlay or fallback.
+        regressions = Path(__file__).with_name("wheel_semantic_regressions.py").read_text(encoding="utf-8")
+        r = s.run("-c", regressions, timeout=180)
+        s.check("installed wheel preserves source ranges and SAS/MDX semantics",
                 r.returncode == 0, (r.stderr or r.stdout)[:2000])
 
         # 5b. Advertised Wasm renderer formats must work from the INSTALLED wheel.
