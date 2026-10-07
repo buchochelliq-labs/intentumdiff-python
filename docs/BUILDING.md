@@ -83,7 +83,7 @@ pip install shadows the fresh cdylib — remove/uninstall them after rebuilds.
 
 ### Reviewed parser registry for 0.0.2
 
-Wheel provisioning pins registry commit `60a9006b913b35302b26d5ad44f92371c1dc5273`
+Wheel provisioning pins registry commit `59d7c91fa4e466b4130628202e6a126792b6f9d7`
 (registry PR #9), including verified SAS, ADF, Databricks workflow and MDX fixes,
 as well as the earlier Svelte inline-script fix. Core commit
 `89c11a806b3f6368a3f502d77aa35698cdf38cba` includes CSS/SCSS source-range enrichment.

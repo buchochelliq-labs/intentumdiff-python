@@ -31,7 +31,7 @@ CORE_REPO = "https://github.com/buchochelliq-labs/intentumdiff-core"
 # integration build; never let a moving branch silently change the engine under CI.
 CORE_REF = os.environ.get("INTENTUMDIFF_CORE_REF", "89c11a806b3f6368a3f502d77aa35698cdf38cba")
 # Reviewed registry RC: source-span/SAS fixes plus earlier Svelte and JS/TS fixes.
-REGISTRY_REF = "60a9006b913b35302b26d5ad44f92371c1dc5273"
+REGISTRY_REF = "59d7c91fa4e466b4130628202e6a126792b6f9d7"
 
 
 def load_reviewed_registry(get, api: str, org: str):

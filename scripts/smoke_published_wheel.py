@@ -131,7 +131,11 @@ for name, old in cases.items():
     (repo / name).write_text(old.replace("One", "Two"), encoding="utf-8")
 diffs = SemanticDiffer().diff_commit(str(repo), "HEAD", "")
 assert {Path(d.new_filename).name for d in diffs} == set(cases), [(d.new_filename, d.language) for d in diffs]
-assert all(d.changes and not d.is_style_only and d.language != "binary" for d in diffs)
+assert all(d.changes and not d.is_style_only and d.language != "binary" for d in diffs), [
+    {"filename": d.new_filename, "language": d.language,
+     "change_count": len(d.changes), "is_style_only": d.is_style_only,
+     "parse_errors": d.parse_errors} for d in diffs
+]
 print("All seven recognized text formats retain their actual Git changes")
 from intentumdiff.plugins.exceptions import PluginOutputError
 for tag in ("script", "style"):
