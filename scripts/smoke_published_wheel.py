@@ -274,6 +274,13 @@ def main() -> int:
         s.check("installed wheel preserves source ranges and SAS/MDX semantics",
                 r.returncode == 0, (r.stderr or r.stdout)[:2000])
 
+        live_regressions = Path(__file__).with_name("wheel_live_regressions.py").read_text(encoding="utf-8")
+        r = s.run("-c", live_regressions, timeout=150)
+        s.check("cold installed stdio preserves generic and GraphQL Git edits within 120s",
+                r.returncode == 0, (r.stderr or r.stdout)[:2000])
+        if r.returncode == 0:
+            print(r.stdout.strip())
+
         # 5b. Advertised Wasm renderer formats must work from the INSTALLED wheel.
         # These all shipped broken in 0.0.2b1 because the CLI looked under
         # intentumdiff/cli/wasm instead of the package's real component directory.

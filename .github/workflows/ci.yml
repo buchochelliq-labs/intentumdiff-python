@@ -175,6 +175,10 @@ jobs:
         # wheel itself has to be built and exercised here.
         if: env.HAS_SPLIT_TOKEN == 'true'
         run: pip wheel . --no-deps --wheel-dir dist
+        env:
+          # Candidate acceptance must exercise the same optimized native profile as
+          # publication, not inherit the editable test install's development profile.
+          MATURIN_PEP517_ARGS: "--release"
 
       - name: Record candidate artifact identities
         if: env.HAS_SPLIT_TOKEN == 'true'
@@ -182,6 +186,7 @@ jobs:
         run: |
           python scripts/wasm_provenance.py verify
           cp src/intentumdiff/wasm/wasm_provenance.json evidence/wasm_provenance.json
+          echo "release" > evidence/wheel-build-profile.txt
           python scripts/verify_artifacts.py --root . --manifest evidence/wheels.sha256 record --patterns "dist/*.whl"
 
       - name: Smoke the wheel this platform just built
