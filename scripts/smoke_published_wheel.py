@@ -264,6 +264,12 @@ def main() -> int:
         s.check("installed wheel Git review retains seven recognized text formats",
                 r.returncode == 0, (r.stderr or r.stdout)[:2000])
 
+        # Use only installed engine/components; the script has no overlay or fallback.
+        regressions = Path(__file__).with_name("wheel_semantic_regressions.py").read_text(encoding="utf-8")
+        r = s.run("-c", regressions, timeout=180)
+        s.check("installed wheel preserves source ranges and SAS/MDX semantics",
+                r.returncode == 0, (r.stderr or r.stdout)[:2000])
+
         # 5b. Advertised Wasm renderer formats must work from the INSTALLED wheel.
         # These all shipped broken in 0.0.2b1 because the CLI looked under
         # intentumdiff/cli/wasm instead of the package's real component directory.

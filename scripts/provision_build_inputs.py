@@ -29,9 +29,9 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 CORE_REPO = "https://github.com/buchochelliq-labs/intentumdiff-core"
 # Immutable reviewed engine candidate for this binding. Override for an explicit
 # integration build; never let a moving branch silently change the engine under CI.
-CORE_REF = os.environ.get("INTENTUMDIFF_CORE_REF", "820227c8e441abb7761ec0b56274a74873b45fcb")
-# Reviewed registry RC: post-rebrand pins plus the JS/TS incomplete-source fix.
-REGISTRY_REF = "fb89a47423622d3ee5c38a46904d1b47499a6e53"
+CORE_REF = os.environ.get("INTENTUMDIFF_CORE_REF", "89c11a806b3f6368a3f502d77aa35698cdf38cba")
+# Reviewed registry RC: source-span/SAS fixes plus earlier Svelte and JS/TS fixes.
+REGISTRY_REF = "60a9006b913b35302b26d5ad44f92371c1dc5273"
 
 
 def load_reviewed_registry(get, api: str, org: str):
