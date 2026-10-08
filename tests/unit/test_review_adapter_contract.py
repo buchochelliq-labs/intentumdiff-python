@@ -117,3 +117,56 @@ def test_required_enrichment_failure_propagates(monkeypatch, tree, operation, fa
         if operation == "facts": rust_core.enrich_node_facts(tree)
         elif operation == "xml": rust_core.try_register_user_xml_dialects([])
         else: rust_core.try_rust_profile_label_enrichment(tree, "x", "json")
+
+
+@pytest.mark.parametrize("payload", [None, [], {}, {"scope_trails": None},
+    {"scope_trails": {}}, {"scope_trails": {"old": [], "new": [42]}}])
+def test_scope_trails_cannot_manufacture_empty_metadata(monkeypatch, tree, payload):
+    monkeypatch.setattr(rust_core, "_load_backend", lambda: SimpleNamespace(
+        scope_trails_json=lambda *args: json.dumps(payload)))
+    with pytest.raises(RuntimeError):
+        rust_core.build_scope_trails(old_tree=tree, new_tree=tree, changes=[])
+
+
+def test_scope_trails_preserves_explicit_empty_sides(monkeypatch, tree):
+    monkeypatch.setattr(rust_core, "_load_backend", lambda: SimpleNamespace(
+        scope_trails_json=lambda *args: '{"scope_trails":{"old":[],"new":[]}}'))
+    assert rust_core.build_scope_trails(old_tree=tree, new_tree=tree, changes=[]) == {"old": [], "new": []}
+
+
+@pytest.mark.parametrize("mode", ["apply", "style_only", "zero_change_literal"])
+def test_compatibility_invariance_helpers_require_rust(monkeypatch, tree, mode):
+    from intentumdiff.analysis import invariances
+    def failed_backend():
+        raise RuntimeError("engine unavailable")
+    monkeypatch.setattr(rust_core, "_load_backend", failed_backend)
+    kwargs = dict(old_source="x", new_source="x", language="python")
+    with pytest.raises(RuntimeError, match="engine unavailable"):
+        if mode == "style_only":
+            invariances.build_style_only_evidence(**kwargs)
+        elif mode == "zero_change_literal":
+            invariances.build_zero_change_literal_evidence(old_tree=tree, new_tree=tree, **kwargs)
+        else:
+            invariances.apply_invariances([], old_tree=tree, new_tree=tree, **kwargs)
+
+
+@pytest.mark.parametrize("template,equivalent", [
+    ("a { color: VALUE; }", True),
+    ("a { --theme: (x; color: VALUE;); }", False),
+    ("a { --theme: [x; color: VALUE;]; }", False),
+    ('a { content: "VALUE"; }', False),
+])
+def test_compatibility_invariances_preserve_css_data(tree, template, equivalent):
+    from intentumdiff.analysis.invariances import apply_invariances
+    old_source, new_source = template.replace("VALUE", "red"), template.replace("VALUE", "#f00")
+    old_tree = tree.model_copy(update={"node_type": "stylesheet", "label": old_source})
+    new_tree = tree.model_copy(update={"node_type": "stylesheet", "label": new_source})
+    changes = [Change(change_type=ChangeType.MODIFICATION, old_node=old_tree, new_node=new_tree)]
+    result = apply_invariances(changes, old_tree=old_tree, new_tree=new_tree,
+        old_source=old_source, new_source=new_source, language="css")
+    if equivalent:
+        assert result.changes == []
+        assert result.change_groups
+    else:
+        assert result.changes == changes
+        assert result.ignored_style_changes == []

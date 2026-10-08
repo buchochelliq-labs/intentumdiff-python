@@ -49,7 +49,7 @@ def _passthrough_invariances_json(request_json: str) -> str:
 
 def _empty_scope_trails_json(request_json: str) -> str:
     json.loads(request_json)
-    return json.dumps({})
+    return json.dumps({"scope_trails": {"old": [], "new": []}})
 
 
 def test_rust_core_defaults_to_native_first_and_can_be_disabled(monkeypatch: Any) -> None:

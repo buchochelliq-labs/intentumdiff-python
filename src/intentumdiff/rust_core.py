@@ -599,11 +599,14 @@ def build_scope_trails(
             )
         )
         data = json.loads(payload)
+        if not isinstance(data, dict) or not isinstance(data.get("scope_trails"), dict):
+            raise ValueError("Rust scope trail result requires a scope_trails object")
+        scope_trails = data["scope_trails"]
+        _result_list(scope_trails, "old")
+        _result_list(scope_trails, "new")
+        return dict(scope_trails)
     except Exception as exc:  # noqa: BLE001 - scope computation belongs to Rust.
-        raise RuntimeError(f"Rust scope trail engine unavailable: {exc}") from exc
-
-    scope_trails = data.get("scope_trails") if isinstance(data, dict) else None
-    return dict(scope_trails) if isinstance(scope_trails, dict) else {}
+        raise RuntimeError(f"Rust scope trail engine failed: {exc}") from exc
 
 
 def _review_result_used(data: Any) -> bool:

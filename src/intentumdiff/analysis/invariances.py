@@ -2,7 +2,10 @@
 intentumdiff.analysis.invariances
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Data-defined semantic invariance handling.
+Rust-backed built-in invariance adapters and declarative rule metadata.
+
+Explicit custom rule sets retain the legacy evaluator until the Rust engine
+supports that API. Default calls always use the authoritative Rust engine.
 
 Rules are declared in packaged YAML and select a small allow-listed evaluator.
 The YAML is data only: it never contains executable predicates, imports, or
@@ -287,6 +290,15 @@ def build_style_only_evidence(
 ) -> InvarianceResult:
     """Build source-span evidence for the fast style-only shortcut."""
 
+    if rules is None:
+        from intentumdiff.rust_core import build_style_only_evidence as rust_evidence
+
+        result = rust_evidence(
+            old_source=old_source, new_source=new_source, language=language,
+            old_cst_json=old_cst_json, new_cst_json=new_cst_json,
+        )
+        return InvarianceResult(result.changes, result.change_groups, result.ignored_style_changes)
+
     if old_source == new_source:
         return InvarianceResult(changes=[])
 
@@ -361,6 +373,15 @@ def build_zero_change_literal_evidence(
 ) -> InvarianceResult:
     """Build literal equivalence evidence when refinement already removed all changes."""
 
+    if rules is None:
+        from intentumdiff.rust_core import build_zero_change_literal_evidence as rust_evidence
+
+        result = rust_evidence(
+            old_tree=old_tree, new_tree=new_tree, old_source=old_source,
+            new_source=new_source, language=language,
+        )
+        return InvarianceResult(result.changes, result.change_groups, result.ignored_style_changes)
+
     if old_source == new_source:
         return InvarianceResult(changes=[])
 
@@ -413,6 +434,15 @@ def apply_invariances(
     rules: tuple[InvarianceRuleDefinition, ...] | None = None,
 ) -> InvarianceResult:
     """Remove review-level changes that are proven equivalent by invariance rules."""
+
+    if rules is None:
+        from intentumdiff.rust_core import apply_invariances as rust_evidence
+
+        result = rust_evidence(
+            changes, old_tree=old_tree, new_tree=new_tree,
+            old_source=old_source, new_source=new_source, language=language,
+        )
+        return InvarianceResult(result.changes, result.change_groups, result.ignored_style_changes)
 
     active_rules = rules if rules is not None else load_builtin_invariance_rules()
     current = list(changes)
