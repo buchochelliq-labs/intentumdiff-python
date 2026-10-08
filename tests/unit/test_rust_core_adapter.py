@@ -49,7 +49,7 @@ def _passthrough_invariances_json(request_json: str) -> str:
 
 def _empty_scope_trails_json(request_json: str) -> str:
     json.loads(request_json)
-    return json.dumps({})
+    return json.dumps({"scope_trails": {"old": [], "new": []}})
 
 
 def test_rust_core_defaults_to_native_first_and_can_be_disabled(monkeypatch: Any) -> None:
@@ -687,20 +687,17 @@ def test_optional_rust_adapters_raise_on_engine_failure(
                 config=DiffConfig(),
             ),
         ),
-        (
-            "enrich_profile_labels_json",
-            lambda root: rust_core.try_rust_profile_label_enrichment(root, "source", "python"),
-        ),
     ],
 )
-def test_optional_rust_adapters_still_decline_when_handler_is_absent(
+def test_required_rust_review_adapters_raise_when_handler_is_absent(
     monkeypatch: Any,
     handler: str,
     call: Any,
 ) -> None:
     root = _node("root", "module", "module", line=0)
     monkeypatch.setattr(rust_core, "_load_backend", lambda: SimpleNamespace())
-    assert call(root) is None
+    with pytest.raises(RuntimeError, match="does not expose"):
+        call(root)
 
 
 def test_rust_core_tree_reconstructs_matching_and_changes(monkeypatch: Any) -> None:
@@ -1181,7 +1178,7 @@ def test_rust_core_commit_json_adapter_rejects_byte_size_mismatch(
         "finalize_review_json -> rust_finalize_declined), which the RUST_ONLY gate forbids."
     ),
 )
-def test_semantic_differ_batch_fallback_continues_python_pipeline(monkeypatch: Any) -> None:
+def test_semantic_differ_explicit_finalize_decline_uses_rust_source_fallback(monkeypatch: Any) -> None:
     payload = {
         "schema_version": 1,
         "status": "fallback",
@@ -1201,6 +1198,8 @@ def test_semantic_differ_batch_fallback_continues_python_pipeline(monkeypatch: A
         apply_invariances_json=_passthrough_invariances_json,
         scope_trails_json=_empty_scope_trails_json,
         enrich_literal_labels_json=lambda tree_json, source: tree_json,
+        enrich_node_facts_json=real_backend.enrich_node_facts_json,
+        finalize_review_json=lambda *args: json.dumps({"used": False, "reason": "tree_too_large"}),
     )
     monkeypatch.setattr(rust_core, "_load_backend", lambda: backend)
 
@@ -1219,9 +1218,8 @@ def test_semantic_differ_batch_fallback_continues_python_pipeline(monkeypatch: A
     phases = [phase["name"] for phase in diff.metadata["phase_timings"]["phases"]]
     assert "rust_core_batch_execution" in phases
     # Post-retirement degradation chain (issue #57 payoff, stage 4b): batch declined ->
-    # the per-stage Rust finalize is attempted next; this synthetic backend exposes no
-    # finalize_review_json, so the pipeline degrades to the Rust source fallback
-    # (the python stages are retired). A REAL backend serves at the finalize tier.
+    # The per-stage Rust finalize explicitly declines next; the pipeline then
+    # uses the Rust source fallback. Missing finalize handlers must raise instead.
     assert "rust_finalize_review" in phases
     assert diff.metadata.get("fallback_reason") == "rust_finalize_declined"
 

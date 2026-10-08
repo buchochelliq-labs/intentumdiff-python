@@ -497,22 +497,15 @@ def _ctypes_backend() -> _CtypesBackend:
 
 
 def enrich_node_facts(tree: SemanticNode) -> SemanticNode:
-    """Fill language-agnostic NodeFacts (issue #70) on a Wasm-parsed tree via the Rust core.
-
-    Non-Python parsers emit ``facts: None``; this asks the Rust core to derive the same
-    privacy-safe structural facts (param_count, returns/return_kind, side_effects) from the
-    SemanticNode tree so every language gives the intent explainer structural signal. Idempotent —
-    nodes that already carry facts (the native Python path) are untouched. On any failure (backend
-    or function unavailable) the tree is returned unchanged: enrichment must never break a diff.
-    """
+    """Derive semantic facts in Rust; required engine failures propagate."""
     try:
         backend = _load_backend()
         enrich = getattr(backend, "enrich_node_facts_json", None)
-        if enrich is None:
-            return tree
+        if not callable(enrich):
+            raise RuntimeError("backend does not expose enrich_node_facts_json")
         return SemanticNode.model_validate_json(enrich(tree.model_dump_json()))
-    except Exception:  # noqa: BLE001 — optional enrichment must degrade gracefully
-        return tree
+    except Exception as exc:
+        raise RuntimeError(f"Rust node-facts enrichment failed: {exc}") from exc
 
 
 def apply_invariances(
@@ -606,11 +599,39 @@ def build_scope_trails(
             )
         )
         data = json.loads(payload)
+        if not isinstance(data, dict) or not isinstance(data.get("scope_trails"), dict):
+            raise ValueError("Rust scope trail result requires a scope_trails object")
+        scope_trails = data["scope_trails"]
+        _result_list(scope_trails, "old")
+        _result_list(scope_trails, "new")
+        return dict(scope_trails)
     except Exception as exc:  # noqa: BLE001 - scope computation belongs to Rust.
-        raise RuntimeError(f"Rust scope trail engine unavailable: {exc}") from exc
+        raise RuntimeError(f"Rust scope trail engine failed: {exc}") from exc
 
-    scope_trails = data.get("scope_trails") if isinstance(data, dict) else None
-    return dict(scope_trails) if isinstance(scope_trails, dict) else {}
+
+def _review_result_used(data: Any) -> bool:
+    """Only an explicit boolean false is an engine routing decline."""
+    if not isinstance(data, dict) or type(data.get("used")) is not bool:
+        raise ValueError("Rust review result requires a boolean used field")
+    return data["used"]
+
+
+def _result_list(data: dict[str, Any], field: str, item_type: type = dict) -> list[Any]:
+    value = data.get(field)
+    if not isinstance(value, list) or any(type(item) is not item_type for item in value):
+        raise ValueError(f"Rust review result requires {field} to be a list of {item_type.__name__}")
+    return value
+
+
+def _result_bool(data: dict[str, Any], field: str) -> bool:
+    if type(data.get(field)) is not bool:
+        raise ValueError(f"Rust review result requires a boolean {field} field")
+    return data[field]
+
+
+def _result_group(data: dict[str, Any], field: str) -> ChangeGroup | None:
+    value = data[field]
+    return None if value is None else ChangeGroup.model_validate(value)
 
 
 def try_rust_generic_text_review(
@@ -618,7 +639,7 @@ def try_rust_generic_text_review(
     new_source: str,
     raw_change_count: int,
 ) -> tuple[list[Change], list[ChangeGroup]] | None:
-    """Run the Rust generic-text review stage; None means fall back to Python.
+    """Run the Rust generic-text review stage; None means the engine explicitly declined this route.
 
     Engine-side port of the generic text presentation (issue #35): line diff,
     relocated-line netting, blank symmetry, inline char detail, and the
@@ -628,15 +649,15 @@ def try_rust_generic_text_review(
         backend = _load_backend()
         review_fn = getattr(backend, "generic_text_review_json", None)
         if not callable(review_fn):
-            return None
+            raise RuntimeError("backend does not expose generic_text_review_json")
         data = json.loads(review_fn(old_source, new_source, raw_change_count))
-        if not isinstance(data, dict) or not data.get("used"):
+        if not _review_result_used(data):
             return None
-        changes = [Change.model_validate(item) for item in data.get("changes") or []]
+        changes = [Change.model_validate(item) for item in _result_list(data, "changes")]
         groups: list[ChangeGroup] = []
-        group = data.get("group")
+        group = _result_group(data, "group")
         if group:
-            groups.append(ChangeGroup.model_validate(group))
+            groups.append(group)
         return changes, groups
     except Exception as exc:  # noqa: BLE001 - an engine failure is not an unsupported decline.
         raise RuntimeError(f"Rust generic-text review failed: {exc}") from exc
@@ -646,7 +667,7 @@ def try_rust_markdown_section_review(
     old_source: str,
     new_source: str,
 ) -> dict[str, object] | None:
-    """Run the Rust markdown section review (moves + heading renames); None -> Python.
+    """Run the Rust markdown section review (moves + heading renames); None means an explicit engine routing decline.
 
     Engine-side port of the markdown post-presentation rules (issue #36): section
     identity by content hash, LIS insertion-shift discrimination for moves, and
@@ -656,24 +677,18 @@ def try_rust_markdown_section_review(
         backend = _load_backend()
         review_fn = getattr(backend, "markdown_section_review_json", None)
         if not callable(review_fn):
-            return None
+            raise RuntimeError("backend does not expose markdown_section_review_json")
         data = json.loads(review_fn(old_source, new_source))
-        if not isinstance(data, dict) or not data.get("used"):
+        if not _review_result_used(data):
             return None
         return {
-            "moves": [Change.model_validate(item) for item in data.get("moves") or []],
-            "moved_labels": set(data.get("moved_labels") or []),
-            "move_group": (
-                ChangeGroup.model_validate(data["move_group"]) if data.get("move_group") else None
-            ),
-            "renames": [Change.model_validate(item) for item in data.get("renames") or []],
-            "old_heading_lines": set(data.get("old_heading_lines") or []),
-            "new_heading_lines": set(data.get("new_heading_lines") or []),
-            "rename_group": (
-                ChangeGroup.model_validate(data["rename_group"])
-                if data.get("rename_group")
-                else None
-            ),
+            "moves": [Change.model_validate(item) for item in _result_list(data, "moves")],
+            "moved_labels": set(_result_list(data, "moved_labels", str)),
+            "move_group": _result_group(data, "move_group"),
+            "renames": [Change.model_validate(item) for item in _result_list(data, "renames")],
+            "old_heading_lines": set(_result_list(data, "old_heading_lines", int)),
+            "new_heading_lines": set(_result_list(data, "new_heading_lines", int)),
+            "rename_group": _result_group(data, "rename_group"),
         }
     except Exception as exc:  # noqa: BLE001 - an engine failure is not an unsupported decline.
         raise RuntimeError(f"Rust markdown section review failed: {exc}") from exc
@@ -721,14 +736,14 @@ def try_rust_finalize_review(
 ) -> dict[str, Any] | None:
     """Route the per-stage draft finalization through the Rust core (issue #57).
 
-    Runs the SAME refine+finalize pipeline as the certified batch from the provided
-    semantic trees. None -> caller stays on the Python transitional path.
+    Runs the same refine/finalize pipeline as the certified batch. None means an
+    explicit engine routing decline; missing handlers or invalid responses raise.
     """
     try:
         backend = _load_backend()
         finalize_fn = getattr(backend, "finalize_review_json", None)
         if not callable(finalize_fn):
-            return None
+            raise RuntimeError("backend does not expose finalize_review_json")
         config_json = json.dumps(
             {
                 "min_height": config.min_height,
@@ -748,25 +763,23 @@ def try_rust_finalize_review(
                 config_json,
             )
         )
-        if not isinstance(data, dict) or not data.get("used"):
+        if not _review_result_used(data):
             return None
         return {
             "fallback_diff": SemanticDiff.model_validate(data["fallback_diff"]) if data.get("fallback_diff") else None,
-            "changes": [Change.model_validate(item) for item in data.get("changes") or []],
+            "changes": [Change.model_validate(item) for item in _result_list(data, "changes")],
             "change_groups": [
-                ChangeGroup.model_validate(item) for item in data.get("change_groups") or []
+                ChangeGroup.model_validate(item) for item in _result_list(data, "change_groups")
             ],
-            "is_style_only": bool(data.get("is_style_only")),
-            "no_surviving_changes": bool(data.get("no_surviving_changes")),
+            "is_style_only": _result_bool(data, "is_style_only"),
+            "no_surviving_changes": _result_bool(data, "no_surviving_changes"),
             "ignored_style_changes": [
                 dict(item)
-                for item in data.get("ignored_style_changes") or []
-                if isinstance(item, dict)
+                for item in _result_list(data, "ignored_style_changes")
             ],
             "trace": [
                 dict(item)
-                for item in data.get("trace") or []
-                if isinstance(item, dict)
+                for item in (_result_list(data, "trace") if "trace" in data else [])
             ],
         }
     except Exception as exc:  # noqa: BLE001 - an engine failure is not an unsupported decline.
@@ -823,14 +836,14 @@ def try_rust_profile_label_enrichment(
 ) -> SemanticNode | None:
     """Profile-label enrichment in the Rust core (issue #57 profile-enrichment port).
 
-    Returns the enriched tree, or None when the backend is unavailable (caller
-    falls back to the python profile enrichment until every family is ported).
+    Returns the enriched tree. Missing handlers and engine failures propagate;
+    callers must not silently omit required profile semantics.
     """
     try:
         backend = _load_backend()
         enrich_fn = getattr(backend, "enrich_profile_labels_json", None)
         if not callable(enrich_fn):
-            return None
+            raise RuntimeError("backend does not expose enrich_profile_labels_json")
         return SemanticNode.model_validate_json(
             enrich_fn(tree.model_dump_json(), source, language, list(identity_fields))
         )
@@ -1404,9 +1417,8 @@ _registered_xml_dialects_fingerprint: str | None = None
 def try_register_user_xml_dialects(dialects: list[dict[str, Any]]) -> bool:
     """Marshal user XML dialect specs (issue #86) into the Rust registry.
 
-    Idempotent per payload; returns False when the backend or the entrypoint is
-    unavailable (older core), in which case the diff proceeds without user XML
-    dialects — the registration is additive, never load-bearing.
+    Idempotent per payload. Required registration failures propagate so a review
+    cannot silently omit the user's requested dialect semantics.
     """
     global _registered_xml_dialects_fingerprint
     payload = json.dumps(dialects, sort_keys=True)
@@ -1416,13 +1428,12 @@ def try_register_user_xml_dialects(dialects: list[dict[str, Any]]) -> bool:
         backend = _load_backend()
         register_fn = getattr(backend, "register_user_xml_dialects_json", None)
         if not callable(register_fn):
-            return False
+            raise RuntimeError("backend does not expose register_user_xml_dialects_json")
         register_fn(payload)
         _registered_xml_dialects_fingerprint = payload
         return True
-    except Exception as exc:  # noqa: BLE001 - strangler boundary must fall back.
-        logger.debug("Rust XML dialect registration unavailable: %s", exc, exc_info=True)
-        return False
+    except Exception as exc:
+        raise RuntimeError(f"Rust XML dialect registration failed: {exc}") from exc
 
 
 def _run_invariance_request(request: dict[str, Any]) -> RustInvarianceResult:
@@ -1433,22 +1444,20 @@ def _run_invariance_request(request: dict[str, Any]) -> RustInvarianceResult:
             raise RuntimeError("backend does not expose apply_invariances_json")
         payload = apply_fn(json.dumps(request))
         data = json.loads(payload)
-    except Exception as exc:  # noqa: BLE001 - public engine boundary requires Rust here.
-        raise RuntimeError(f"Rust invariance engine unavailable: {exc}") from exc
-
-    if not isinstance(data, dict):
-        raise RuntimeError("Rust invariance engine returned a non-object payload")
-    return RustInvarianceResult(
-        changes=[Change.model_validate(item) for item in data.get("changes") or []],
-        change_groups=[
-            ChangeGroup.model_validate(item) for item in data.get("change_groups") or []
-        ],
-        ignored_style_changes=[
-            dict(item)
-            for item in data.get("ignored_style_changes") or []
-            if isinstance(item, dict)
-        ],
-    )
+        if not isinstance(data, dict):
+            raise ValueError("Rust invariance engine returned a non-object payload")
+        return RustInvarianceResult(
+            changes=[Change.model_validate(item) for item in _result_list(data, "changes")],
+            change_groups=[
+                ChangeGroup.model_validate(item) for item in _result_list(data, "change_groups")
+            ],
+            ignored_style_changes=[
+                dict(item)
+                for item in _result_list(data, "ignored_style_changes")
+            ],
+        )
+    except Exception as exc:
+        raise RuntimeError(f"Rust invariance engine failed: {exc}") from exc
 
 
 def try_rust_core_batch_diff(
