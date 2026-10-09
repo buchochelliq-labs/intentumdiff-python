@@ -60,6 +60,18 @@ intentumdiff file old.py new.py
 intentumdiff git --help      # diff against a ref in a git repository
 ```
 
+## See the 0.0.2 candidate CLI
+
+This real installed-wheel recording changes the assigned value from `1` to `2`.
+Rust reports one modification; the main diff panel and table use **rs-rich**.
+
+[![Installed 0.0.2b1 candidate showing one integer-value modification](https://raw.githubusercontent.com/buchochelliq-labs/intentumdiff-docs/1c082d29f58a616136290db7003baec96aa3c200/docs/assets/cli/current/meaningful.png)](https://github.com/buchochelliq-labs/intentumdiff-docs/blob/1c082d29f58a616136290db7003baec96aa3c200/docs/assets/cli/current/meaningful.mp4)
+
+[Watch the CLI examples and read their exact provenance](https://github.com/buchochelliq-labs/intentumdiff-docs/blob/1c082d29f58a616136290db7003baec96aa3c200/docs/cli-demos/index.md).
+The recordings use the verified Python #98 Linux wheel and **rs-rich-record**. They are
+pre-publication candidate evidence, not a claim that 0.0.2 is available on PyPI.
+Standalone guardrail reports and errors still use the existing presentation paths.
+
 ## Documentation
 
 **https://buchochelliq-labs.github.io/intentumdiff-docs/**
