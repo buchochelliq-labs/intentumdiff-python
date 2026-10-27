@@ -73,11 +73,18 @@ def test_complete_74_language_corpus_is_collected() -> None:
         f"missing corpus languages: {sorted(_EXPECTED_CORPUS_DIRS - directories)}; "
         f"unexpected: {sorted(directories - _EXPECTED_CORPUS_DIRS)}"
     )
-    collected = {source.parent.name for source, _ in _CASES}
+    # Five languages also carry constructs.expect.json in addition to the
+    # playground manifest. Preserve those extra regression cases; count only
+    # the playground subset when asserting one source per language.
+    playground_cases = [
+        (source, manifest) for source, manifest in _CASES
+        if source.stem == "playground"
+    ]
+    collected = {source.parent.name for source, _ in playground_cases}
     assert collected == _EXPECTED_CORPUS_DIRS, (
         f"missing playground manifests/sources: {sorted(_EXPECTED_CORPUS_DIRS - collected)}"
     )
-    assert len(_CASES) == len(_EXPECTED_CORPUS_DIRS) == 74
+    assert len(playground_cases) == len(_EXPECTED_CORPUS_DIRS) == 74
     for source, manifest in _CASES:
         assert manifest["language"] and manifest["filename"], source
         # The current candidate has zero mutation xfails across all 74 manifests.
