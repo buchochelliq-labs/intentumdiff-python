@@ -80,6 +80,13 @@ def test_complete_74_language_corpus_is_collected() -> None:
     assert len(_CASES) == len(_EXPECTED_CORPUS_DIRS) == 74
     for source, manifest in _CASES:
         assert manifest["language"] and manifest["filename"], source
+        # The current candidate has zero mutation xfails across all 74 manifests.
+        # A newly exempted value edit must block 0.0.2 rather than hiding a
+        # false-style/zero-change regression behind pytest.xfail.
+        assert not manifest.get("mutation_xfail"), (
+            f"{source.parent.name}: unresolved content mutation exemptions: "
+            f"{manifest.get('mutation_xfail')}"
+        )
         assert (source.parent / "edit_matrix.expect.json").is_file(), source
 
 
