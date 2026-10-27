@@ -215,6 +215,42 @@ class TestSemanticDifferParallelCommit:
 
         assert [result.new_filename for result in results] == ["good.py"]
 
+    @pytest.mark.parametrize("parallel", [False, 2], ids=["sequential", "parallel"])
+    @pytest.mark.parametrize(
+        "error",
+        [
+            pytest.param(RuntimeError("Rust node facts unavailable"), id="rust-boundary"),
+            pytest.param(ValueError("malformed Rust payload"), id="invalid-payload"),
+            pytest.param(
+                PluginFuelExhausted("python-parser", 100_000),
+                id="parser-fuel",
+            ),
+        ],
+    )
+    def test_commit_file_failure_is_not_silent_partial_success(self, parallel, error):
+        """A failed changed file must not disappear behind a successful sibling."""
+        differ = SemanticDiffer(DiffConfig(parallel=parallel, experimental_rust_core=False))
+
+        def fake_pipeline(self, old, new, filename, language_hint, **kwargs):
+            if filename == "broken.py":
+                raise error
+            return _semantic_diff(filename, kwargs.get("new_filename") or filename)
+
+        changed_files = [
+            ("old good", "new good", "good.py", "good.py", None),
+            ("old broken", "new broken", "broken.py", "broken.py", None),
+        ]
+        repo_patch, sources_patch = self._patch_git_inputs(changed_files)
+        with (
+            repo_patch,
+            sources_patch,
+            patch.object(SemanticDiffer, "_run_pipeline", fake_pipeline),
+        ):
+            with pytest.raises(RuntimeError, match=r"Commit diff failed for 'broken\\.py'") as caught:
+                differ.diff_commit(".")
+
+        assert caught.value.__cause__ is error
+
     def test_phase_profile_records_source_collection_once(self):
         differ = SemanticDiffer(
             DiffConfig(parallel=2, profile_phases=True, experimental_rust_core=False)
