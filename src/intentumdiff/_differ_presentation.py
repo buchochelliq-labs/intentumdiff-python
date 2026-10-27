@@ -134,67 +134,6 @@ def _token_fallback_diff(
 # ---------------------------------------------------------------------------
 
 
-_GENERIC_STRING_LABELS = frozenset({"string", "string_literal"})
-
-# Entity node types whose labels should surface in review output even when
-# the matcher preserved the container (its body changed in place but the
-# container itself was matched by label). Broad coverage across all
-# supported parsers — tree-sitter grammars plus the lightweight hand-written
-# parsers (graphql, po, asciidoc, latex, ocaml, reasonml). See
-# ``the retired NOISE_SUPPRESSION_RETUNE doc (git history)`` Step A2.
-_NAMED_ENTITY_NODE_TYPES: frozenset[str] = frozenset(
-    {
-        # Tree-sitter common
-        "function_definition", "async_function_def", "class_definition",
-        "method_declaration", "function_declaration", "async_function_declaration",
-        "constructor_declaration",
-        "destructor_declaration", "property_declaration", "field_declaration",
-        "variable_declaration", "lexical_declaration", "struct_definition",
-        "interface_declaration", "enum_declaration", "enum_member_declaration",
-        "operator_declaration", "event_declaration", "delegate_declaration",
-        "record_declaration", "record_struct_declaration",
-        # GraphQL
-        "type_definition", "operation_definition", "fragment_definition",
-        "field_definition", "directive_definition", "schema_definition",
-        "enum_definition", "input_object_definition",
-        # PO/gettext
-        "message", "obsolete_message",
-        # AsciiDoc
-        "section_level_1", "section_level_2", "section_level_3",
-        "section_level_4", "section_level_5", "section_level_6",
-        # LaTeX
-        "document_class", "package", "section", "environment",
-        # OCaml / ReasonML
-        "module_binding", "module", "value_definition",
-        "recursive_value", "component", "signature_value", "class_type",
-        "exception",
-    }
-)
-
-
-def _slice_source_text(source: str, position: NodePosition) -> str:
-    lines = source.splitlines()
-    if position.start_line < 0 or position.start_line >= len(lines):
-        return ""
-    if position.end_line < position.start_line:
-        return ""
-    if position.start_line == position.end_line:
-        return lines[position.start_line][position.start_col : position.end_col]
-
-    selected = [lines[position.start_line][position.start_col :]]
-    for line_no in range(position.start_line + 1, min(position.end_line, len(lines))):
-        selected.append(lines[line_no])
-    if position.end_line < len(lines):
-        selected.append(lines[position.end_line][: position.end_col])
-    return "\n".join(selected)
-
-
-def _enrich_literal_labels(root: SemanticNode, source: str) -> SemanticNode:
-    from intentumdiff.rust_core import enrich_literal_labels
-
-    return enrich_literal_labels(root, source)
-
-
 def _changes_to_stream_events(
     before: list[Change],
     after: list[Change],
