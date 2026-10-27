@@ -11,7 +11,9 @@ from intentumdiff import rust_core
 from intentumdiff.core.models import NodePosition, SemanticNode
 
 
-def _node(node_id: str, *, line: int = 0, children: list[SemanticNode] | None = None) -> SemanticNode:
+def _node(
+    node_id: str, *, line: int = 0, children: list[SemanticNode] | None = None
+) -> SemanticNode:
     return SemanticNode(
         id=node_id,
         node_type="identifier",
@@ -57,7 +59,9 @@ def test_missing_native_type_map_handler_fails_closed(monkeypatch: pytest.Monkey
         rust_core.attach_lsp_type_map(_node("root"), {"root": "int"})
 
 
-def test_malformed_native_tree_dto_is_not_silently_accepted(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_malformed_native_tree_dto_is_not_silently_accepted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(rust_core, "_required_engine_json", lambda *_args, **_kw: {"children": []})
     with pytest.raises(RuntimeError, match="invalid tree DTO"):
         rust_core.attach_lsp_type_map(_node("root"), {"root": "int"})
@@ -71,6 +75,10 @@ def test_python_indexer_has_no_type_tree_mutation_function() -> None:
 
     source = Path(indexer.__file__).read_text(encoding="utf-8")
     tree = ast.parse(source)
-    definitions = {node.name for node in ast.walk(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
+    definitions = {
+        node.name
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
     assert "_attach_type_info" not in definitions
     assert "attach_lsp_type_map(node, type_map)" in source
