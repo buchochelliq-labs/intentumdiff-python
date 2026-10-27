@@ -503,22 +503,20 @@ def _ctypes_backend() -> _CtypesBackend:
 
 
 def enrich_node_facts(tree: SemanticNode) -> SemanticNode:
-    """Fill language-agnostic NodeFacts (issue #70) on a Wasm-parsed tree via the Rust core.
+    """Request authoritative language-agnostic NodeFacts enrichment from Rust.
 
-    Non-Python parsers emit ``facts: None``; this asks the Rust core to derive the same
-    privacy-safe structural facts (param_count, returns/return_kind, side_effects) from the
-    SemanticNode tree so every language gives the intent explainer structural signal. Idempotent —
-    nodes that already carry facts (the native Python path) are untouched. On any failure (backend
-    or function unavailable) the tree is returned unchanged: enrichment must never break a diff.
+    Rust supplies structural facts for every shipped parser. Returning the input
+    tree after an engine error can silently lose intent evidence, so the 0.0.2
+    boundary rejects missing handlers and malformed responses instead of
+    manufacturing successful un-enriched output. A valid no-op is supported.
     """
     try:
-        backend = _load_backend()
-        enrich = getattr(backend, "enrich_node_facts_json", None)
-        if enrich is None:
-            return tree
+        enrich = getattr(_load_backend(), "enrich_node_facts_json", None)
+        if not callable(enrich):
+            raise RuntimeError("required Rust node facts handler is unavailable")
         return SemanticNode.model_validate_json(enrich(tree.model_dump_json()))
-    except Exception:  # noqa: BLE001 — optional enrichment must degrade gracefully
-        return tree
+    except Exception as exc:  # noqa: BLE001 - native failures must never become success.
+        raise RuntimeError(f"Rust node facts enrichment failed: {exc}") from exc
 
 
 def apply_invariances(
