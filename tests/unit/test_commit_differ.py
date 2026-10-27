@@ -219,7 +219,9 @@ class TestSemanticDifferParallelCommit:
     @pytest.mark.parametrize(
         "error",
         [
-            pytest.param(RuntimeError("Rust node facts unavailable"), id="rust-boundary"),
+            pytest.param(
+                RuntimeError("Rust node facts unavailable"), id="rust-boundary"
+            ),
             pytest.param(ValueError("malformed Rust payload"), id="invalid-payload"),
             pytest.param(
                 PluginFuelExhausted("python-parser", 100_000),
@@ -229,7 +231,9 @@ class TestSemanticDifferParallelCommit:
     )
     def test_commit_file_failure_is_not_silent_partial_success(self, parallel, error):
         """A failed changed file must not disappear behind a successful sibling."""
-        differ = SemanticDiffer(DiffConfig(parallel=parallel, experimental_rust_core=False))
+        differ = SemanticDiffer(
+            DiffConfig(parallel=parallel, experimental_rust_core=False)
+        )
 
         def fake_pipeline(self, old, new, filename, language_hint, **kwargs):
             if filename == "broken.py":
