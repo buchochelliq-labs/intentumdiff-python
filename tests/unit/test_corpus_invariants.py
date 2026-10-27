@@ -55,6 +55,35 @@ _CASES = _corpus_cases()
 _IDS = [f"{manifest['language']}-{path.stem}" for path, manifest in _CASES]
 
 
+# 0.0.2 release contract: these 74 parser-language directories were independently
+# verified against the full checked-in corpus tree at RC 243d04207. Do not
+# silently permit missing fixture directories or manifests to turn parametrized
+# tests into an empty/partial green run.
+_EXPECTED_CORPUS_DIRS = frozenset(
+    """
+    abap adf asciidoc asm assemblyscript astro bash c clojure cmake cpp csharp css dart databricks-workflow databricks dax delphi dockerfile elixir generic gitignore go gomod graphql groovy haskell hcl html ini java javascript json kotlin latex lua m make markdown mdx ocaml odin perl php plsql po postscript powershell proto puppet python qsharp r reasonml ruby rust sas scala scss sql squirrel svelte swift toml tsql tsx typescript vbnet vue wast wat xml yaml zig
+    """.split()
+)
+
+
+def test_complete_74_language_corpus_is_collected() -> None:
+    assert _CORPUS_ROOT.is_dir(), "74-language corpus directory is missing"
+    directories = {p.name for p in _CORPUS_ROOT.iterdir() if p.is_dir()}
+    assert directories == _EXPECTED_CORPUS_DIRS, (
+        f"missing corpus languages: {sorted(_EXPECTED_CORPUS_DIRS - directories)}; "
+        f"unexpected: {sorted(directories - _EXPECTED_CORPUS_DIRS)}"
+    )
+    collected = {source.parent.name for source, _ in _CASES}
+    assert collected == _EXPECTED_CORPUS_DIRS, (
+        f"missing playground manifests/sources: {sorted(_EXPECTED_CORPUS_DIRS - collected)}"
+    )
+    assert len(_CASES) == len(_EXPECTED_CORPUS_DIRS) == 74
+    for source, manifest in _CASES:
+        assert manifest["language"] and manifest["filename"], source
+        assert (source.parent / "edit_matrix.expect.json").is_file(), source
+
+
+
 def _semantic_labels(language: str, filename: str, source: str) -> str:
     diff = SemanticDiffer().diff_strings("", source, filename=filename, language_hint=language)
     labels: list[str] = []
