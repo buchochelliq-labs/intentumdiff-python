@@ -1361,6 +1361,9 @@ def test_semantic_differ_batch_fallback_continues_python_pipeline(monkeypatch: A
         filename_selection_next=rust_core._load_backend().filename_selection_next,
         parse_errors_present_json=real_backend.parse_errors_present_json,
         source_fallback_diff_json=real_backend.source_fallback_diff_json,
+        # Exercise the real Rust NodeFacts contract; only batch/finalize decline is mocked.
+        # An absent enrichment handler must fail closed, not return un-enriched trees.
+        enrich_node_facts_json=real_backend.enrich_node_facts_json,
         version=lambda: "0.4.0",
         supports_language=lambda language: language == "python",
         diff_batch=lambda *args: json.dumps(payload),
