@@ -823,6 +823,8 @@ class SemanticDiffer:
         Diff every file that changed between two git refs.
 
         Files that have no registered parser are silently skipped.
+        Runtime/parser failures instead abort the review: a list of successes
+        must not silently omit a changed file when its Rust engine call fails.
 
         Parameters
         ----------
@@ -1020,8 +1022,12 @@ class SemanticDiffer:
                     raise
                 except _skip_exc:
                     logger.debug("Skipping %r — no parser available", item[2])
-                except _warn_exc:
-                    logger.warning("Failed to diff %r", item[2], exc_info=True)
+                except _warn_exc as exc:
+                    # A runtime failure cannot be represented in list[SemanticDiff].
+                    # Preserve the failed file identity; a partial review is unsafe.
+                    raise RuntimeError(
+                        f"Commit diff failed for {item[2]!r}: {exc}"
+                    ) from exc
             return results
         else:
             # ── Parallel ────────────────────────────────────────────────
@@ -1064,8 +1070,12 @@ class SemanticDiffer:
                         raise
                     except _skip_exc:
                         logger.debug("Skipping %r — no parser available", sources[idx][2])
-                    except _warn_exc:
-                        logger.warning("Failed to diff %r", sources[idx][2], exc_info=True)
+                    except _warn_exc as exc:
+                        # Match the sequential path: failures must not disappear
+                        # when one parallel worker succeeds.
+                        raise RuntimeError(
+                            f"Commit diff failed for {sources[idx][2]!r}: {exc}"
+                        ) from exc
             return [results_map[i] for i in sorted(results_map)]
 
     def diff_stream(
