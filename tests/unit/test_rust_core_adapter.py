@@ -462,11 +462,13 @@ def test_rust_core_batch_diffs_accepts_multiple_complete_items(
     assert captured[1]["python_parser_backend"] == "wasm"
 
 
-def _batch_mapping_fixture(monkeypatch: Any, indices: list[Any]) -> None:
+def _batch_mapping_fixture(
+    monkeypatch: Any, indices: list[Any], *, filenames: tuple[str, str] = ("a.py", "b.py")
+) -> None:
     """Install a fake native batch that preserves each item's requested identity."""
     diffs = [
-        SemanticDiff(old_filename="a.py", new_filename="a.py", language="python"),
-        SemanticDiff(old_filename="b.py", new_filename="b.py", language="python"),
+        SemanticDiff(old_filename=name, new_filename=name, language="python")
+        for name in filenames
     ]
     payload = {
         "engine": "rust_core_batch_v4",
@@ -501,15 +503,15 @@ def test_rust_batch_out_of_order_explicit_index_zero_is_not_remapped(
     monkeypatch: Any,
 ) -> None:
     """Rust may return index 0 second; its diff must remain attached to source 0."""
-    _batch_mapping_fixture(monkeypatch, [1, 0])
+    _batch_mapping_fixture(monkeypatch, [1, 0], filenames=("b.py", "a.py"))
     attempt = rust_core.try_rust_core_batch_diffs(
         files=_two_python_batch_inputs(),
         config=DiffConfig(experimental_rust_core=True),
     )
     assert attempt.used is True
     assert {index: diff.new_filename for index, diff in attempt.diffs.items()} == {
-        0: "b.py",
-        1: "a.py",
+        0: "a.py",
+        1: "b.py",
     }
 
 
