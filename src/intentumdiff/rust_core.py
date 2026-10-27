@@ -622,24 +622,28 @@ def try_rust_generic_text_review(
     new_source: str,
     raw_change_count: int,
 ) -> tuple[list[Change], list[ChangeGroup]] | None:
-    """Run the Rust generic-text review stage; None means fall back to Python.
+    """Run Rust-owned generic-text review; only explicit Rust declines pass through.
 
-    Engine-side port of the generic text presentation (issue #35): line diff,
-    relocated-line netting, blank symmetry, inline char detail, and the
-    presentation.generic_text_diff suppression audit group.
+    Missing handlers, malformed envelopes and invalid change lists fail closed.
+    A Rust response with `used: false` is an intentional decline, not an error.
     """
     try:
         backend = _load_backend()
         review_fn = getattr(backend, "generic_text_review_json", None)
         if not callable(review_fn):
-            return None
+            raise RuntimeError("required Rust generic-text review handler is unavailable")
         data = json.loads(review_fn(old_source, new_source, raw_change_count))
-        if not isinstance(data, dict) or not data.get("used"):
+        if not isinstance(data, dict) or type(data.get("used")) is not bool:
+            raise ValueError("Rust generic-text review requires a boolean used field")
+        if data["used"] is False:
             return None
-        changes = [Change.model_validate(item) for item in data.get("changes") or []]
+        raw_changes = data.get("changes")
+        if not isinstance(raw_changes, list):
+            raise ValueError("Rust generic-text review requires a changes array")
+        changes = [Change.model_validate(item) for item in raw_changes]
         groups: list[ChangeGroup] = []
         group = data.get("group")
-        if group:
+        if group is not None:
             groups.append(ChangeGroup.model_validate(group))
         return changes, groups
     except Exception as exc:  # noqa: BLE001 - an engine failure is not an unsupported decline.
