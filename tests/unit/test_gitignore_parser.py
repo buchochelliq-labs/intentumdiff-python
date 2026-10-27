@@ -88,3 +88,21 @@ def test_engine_emits_human_intent_descriptions(differ: SemanticDiffer) -> None:
 
     negate = _diff(differ, "build/\n", "build/\n!build/keep.txt\n").changes[0]
     assert negate.description == "Adds an exception for build/keep.txt (no longer ignored)"
+
+
+def test_shipped_gitignore_append_span_is_source_grounded(differ: SemanticDiffer) -> None:
+    """The newly added 74th corpus language must preserve real change spans."""
+    source = "# Build outputs\n/dist/\n*.log\n!important.log\n"
+    changed = source + "/focus/\n"
+    diff = _diff(differ, source, changed)
+    assert diff.language == "gitignore"
+    assert not diff.is_fallback
+    assert not diff.is_style_only
+    assert [change.change_type for change in diff.changes] == [ChangeType.ADDITION]
+    added = diff.changes[0].new_node
+    assert added is not None
+    assert added.node_type == "pattern"
+    assert added.label == "/focus/"
+    position = added.position
+    assert (position.start_line, position.start_col) == (4, 0)
+    assert (position.end_line, position.end_col) == (4, 7)

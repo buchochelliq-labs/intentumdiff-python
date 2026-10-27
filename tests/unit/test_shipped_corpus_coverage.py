@@ -35,6 +35,18 @@ def test_each_shipped_parser_language_has_a_source_corpus_fixture() -> None:
         content = json.loads((fixture / "playground.expect.json").read_text(encoding="utf-8"))
         assert content["language"] == language, language
         assert content["filename"], language
+        matrix_path = fixture / "edit_matrix.expect.json"
+        assert matrix_path.is_file(), f"{language}: construct-edit matrix missing"
+        matrix = json.loads(matrix_path.read_text(encoding="utf-8"))
+        expected_verbs = {
+            "delete_entity", "rename_entity", "duplicate_entity",
+            "modify_literal", "swap_siblings",
+        }
+        assert set(matrix) == expected_verbs, (
+            f"{language}: unratcheted construct-edit verbs: "
+            f"missing={sorted(expected_verbs - set(matrix))}; "
+            f"unexpected={sorted(set(matrix) - expected_verbs)}"
+        )
         assert any(
             path.is_file()
             for path in fixture.glob("playground.*")
