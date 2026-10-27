@@ -374,6 +374,53 @@ class TestPostDiff:
         resp = client.post("/diff", json={"old": "a", "new": big})
         assert resp.status_code == 422
 
+    def test_body_replay_forwards_real_asgi_disconnect(self):
+        """Buffered request replay must not fabricate a second http.request event.
+
+        Starlette's streaming-response disconnect listener requires the real
+        upstream ASGI stream after the one replayed request body.
+        """
+        from fastapi import Request, Response
+
+        app = create_app(differ=_mock_differ())
+        dispatch = next(
+            middleware.kwargs["dispatch"]
+            for middleware in app.user_middleware
+            if "dispatch" in middleware.kwargs
+        )
+        body = b'{"old":"a","new":"b"}'
+        request_message = {"type": "http.request", "body": body, "more_body": False}
+        disconnect_message = {"type": "http.disconnect"}
+        upstream_events = [request_message, disconnect_message]
+        forwarded: list[dict[str, Any]] = []
+
+        async def upstream_receive():
+            return upstream_events.pop(0)
+
+        async def downstream(request: Request):
+            forwarded.append(await request.receive())
+            forwarded.append(await request.receive())
+            return Response("ok")
+
+        scope = {
+            "type": "http",
+            "asgi": {"version": "3.0"},
+            "http_version": "1.1",
+            "method": "POST",
+            "scheme": "http",
+            "path": "/diff",
+            "raw_path": b"/diff",
+            "query_string": b"",
+            "headers": [(b"content-type", b"application/json")],
+            "client": ("127.0.0.1", 12345),
+            "server": ("testserver", 80),
+        }
+        response = asyncio.run(dispatch(Request(scope, receive=upstream_receive), downstream))
+
+        assert response.status_code == 200
+        assert forwarded == [request_message, disconnect_message]
+        assert not upstream_events
+
     def test_body_limit_without_content_length_rejected(self):
         app = create_app(differ=_mock_differ())
         body = json.dumps({
