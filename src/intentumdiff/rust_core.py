@@ -404,8 +404,14 @@ def _c_abi_call(name: str, *args: Any) -> Any:
     finally:
         lib.intentumdiff_free(ptr)
     envelope = json.loads((raw or b"").decode("utf-8"))
-    if envelope.get("ok"):
-        return envelope.get("result")
+    # Only the Rust ABI can certify success. A malformed envelope must not
+    # manufacture a None (or other truthy) result for a successful operation.
+    if not isinstance(envelope, dict) or type(envelope.get("ok")) is not bool:
+        raise RuntimeError(f"invalid C ABI envelope for {name!r}: expected a boolean 'ok'")
+    if envelope["ok"]:
+        if "result" not in envelope:
+            raise RuntimeError(f"invalid C ABI envelope for {name!r}: success missing 'result'")
+        return envelope["result"]
     message = envelope.get("error", "engine error")
     kind = envelope.get("error_type", "value_error")
     if kind == "not_found":
