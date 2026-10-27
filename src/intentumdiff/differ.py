@@ -1024,8 +1024,10 @@ class SemanticDiffer:
                     logger.debug("Skipping %r — no parser available", item[2])
                 except _warn_exc as exc:
                     # A runtime failure cannot be represented in list[SemanticDiff].
-                    # Propagate with the file identity rather than return a partial review.
-                    raise RuntimeError(f"Commit diff failed for {item[2]!r}: {exc}") from exc
+                    # Preserve the failed file identity; a partial review is unsafe.
+                    raise RuntimeError(
+                        f"Commit diff failed for {item[2]!r}: {exc}"
+                    ) from exc
             return results
         else:
             # ── Parallel ────────────────────────────────────────────────
