@@ -11,6 +11,7 @@ _REMOVED = {
     "_is_named_entity_node",
     "_surface_changed_in_place_entities",
     "_clean_string_literal_label",
+    "_slice_source_text",
 }
 
 
@@ -20,6 +21,8 @@ def test_retired_python_semantic_presentation_helpers_stay_absent():
     differ = ast.parse((package / "differ.py").read_text(encoding="utf-8"))
     functions = {node.name for node in presentation.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
     assert not (_REMOVED & functions)
+    assert "_NAMED_ENTITY_NODE_TYPES" not in {n.id for n in ast.walk(presentation) if isinstance(n, ast.Name)}
+    assert "_GENERIC_STRING_LABELS" not in {n.id for n in ast.walk(presentation) if isinstance(n, ast.Name)}
     for node in ast.walk(differ):
         if isinstance(node, ast.ImportFrom) and node.module == "intentumdiff._differ_presentation":
             assert not (_REMOVED & {alias.name for alias in node.names})
