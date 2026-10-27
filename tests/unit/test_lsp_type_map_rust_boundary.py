@@ -61,3 +61,16 @@ def test_malformed_native_tree_dto_is_not_silently_accepted(monkeypatch: pytest.
     monkeypatch.setattr(rust_core, "_required_engine_json", lambda *_args, **_kw: {"children": []})
     with pytest.raises(RuntimeError, match="invalid tree DTO"):
         rust_core.attach_lsp_type_map(_node("root"), {"root": "int"})
+
+
+def test_python_indexer_has_no_type_tree_mutation_function() -> None:
+    import ast
+    from pathlib import Path
+
+    from intentumdiff.core import indexer
+
+    source = Path(indexer.__file__).read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    definitions = {node.name for node in ast.walk(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
+    assert "_attach_type_info" not in definitions
+    assert "attach_lsp_type_map(node, type_map)" in source
