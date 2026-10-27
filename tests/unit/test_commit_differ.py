@@ -246,7 +246,9 @@ class TestSemanticDifferParallelCommit:
             sources_patch,
             patch.object(SemanticDiffer, "_run_pipeline", fake_pipeline),
         ):
-            with pytest.raises(RuntimeError, match=r"Commit diff failed for 'broken\\.py'") as caught:
+            with pytest.raises(
+                RuntimeError, match=r"Commit diff failed for 'broken\.py'"
+            ) as caught:
                 differ.diff_commit(".")
 
         assert caught.value.__cause__ is error
