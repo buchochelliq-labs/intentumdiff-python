@@ -745,18 +745,17 @@ class TestDiffCommit:
         assert len(result.file_diffs) == 1
         assert result.file_diffs[0] is diff
 
-    def test_parse_error_collected(self):
+    def test_pipeline_failure_aborts_complete_commit_review(self):
         cd = self._make_differ()
 
         with self._patch_git_repo() as mock_git:
             mock_git.Repo.return_value = MagicMock()
             with self._patch_iter_changed_sources([("old", "new", "broken.py", "broken.py", None)]):
                 cd._differ._run_pipeline = MagicMock(side_effect=ValueError("synthetic error"))
-                result = cd.diff_commit(".")
+                with pytest.raises(RuntimeError, match="broken.py.*synthetic error"):
+                    cd.diff_commit(".")
 
-        assert any("broken.py" in e for e in result.parse_errors)
-
-    def test_plugin_error_collected_without_aborting_commit_review(self):
+    def test_plugin_error_fails_closed_even_with_successful_file(self):
         cd = self._make_differ()
         good_diff = _semantic_diff("good.py", "good.py")
 
@@ -775,12 +774,10 @@ class TestDiffCommit:
                     ]
                 )
                 cd._parse_to_tree = MagicMock(return_value=None)
-                result = cd.diff_commit(".")
+                with pytest.raises(RuntimeError, match="fuel.py.*FUEL_EXCEEDED"):
+                    cd.diff_commit(".")
 
-        assert result.file_diffs == [good_diff]
-        assert any("fuel.py" in error and "FUEL_EXCEEDED" in error for error in result.parse_errors)
-
-    def test_plugin_not_found_skips_file(self):
+    def test_plugin_not_found_fails_closed(self):
         cd = self._make_differ()
         from intentumdiff.plugins.exceptions import PluginNotFoundError
 
@@ -790,10 +787,8 @@ class TestDiffCommit:
                 [("old", "new", "unknown.xyz", "unknown.xyz", None)]
             ):
                 cd._differ._run_pipeline = MagicMock(side_effect=PluginNotFoundError("no parser"))
-                result = cd.diff_commit(".")
-
-        assert result.file_diffs == []
-        assert result.parse_errors == []
+                with pytest.raises(RuntimeError, match="unknown.xyz"):
+                    cd.diff_commit(".")
 
     def test_all_parser_load_failure_is_not_reported_as_clean_review(self):
         cd = self._make_differ()
@@ -814,6 +809,49 @@ class TestDiffCommit:
 
                 with pytest.raises(RuntimeError, match="No parser plugins could be loaded"):
                     cd.diff_commit(".")
+
+    def test_stream_finalization_rejects_partial_errors(self):
+        from intentumdiff.core.commit_differ import FileDiffError, FileDiffResult
+
+        cd = self._make_differ()
+        good = _semantic_diff("good.py", "good.py")
+        result = FileDiffResult(good, "good.py", "good.py", "old", "new")
+        error = FileDiffError("bad.py", "bad.py", "native engine unavailable", "pipeline_error")
+        with pytest.raises(RuntimeError, match="bad.py.*native engine unavailable"):
+            cd.finalize_commit_diff(
+                [result], [error], old_ref="HEAD~1", new_ref="HEAD"
+            )
+
+    def test_alternate_vcs_backend_fails_closed_on_mixed_results(self):
+        from intentumdiff.vcs.base import ChangedFile
+
+        cd = self._make_differ()
+        backend = SimpleNamespace(
+            list_changed_files=lambda _old, _new: [
+                ChangedFile("good.py", "good.py", "modified"),
+                ChangedFile("bad.py", "bad.py", "modified"),
+            ],
+            get_blob=lambda _path, _ref: "source",
+        )
+        cd._differ._run_pipeline = MagicMock(
+            side_effect=[_semantic_diff("good.py", "good.py"), RuntimeError("native failure")]
+        )
+        with pytest.raises(RuntimeError, match="bad.py.*native failure"):
+            cd.diff_commit(old_ref="old", new_ref="new", backend=backend)
+
+    def test_alternate_vcs_backend_skips_only_explicit_binary_files(self):
+        from intentumdiff.vcs.base import ChangedFile
+
+        cd = self._make_differ()
+        backend = SimpleNamespace(
+            list_changed_files=lambda _old, _new: [
+                ChangedFile("image.png", "image.png", "modified", is_binary=True)
+            ],
+            get_blob=MagicMock(side_effect=AssertionError("binary blob should not load")),
+        )
+        result = cd.diff_commit(old_ref="old", new_ref="new", backend=backend)
+        assert result.file_diffs == []
+        backend.get_blob.assert_not_called()
 
     def test_empty_commit_returns_empty_diff(self):
         cd = self._make_differ()
