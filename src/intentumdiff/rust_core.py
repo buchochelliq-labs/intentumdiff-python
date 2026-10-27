@@ -847,17 +847,18 @@ def try_rust_profile_label_enrichment(
     source: str,
     language: str,
     identity_fields: tuple[str, ...] = (),
-) -> SemanticNode | None:
-    """Profile-label enrichment in the Rust core (issue #57 profile-enrichment port).
+) -> SemanticNode:
+    """Request authoritative Rust profile-label enrichment for a supported parser.
 
-    Returns the enriched tree, or None when the backend is unavailable (caller
-    falls back to the python profile enrichment until every family is ported).
+    A missing backend handler is a contract failure, not an empty/no-op
+    enrichment: silently returning an un-enriched tree can alter matching and
+    suppress meaningful changes in the release candidate.
     """
     try:
         backend = _load_backend()
         enrich_fn = getattr(backend, "enrich_profile_labels_json", None)
         if not callable(enrich_fn):
-            return None
+            raise RuntimeError("required Rust profile enrichment handler is unavailable")
         return SemanticNode.model_validate_json(
             enrich_fn(tree.model_dump_json(), source, language, list(identity_fields))
         )
