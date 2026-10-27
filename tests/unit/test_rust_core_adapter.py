@@ -701,6 +701,43 @@ def test_optional_rust_adapters_still_decline_when_handler_is_absent(
 
 
 
+def test_node_facts_enrichment_requires_authoritative_rust_handler(monkeypatch: Any) -> None:
+    root = _node("root", "module", "module", line=0)
+    monkeypatch.setattr(rust_core, "_load_backend", lambda: SimpleNamespace())
+    with pytest.raises(RuntimeError, match="required Rust node facts handler"):
+        rust_core.enrich_node_facts(root)
+
+
+@pytest.mark.parametrize("response", ["{}", "not json", None])
+def test_node_facts_enrichment_rejects_malformed_native_success(
+    monkeypatch: Any, response: Any,
+) -> None:
+    root = _node("root", "module", "module", line=0)
+    monkeypatch.setattr(
+        rust_core,
+        "_load_backend",
+        lambda: SimpleNamespace(enrich_node_facts_json=lambda *_args: response),
+    )
+    with pytest.raises(RuntimeError, match="Rust node facts enrichment failed"):
+        rust_core.enrich_node_facts(root)
+
+
+def test_node_facts_enrichment_preserves_valid_noop_and_propagates_native_failure(
+    monkeypatch: Any,
+) -> None:
+    root = _node("root", "module", "module", line=0)
+    backend = SimpleNamespace(enrich_node_facts_json=lambda *_args: root.model_dump_json())
+    monkeypatch.setattr(rust_core, "_load_backend", lambda: backend)
+    assert rust_core.enrich_node_facts(root) == root
+
+    def reject(*_args: Any) -> str:
+        raise ValueError("native operation failed")
+
+    backend.enrich_node_facts_json = reject
+    with pytest.raises(RuntimeError, match="native operation failed"):
+        rust_core.enrich_node_facts(root)
+
+
 def test_profile_enrichment_handler_is_required_not_optional(monkeypatch: Any) -> None:
     root = _node("root", "module", "module", line=0)
     monkeypatch.setattr(rust_core, "_load_backend", lambda: SimpleNamespace())
