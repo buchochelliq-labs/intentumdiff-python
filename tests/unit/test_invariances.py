@@ -12,10 +12,8 @@ from intentumdiff import ChangeGroupKind, SemanticDiffer
 from intentumdiff.analysis.invariances import (
     InvarianceRuleDefinition,
     InvarianceRuleSet,
-    apply_invariances,
     load_builtin_invariance_rules,
 )
-from intentumdiff.core.models import Change, ChangeType, NodePosition, SemanticNode
 
 ROOT = Path(__file__).parents[2]
 
@@ -32,16 +30,6 @@ def _parser_language_ids() -> set[str]:
 def _rules_schema() -> dict:
     schema_path = ROOT / "src" / "intentumdiff" / "invariances" / "rules.schema.json"
     return json.loads(schema_path.read_text(encoding="utf-8"))
-
-
-def _node(node_id: str, node_type: str, label: str, start: int, end: int) -> SemanticNode:
-    return SemanticNode(
-        id=node_id,
-        node_type=node_type,
-        label=label,
-        position=NodePosition(start_line=0, start_col=start, end_line=0, end_col=end),
-        structural_hash=f"hash-{node_id}",
-    )
 
 
 def test_packaged_yaml_rules_load_from_package_resources():
@@ -237,87 +225,6 @@ def test_builtin_catalog_entries_have_review_metadata():
             assert rule.evaluator is None
 
 
-def test_disabled_rules_do_not_fire():
-    disabled = InvarianceRuleDefinition(
-        id="css.color.disabled",
-        languages=("css",),
-        evaluator="css_color_equivalence",
-        group_kind=ChangeGroupKind.IGNORED_STYLE,
-        enabled=False,
-        risk="green",
-        explanation="disabled test rule",
-    )
-    # White-box fixture (reformulated for the #57 python-pipeline retirement): the unit
-    # under test is apply_invariances with a custom rule set, not the pipeline — feed it a
-    # SYNTHETIC change that an ENABLED css color rule would fire on (blue -> #0000ff), so
-    # "does not fire" is proven against a matching input.
-    old_value = _node("old-color", "plain_value", "blue", 18, 22)
-    new_value = _node("new-color", "color_value", "#0000ff", 18, 25)
-    changes = [
-        Change(
-            change_type=ChangeType.MODIFICATION,
-            old_node=old_value,
-            new_node=new_value,
-            confidence=1.0,
-            description="Update plain_value('blue') -> color_value('#0000ff')",
-        )
-    ]
-
-    result = apply_invariances(
-        changes,
-        old_tree=old_value,
-        new_tree=new_value,
-        old_source=".button { color: blue; }",
-        new_source=".button { color: #0000ff; }",
-        language="css",
-        rules=(disabled,),
-    )
-
-    assert result.changes == changes
-    assert result.change_groups == []
-
-
-def test_catalog_only_rules_do_not_fire():
-    catalog = InvarianceRuleDefinition(
-        id="css.color.catalog.only",
-        languages=("css",),
-        status="catalog",
-        evaluator=None,
-        group_kind=ChangeGroupKind.IGNORED_STYLE,
-        enabled=False,
-        risk="green",
-        explanation="catalog rules document future behavior only",
-        notes="test",
-    )
-    # Same synthetic white-box fixture as test_disabled_rules_do_not_fire (reformulated
-    # for the #57 python-pipeline retirement): a matching css color change proves the
-    # catalog rule does not fire.
-    old_value = _node("old-color", "plain_value", "blue", 18, 22)
-    new_value = _node("new-color", "color_value", "#0000ff", 18, 25)
-    state_changes = [
-        Change(
-            change_type=ChangeType.MODIFICATION,
-            old_node=old_value,
-            new_node=new_value,
-            confidence=1.0,
-            description="Update plain_value('blue') -> color_value('#0000ff')",
-        )
-    ]
-
-    result = apply_invariances(
-        state_changes,
-        old_tree=old_value,
-        new_tree=new_value,
-        old_source=".button { color: blue; }",
-        new_source=".button { color: #0000ff; }",
-        language="css",
-        rules=(catalog,),
-    )
-
-    assert result.changes == state_changes
-    assert result.change_groups == []
-
-
 def test_css_blue_and_hex_blue_are_ignored_with_explainable_evidence():
     diff = _diff_css(".button { color: blue; }", ".button { color: #0000ff; }")
 
@@ -422,42 +329,6 @@ def test_integer_literal_equivalence_is_ignored_with_explainable_evidence():
     assert group.metadata["new_label"] == "1000"
 
 
-def test_string_literal_quote_equivalence_is_ignored_with_explainable_evidence():
-    old_source = "host = 'semanticdiff.com'\n"
-    new_source = 'host = "semanticdiff.com"\n'
-    old_node = _node("old-string", "string", "semanticdiff.com", 7, 25)
-    new_node = _node("new-string", "string", "semanticdiff.com", 7, 25)
-    rule = next(
-        rule
-        for rule in load_builtin_invariance_rules()
-        if rule.id == "core.string_literal.decoded_value.safe"
-    )
-
-    result = apply_invariances(
-        [
-            Change(
-                change_type=ChangeType.MODIFICATION,
-                old_node=old_node,
-                new_node=new_node,
-            )
-        ],
-        old_tree=old_node,
-        new_tree=new_node,
-        old_source=old_source,
-        new_source=new_source,
-        language="python",
-        rules=(rule,),
-    )
-
-    assert result.changes == []
-    group = result.change_groups[0]
-    assert group.kind == ChangeGroupKind.IGNORED_STYLE
-    assert group.metadata["canonical_old"] == "string(semanticdiff.com)"
-    assert group.metadata["canonical_new"] == "string(semanticdiff.com)"
-    assert group.old_node_ids == ["old-string"]
-    assert group.new_node_ids == ["new-string"]
-
-
 def test_python_quote_only_string_diff_has_source_span_literal_evidence():
     diff = SemanticDiffer().diff_strings(
         "host = 'semanticdiff.com'\n",
@@ -559,3 +430,19 @@ def test_multiple_ignored_colors_remain_individually_inspectable():
     assert {group.metadata["old_label"] for group in groups} == {"blue", "#FF0000"}
     assert {group.metadata["new_label"] for group in groups} == {"#00f", "#ff0000"}
     assert all(group.old_node_ids and group.new_node_ids for group in groups)
+
+def test_python_invariance_module_is_metadata_only():
+    """Rust is the sole invariance evaluator, even when old code is unreachable."""
+    import ast
+    import intentumdiff.analysis.invariances as module
+
+    tree = ast.parse(Path(module.__file__).read_text(encoding="utf-8"))
+    functions = {node.name for node in tree.body if isinstance(node, ast.FunctionDef)}
+    forbidden = {"apply_invariances", "build_style_only_evidence", "build_zero_change_literal_evidence", "_apply_css_color_equivalence", "_apply_literal_equivalence", "_apply_number_literal_equivalence", "_changed_source_evidence"}
+    assert not (functions & forbidden)
+
+
+def test_catalog_rules_are_metadata_only():
+    rules = load_builtin_invariance_rules()
+    assert all(not rule.enabled and rule.evaluator is None for rule in rules if rule.status == "catalog")
+
