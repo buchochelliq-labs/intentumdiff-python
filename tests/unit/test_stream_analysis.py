@@ -62,9 +62,17 @@ class TestChangeStreamEvent:
         assert event.replaced_ids == []
 
     def test_revise_event(self) -> None:
-        from intentumdiff.core.models import ChangeStreamEvent, ChangeStreamPhase
+        from intentumdiff.core.models import (
+            Change, ChangeType, ChangeStreamEvent, ChangeStreamPhase, RefactoringKind,
+        )
 
-        change = _refactor("old1", "new1")
+        # DTO compatibility only: Python does not infer revisions or refactorings.
+        change = Change(
+            change_type=ChangeType.REFACTORING,
+            old_node=_node("old1"),
+            new_node=_node("new1"),
+            refactoring_kind=RefactoringKind.RENAME_SYMBOL,
+        )
         event = ChangeStreamEvent(
             phase=ChangeStreamPhase.REFINED,
             action="revise",
