@@ -622,27 +622,35 @@ def try_rust_generic_text_review(
     new_source: str,
     raw_change_count: int,
 ) -> tuple[list[Change], list[ChangeGroup]] | None:
-    """Run the Rust generic-text review stage; None means fall back to Python.
+    """Decode Rust-owned generic text review or an explicit Rust size-cap decline.
 
-    Engine-side port of the generic text presentation (issue #35): line diff,
-    relocated-line netting, blank symmetry, inline char detail, and the
-    presentation.generic_text_diff suppression audit group.
+    Only Rust may decline this stage. Missing handlers, invalid envelopes and
+    engine failures cannot silently become successful Python pass-throughs.
     """
     try:
         backend = _load_backend()
         review_fn = getattr(backend, "generic_text_review_json", None)
         if not callable(review_fn):
-            return None
+            raise RuntimeError("required Rust generic-text review handler is unavailable")
         data = json.loads(review_fn(old_source, new_source, raw_change_count))
-        if not isinstance(data, dict) or not data.get("used"):
+        if not isinstance(data, dict):
+            raise ValueError("Rust generic-text review must return a JSON object")
+        used = data.get("used")
+        if used is False:
+            if data.get("reason") != "input too large for LCS table":
+                raise ValueError("uncertified Rust generic-text review decline")
             return None
-        changes = [Change.model_validate(item) for item in data.get("changes") or []]
-        groups: list[ChangeGroup] = []
+        if used is not True:
+            raise ValueError("Rust generic-text review missing explicit used=true")
+        if not isinstance(data.get("changes"), list):
+            raise ValueError("Rust generic-text review missing changes list")
         group = data.get("group")
-        if group:
-            groups.append(ChangeGroup.model_validate(group))
+        if group is not None and not isinstance(group, dict):
+            raise ValueError("Rust generic-text review group must be an object or null")
+        changes = [Change.model_validate(item) for item in data["changes"]]
+        groups = [ChangeGroup.model_validate(group)] if group else []
         return changes, groups
-    except Exception as exc:  # noqa: BLE001 - an engine failure is not an unsupported decline.
+    except Exception as exc:  # noqa: BLE001 - fail closed on native/DTO failures.
         raise RuntimeError(f"Rust generic-text review failed: {exc}") from exc
 
 
