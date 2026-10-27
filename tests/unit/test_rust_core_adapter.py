@@ -687,10 +687,6 @@ def test_optional_rust_adapters_raise_on_engine_failure(
                 config=DiffConfig(),
             ),
         ),
-        (
-            "enrich_profile_labels_json",
-            lambda root: rust_core.try_rust_profile_label_enrichment(root, "source", "python"),
-        ),
     ],
 )
 def test_optional_rust_adapters_still_decline_when_handler_is_absent(
@@ -701,6 +697,28 @@ def test_optional_rust_adapters_still_decline_when_handler_is_absent(
     root = _node("root", "module", "module", line=0)
     monkeypatch.setattr(rust_core, "_load_backend", lambda: SimpleNamespace())
     assert call(root) is None
+
+
+
+
+def test_profile_enrichment_handler_is_required_not_optional(monkeypatch: Any) -> None:
+    root = _node("root", "module", "module", line=0)
+    monkeypatch.setattr(rust_core, "_load_backend", lambda: SimpleNamespace())
+    with pytest.raises(RuntimeError, match="required Rust profile enrichment handler"):
+        rust_core.try_rust_profile_label_enrichment(root, "source", "xml")
+
+
+def test_profile_enrichment_keeps_valid_noop_and_rejects_malformed_engine_output(
+    monkeypatch: Any,
+) -> None:
+    root = _node("root", "module", "module", line=0)
+    backend = SimpleNamespace(enrich_profile_labels_json=lambda *_args: root.model_dump_json())
+    monkeypatch.setattr(rust_core, "_load_backend", lambda: backend)
+    assert rust_core.try_rust_profile_label_enrichment(root, "source", "xml") == root
+
+    backend.enrich_profile_labels_json = lambda *_args: "{}"
+    with pytest.raises(RuntimeError, match="Rust profile enrichment failed"):
+        rust_core.try_rust_profile_label_enrichment(root, "source", "xml")
 
 
 @pytest.mark.parametrize(
