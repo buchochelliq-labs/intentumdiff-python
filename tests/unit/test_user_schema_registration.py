@@ -383,6 +383,14 @@ def test_dialect_key_changes_matching_for_identity_edits(
     assert unregistered_shape == ["MODIFICATION"]
     assert registered_shape != unregistered_shape
 
+    # The public path must clear native state when configuration is disabled;
+    # callers must not need to reset the Rust registry themselves.
+    monkeypatch.setenv("INTENTUMDIFF_USER_SCHEMAS", "off")
+    disabled = SemanticDiffer().diff_strings(
+        old, new, filename="shop.catalog.xml", language_hint="xml"
+    )
+    assert [change.change_type.name for change in disabled.changes] == unregistered_shape
+
 
 def test_xml_dialect_without_engine_predicate_fails_closed(tmp_path: Path) -> None:
     """keyed_elements without match.namespace/root_element is rejected whole -
