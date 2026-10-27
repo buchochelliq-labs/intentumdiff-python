@@ -1660,11 +1660,22 @@ def try_rust_core_batch_diffs(
         batch_metadata = dict(data.get("metadata") or {})
         fallback_reasons: dict[int, str] = {}
         validated_diffs: list[tuple[int, str, SemanticDiff]] = []
+        seen_indices: set[int] = set()
         for fallback_index, item in enumerate(diff_items):
             if not isinstance(item, dict):
+                if fallback_index >= len(files) or fallback_index in seen_indices:
+                    raise ValueError("Rust batch response contains an invalid fallback index")
+                seen_indices.add(fallback_index)
                 fallback_reasons[fallback_index] = "batch diff item must be an object"
                 continue
-            index = int(item.get("index") or fallback_index)
+            # An explicit index of zero is valid even when it appears after the
+            # first response item; a truthiness fallback silently remapped it.
+            index = item.get("index", fallback_index)
+            if type(index) is not int or not 0 <= index < len(files):
+                raise ValueError(f"Rust batch response index is invalid: {index!r}")
+            if index in seen_indices:
+                raise ValueError(f"Rust batch response repeats file index {index}")
+            seen_indices.add(index)
             status = str(item.get("status") or "")
             if status != _COMPLETE_STATUS or "diff" not in item:
                 fallback_reasons[index] = str(
