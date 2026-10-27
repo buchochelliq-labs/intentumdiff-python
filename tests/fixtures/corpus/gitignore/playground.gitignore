@@ -1,0 +1,4 @@
+# Build outputs
+/dist/
+*.log
+!important.log

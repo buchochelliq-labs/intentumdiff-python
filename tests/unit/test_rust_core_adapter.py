@@ -687,10 +687,6 @@ def test_optional_rust_adapters_raise_on_engine_failure(
                 config=DiffConfig(),
             ),
         ),
-        (
-            "enrich_profile_labels_json",
-            lambda root: rust_core.try_rust_profile_label_enrichment(root, "source", "python"),
-        ),
     ],
 )
 def test_optional_rust_adapters_still_decline_when_handler_is_absent(
@@ -701,6 +697,65 @@ def test_optional_rust_adapters_still_decline_when_handler_is_absent(
     root = _node("root", "module", "module", line=0)
     monkeypatch.setattr(rust_core, "_load_backend", lambda: SimpleNamespace())
     assert call(root) is None
+
+
+
+
+def test_node_facts_enrichment_requires_authoritative_rust_handler(monkeypatch: Any) -> None:
+    root = _node("root", "module", "module", line=0)
+    monkeypatch.setattr(rust_core, "_load_backend", lambda: SimpleNamespace())
+    with pytest.raises(RuntimeError, match="required Rust node facts handler"):
+        rust_core.enrich_node_facts(root)
+
+
+@pytest.mark.parametrize("response", ["{}", "not json", None])
+def test_node_facts_enrichment_rejects_malformed_native_success(
+    monkeypatch: Any, response: Any,
+) -> None:
+    root = _node("root", "module", "module", line=0)
+    monkeypatch.setattr(
+        rust_core,
+        "_load_backend",
+        lambda: SimpleNamespace(enrich_node_facts_json=lambda *_args: response),
+    )
+    with pytest.raises(RuntimeError, match="Rust node facts enrichment failed"):
+        rust_core.enrich_node_facts(root)
+
+
+def test_node_facts_enrichment_preserves_valid_noop_and_propagates_native_failure(
+    monkeypatch: Any,
+) -> None:
+    root = _node("root", "module", "module", line=0)
+    backend = SimpleNamespace(enrich_node_facts_json=lambda *_args: root.model_dump_json())
+    monkeypatch.setattr(rust_core, "_load_backend", lambda: backend)
+    assert rust_core.enrich_node_facts(root) == root
+
+    def reject(*_args: Any) -> str:
+        raise ValueError("native operation failed")
+
+    backend.enrich_node_facts_json = reject
+    with pytest.raises(RuntimeError, match="native operation failed"):
+        rust_core.enrich_node_facts(root)
+
+
+def test_profile_enrichment_handler_is_required_not_optional(monkeypatch: Any) -> None:
+    root = _node("root", "module", "module", line=0)
+    monkeypatch.setattr(rust_core, "_load_backend", lambda: SimpleNamespace())
+    with pytest.raises(RuntimeError, match="required Rust profile enrichment handler"):
+        rust_core.try_rust_profile_label_enrichment(root, "source", "xml")
+
+
+def test_profile_enrichment_keeps_valid_noop_and_rejects_malformed_engine_output(
+    monkeypatch: Any,
+) -> None:
+    root = _node("root", "module", "module", line=0)
+    backend = SimpleNamespace(enrich_profile_labels_json=lambda *_args: root.model_dump_json())
+    monkeypatch.setattr(rust_core, "_load_backend", lambda: backend)
+    assert rust_core.try_rust_profile_label_enrichment(root, "source", "xml") == root
+
+    backend.enrich_profile_labels_json = lambda *_args: "{}"
+    with pytest.raises(RuntimeError, match="Rust profile enrichment failed"):
+        rust_core.try_rust_profile_label_enrichment(root, "source", "xml")
 
 
 @pytest.mark.parametrize(
@@ -1306,6 +1361,9 @@ def test_semantic_differ_batch_fallback_continues_python_pipeline(monkeypatch: A
         filename_selection_next=rust_core._load_backend().filename_selection_next,
         parse_errors_present_json=real_backend.parse_errors_present_json,
         source_fallback_diff_json=real_backend.source_fallback_diff_json,
+        # Exercise the real Rust NodeFacts contract; only batch/finalize decline is mocked.
+        # An absent enrichment handler must fail closed, not return un-enriched trees.
+        enrich_node_facts_json=real_backend.enrich_node_facts_json,
         version=lambda: "0.4.0",
         supports_language=lambda language: language == "python",
         diff_batch=lambda *args: json.dumps(payload),

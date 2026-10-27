@@ -1,0 +1,13 @@
+{
+  "language": "gitignore",
+  "filename": ".gitignore",
+  "visible_tokens": [
+    "# Build outputs",
+    "/dist/",
+    "*.log",
+    "!important.log"
+  ],
+  "append_statement": "/focus/",
+  "mutation_xfail": {},
+  "invisible_tokens_at_generation": []
+}
