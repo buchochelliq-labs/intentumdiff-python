@@ -26,3 +26,25 @@ def test_retired_python_semantic_presentation_helpers_stay_absent():
     for node in ast.walk(differ):
         if isinstance(node, ast.ImportFrom) and node.module == "intentumdiff._differ_presentation":
             assert not (_REMOVED & {alias.name for alias in node.names})
+
+
+def test_presentation_import_contract():
+    """Catch missing Rust-backed adapters before a wheel is ever built."""
+    package = Path(__file__).resolve().parents[2] / "src" / "intentumdiff"
+    presentation = ast.parse(
+        (package / "_differ_presentation.py").read_text(encoding="utf-8")
+    )
+    differ = ast.parse((package / "differ.py").read_text(encoding="utf-8"))
+    available = {
+        node.name
+        for node in presentation.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    imported = {
+        alias.name
+        for node in ast.walk(differ)
+        if isinstance(node, ast.ImportFrom)
+        and node.module == "intentumdiff._differ_presentation"
+        for alias in node.names
+    }
+    assert imported <= available, f"Missing presentation exports: {sorted(imported - available)}"
