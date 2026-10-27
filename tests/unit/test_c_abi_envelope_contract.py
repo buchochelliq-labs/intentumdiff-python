@@ -12,7 +12,7 @@ import pytest
 from intentumdiff import rust_core
 
 
-def _stub_native_envelope(monkeypatch, raw: bytes) -> None:
+def _stub_native_envelope(monkeypatch, raw: bytes):
     class Stub:
         def __init__(self) -> None:
             # Keep the backing bytes alive until the C ABI consumer frees them.
