@@ -1620,31 +1620,30 @@ class SemanticDiffer:
             old_tree = enrich_node_facts(old_tree)
             new_tree = enrich_node_facts(new_tree)
             # Profile-label enrichment runs in the Rust core (issue #57 port).
-            # The Rust core is AUTHORITATIVE (readiness #90 / #82): no Python
-            # engine fallback — if the backend is unavailable the tree passes
-            # through UNCHANGED (graceful, degraded labels) rather than routing
-            # to a Python enricher, so "if Python didn't exist it still works".
+            # Rust owns profile enrichment. Missing ABI handlers are fatal:
+            # accepting un-enriched trees silently changes identity matching
+            # and can suppress a meaningful diff. Never substitute Python logic.
             # Gated by language so non-profile diffs pay no tree-JSON roundtrip.
             if language.lower() in {"json", "yaml"}:
                 _identity_fields = tuple(schema_resolution.identity_fields)
                 old_tree = try_rust_profile_label_enrichment(
                     old_tree, old_raw, language, identity_fields=_identity_fields
-                ) or old_tree
+                )
                 new_tree = try_rust_profile_label_enrichment(
                     new_tree, new_raw, language, identity_fields=_identity_fields
-                ) or new_tree
+                )
             if language.lower() in {"css", "scss", "html", "xml", "mdx"}:
-                old_tree = try_rust_profile_label_enrichment(old_tree, old_raw, language) or old_tree
-                new_tree = try_rust_profile_label_enrichment(new_tree, new_raw, language) or new_tree
+                old_tree = try_rust_profile_label_enrichment(old_tree, old_raw, language)
+                new_tree = try_rust_profile_label_enrichment(new_tree, new_raw, language)
             if language.lower() in {"hcl", "puppet"}:
-                old_tree = try_rust_profile_label_enrichment(old_tree, old_raw, language) or old_tree
-                new_tree = try_rust_profile_label_enrichment(new_tree, new_raw, language) or new_tree
+                old_tree = try_rust_profile_label_enrichment(old_tree, old_raw, language)
+                new_tree = try_rust_profile_label_enrichment(new_tree, new_raw, language)
             if language.lower() == "sql":
-                old_tree = try_rust_profile_label_enrichment(old_tree, old_raw, language) or old_tree
-                new_tree = try_rust_profile_label_enrichment(new_tree, new_raw, language) or new_tree
+                old_tree = try_rust_profile_label_enrichment(old_tree, old_raw, language)
+                new_tree = try_rust_profile_label_enrichment(new_tree, new_raw, language)
             if language.lower() in {"asm", "bash", "delphi"}:
-                old_tree = try_rust_profile_label_enrichment(old_tree, old_raw, language) or old_tree
-                new_tree = try_rust_profile_label_enrichment(new_tree, new_raw, language) or new_tree
+                old_tree = try_rust_profile_label_enrichment(old_tree, old_raw, language)
+                new_tree = try_rust_profile_label_enrichment(new_tree, new_raw, language)
             _validate_tree_ids(old_tree, filename)
             _validate_tree_ids(new_tree, filename)
         diagnostics.record(
