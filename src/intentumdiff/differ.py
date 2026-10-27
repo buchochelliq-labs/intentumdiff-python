@@ -64,12 +64,6 @@ from intentumdiff._differ_gate import (
     _validate_git_ref as _validate_git_ref,
 )
 from intentumdiff._differ_presentation import (
-    _GENERIC_STRING_LABELS as _GENERIC_STRING_LABELS,
-)
-from intentumdiff._differ_presentation import (
-    _NAMED_ENTITY_NODE_TYPES as _NAMED_ENTITY_NODE_TYPES,
-)
-from intentumdiff._differ_presentation import (
     _changes_to_stream_events as _changes_to_stream_events,
 )
 from intentumdiff._differ_presentation import (
@@ -101,9 +95,6 @@ from intentumdiff._differ_presentation import (
 )
 from intentumdiff._differ_presentation import (
     _root_structural_hash as _root_structural_hash,
-)
-from intentumdiff._differ_presentation import (
-    _slice_source_text as _slice_source_text,
 )
 from intentumdiff._differ_presentation import (
     _token_fallback_diff as _token_fallback_diff,
