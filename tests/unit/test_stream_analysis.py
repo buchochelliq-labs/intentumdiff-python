@@ -1,4 +1,4 @@
-"""Unit tests for ChangeStreamEvent, ChangeStreamPhase, and _changes_to_stream_events."""
+"""DTO and Rust-backed stream API contract tests."""
 from __future__ import annotations
 
 import pytest
@@ -26,32 +26,6 @@ def _add(nid: str):
 
     return Change(change_type=ChangeType.ADDITION, new_node=_node(nid))
 
-
-def _del(nid: str):
-    from intentumdiff.core.models import Change, ChangeType
-
-    return Change(change_type=ChangeType.DELETION, old_node=_node(nid))
-
-
-def _mod(old_id: str, new_id: str):
-    from intentumdiff.core.models import Change, ChangeType
-
-    return Change(
-        change_type=ChangeType.MODIFICATION,
-        old_node=_node(old_id),
-        new_node=_node(new_id),
-    )
-
-
-def _refactor(old_id: str, new_id: str):
-    from intentumdiff.core.models import Change, ChangeType, RefactoringKind
-
-    return Change(
-        change_type=ChangeType.REFACTORING,
-        old_node=_node(old_id),
-        new_node=_node(new_id),
-        refactoring_kind=RefactoringKind.RENAME_SYMBOL,
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -132,84 +106,55 @@ class TestChangeStreamEvent:
 
 
 # ---------------------------------------------------------------------------
-# _changes_to_stream_events
+# Public stream transport over Rust-finalized changes
 # ---------------------------------------------------------------------------
 
 
-class TestChangesToStreamEvents:
-    def _run(self, before, after, phase=None):
+class TestRustBackedStream:
+    @pytest.mark.parametrize(
+        ("old", "new"),
+        [
+            ("answer = 1\n", "answer = 2\n"),
+            ("π = 1\n", "π = 2\n"),
+        ],
+    )
+    def test_semantic_changes_emit_final_add_events(self, old: str, new: str) -> None:
+        from intentumdiff import SemanticDiffer
         from intentumdiff.core.models import ChangeStreamPhase
-        from intentumdiff.differ import _changes_to_stream_events
+        from intentumdiff.sources.string_source import StringSource
 
-        p = phase or ChangeStreamPhase.REFINED
-        return list(_changes_to_stream_events(before, after, p))
+        differ = SemanticDiffer()
+        source = StringSource(old, new, "example.py", language_hint="python")
+        final = differ.diff_strings(old, new, "example.py", language_hint="python")
+        events = list(differ.diff_stream_progressive(source))
 
-    def test_empty_before_and_after(self) -> None:
-        assert self._run([], []) == []
+        assert final.has_semantic_changes is True
+        assert events
+        assert len(events) == len(final.changes)
+        assert [event.change.change_type for event in events] == [
+            change.change_type for change in final.changes
+        ]
+        assert all(event.phase == ChangeStreamPhase.FINAL for event in events)
+        assert all(event.action == "add" and not event.replaced_ids for event in events)
+        assert all(event.change is not None for event in events)
 
-    def test_unchanged_changes_emit_nothing(self) -> None:
-        """Changes that survive unchanged (same Python object) produce no events."""
-        c1 = _add("n1")
-        c2 = _del("n2")
-        events = self._run([c1, c2], [c1, c2])
+    def test_style_only_changes_do_not_create_fake_stream_events(self) -> None:
+        from intentumdiff import SemanticDiffer
+        from intentumdiff.sources.string_source import StringSource
+
+        old = "answer = 1\n"
+        new = "# comment\nanswer = 1\n"
+        differ = SemanticDiffer()
+        final = differ.diff_strings(old, new, "example.py", language_hint="python")
+        events = list(
+            differ.diff_stream_progressive(
+                StringSource(old, new, "example.py", language_hint="python")
+            )
+        )
+
+        assert final.has_semantic_changes is False
+        assert final.changes == []
         assert events == []
-
-    def test_new_change_emits_add(self) -> None:
-        c1 = _add("n1")
-        c2 = _add("n2")  # brand new — no predecessor
-        events = self._run([c1], [c1, c2])
-        assert len(events) == 1
-        assert events[0].action == "add"
-        assert events[0].change is c2
-        assert events[0].replaced_ids == []
-
-    def test_removed_change_emits_remove(self) -> None:
-        c1 = _del("n1")
-        events = self._run([c1], [])
-        assert len(events) == 1
-        e = events[0]
-        assert e.action == "remove"
-        assert e.change is None
-        assert "n1" in e.replaced_ids
-
-    def test_refactoring_replaces_deletion_and_addition(self) -> None:
-        """DELETION + ADDITION → REFACTORING emits action='revise' with both node IDs."""
-        d = _del("fn_old")
-        a = _add("fn_new")
-        r = _refactor("fn_old", "fn_new")  # new Change, references same node IDs
-        events = self._run([d, a], [r])
-        assert len(events) == 1
-        e = events[0]
-        assert e.action == "revise"
-        assert e.change is r
-        assert set(e.replaced_ids) == {"fn_old", "fn_new"}
-
-    def test_refactoring_replaces_modification(self) -> None:
-        """MODIFICATION → REFACTORING(RENAME) replaces both node IDs."""
-        m = _mod("old_name", "new_name")
-        r = _refactor("old_name", "new_name")
-        events = self._run([m], [r])
-        assert len(events) == 1
-        e = events[0]
-        assert e.action == "revise"
-        assert set(e.replaced_ids) == {"old_name", "new_name"}
-
-    def test_consumed_but_unreferenced_emits_remove(self) -> None:
-        """A consumed change whose node IDs are NOT referenced by any new change → 'remove'."""
-        c1 = _del("x1")  # consumed but not referenced by any new change
-        c2 = _add("new_stuff")  # new, no relation to c1
-        # Simulate: c1 is consumed (missing from after), c2 is added
-        events = self._run([c1], [c2])
-        actions = {e.action for e in events}
-        assert "remove" in actions
-        assert "add" in actions
-
-    def test_phase_is_propagated(self) -> None:
-        from intentumdiff.core.models import ChangeStreamPhase
-
-        c = _add("n1")
-        events = self._run([], [c], phase=ChangeStreamPhase.FINAL)
-        assert events[0].phase == ChangeStreamPhase.FINAL
 
 
 # ---------------------------------------------------------------------------
