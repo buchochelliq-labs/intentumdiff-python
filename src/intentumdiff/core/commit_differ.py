@@ -299,7 +299,9 @@ class CommitDiffer:
             if error.kind == "pipeline_error"
         ]
 
-        self._raise_if_all_parsers_failed(changed_file_count, file_diffs, parse_errors)
+        self._raise_if_all_parsers_failed(
+            changed_file_count, file_diffs, parse_errors, file_errors=errors
+        )
         if errors:
             details = "; ".join(
                 f"{err.old_path}: {err.kind}: {err.reason}" for err in errors
@@ -376,6 +378,8 @@ class CommitDiffer:
         changed_file_count: int,
         file_diffs: list,
         parse_errors: list[str],
+        *,
+        file_errors: list[FileDiffError] | None = None,
     ) -> None:
         """Fail loudly when changed files exist but no parser plugin loaded."""
         if changed_file_count <= 0 or file_diffs or parse_errors:
@@ -386,7 +390,16 @@ class CommitDiffer:
         summary = summary_fn()
         if summary:
             raise RuntimeError(summary)
-        raise RuntimeError("Commit diff incomplete: no parser succeeded for changed text files")
+        # Preserve concrete failing paths when the registry cannot supply a richer
+        # parser-load diagnostic. A generic error hides the failed file and masks
+        # actionable evidence from the fail-closed commit boundary.
+        details = (
+            ": " + "; ".join(f"{error.old_path}: {error.reason}" for error in file_errors)
+            if file_errors else ""
+        )
+        raise RuntimeError(
+            "Commit diff incomplete: no parser succeeded for changed text files" + details
+        )
 
     def _build_index(
         self, file_contents: list[tuple[str, str, str]]
