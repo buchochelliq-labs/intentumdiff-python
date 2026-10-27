@@ -53,6 +53,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 
 from intentumdiff.core.diffignore import load_diffignore
+from intentumdiff.rust_core import attach_lsp_type_map
 
 if TYPE_CHECKING:
     from intentumdiff.core.index import SemanticIndex
@@ -239,28 +240,6 @@ def _collect_blob_files(
     shas_input = "\n".join(sha_to_path).encode()
     out = run_git_bytes(repo_root, ["cat-file", "--batch"], input_bytes=shas_input)
     return _parse_catfile_output(out, sha_to_path), ignored_files
-
-
-def _attach_type_info(
-    node: "SemanticNode",
-    type_map: dict[str, str],
-) -> "SemanticNode":
-    """Return a copy of *node* tree with ``type_info`` set from *type_map*.
-
-    ``SemanticNode`` is frozen so we must rebuild changed nodes from the leaves
-    up.  Only nodes whose id appears in *type_map* are rebuilt.
-    """
-    from intentumdiff.core.models import SemanticNode  # noqa: PLC0415
-
-    new_children = [_attach_type_info(c, type_map) for c in node.children]
-    if node.id in type_map or new_children != list(node.children):
-        return node.model_copy(
-            update={
-                "children": new_children,
-                **({"type_info": type_map[node.id]} if node.id in type_map else {}),
-            }
-        )
-    return node
 
 
 # ---------------------------------------------------------------------------
@@ -740,7 +719,7 @@ class Indexer:
                             cache.put_hover_map(hm_key, type_map)
                     if type_map:
                         enriched_count = len(type_map)
-                        node = _attach_type_info(node, type_map)
+                        node = attach_lsp_type_map(node, type_map)
                 return filename, language, node, enriched_count
 
         tasks = [asyncio.create_task(_process_one(f, c)) for f, c in files]
