@@ -380,7 +380,7 @@ class TestPostDiff:
         Starlette's streaming-response disconnect listener requires the real
         upstream ASGI stream after the one replayed request body.
         """
-        from fastapi import Request, Response
+        from starlette.middleware.base import BaseHTTPMiddleware
 
         app = create_app(differ=_mock_differ())
         dispatch = next(
@@ -397,10 +397,11 @@ class TestPostDiff:
         async def upstream_receive():
             return upstream_events.pop(0)
 
-        async def downstream(request: Request):
-            forwarded.append(await request.receive())
-            forwarded.append(await request.receive())
-            return Response("ok")
+        async def downstream(scope, receive, send):
+            forwarded.append(await receive())
+            forwarded.append(await receive())
+            await send({"type": "http.response.start", "status": 200, "headers": []})
+            await send({"type": "http.response.body", "body": b"ok"})
 
         scope = {
             "type": "http",
@@ -415,9 +416,15 @@ class TestPostDiff:
             "client": ("127.0.0.1", 12345),
             "server": ("testserver", 80),
         }
-        response = asyncio.run(dispatch(Request(scope, receive=upstream_receive), downstream))
+        sent = []
 
-        assert response.status_code == 200
+        async def send(message):
+            sent.append(message)
+
+        middleware = BaseHTTPMiddleware(downstream, dispatch=dispatch)
+        asyncio.run(middleware(scope, upstream_receive, send))
+
+        assert sent[0]["status"] == 200
         assert forwarded == [request_message, disconnect_message]
         assert not upstream_events
 

@@ -309,20 +309,10 @@ def create_app(
                 return _request_body_too_large_response()
             chunks.append(chunk)
         body = b"".join(chunks)
-        sent = False
-        upstream_receive = request._receive
-
-        async def receive():  # type: ignore[no-untyped-def]
-            nonlocal sent
-            if sent:
-                # Once the buffered body is replayed, forward upstream ASGI events.
-                # Repeated fake http.request events break Starlette's disconnect listener.
-                return await upstream_receive()
-            sent = True
-            return {"type": "http.request", "body": body, "more_body": False}
-
+        # BaseHTTPMiddleware replays the cached body through wrapped_receive.
+        # Preserve the original receive callable so its next event is the real
+        # upstream disconnect, rather than a second replayed request.
         request._body = body  # type: ignore[attr-defined]
-        request._receive = receive  # type: ignore[attr-defined]
         return await call_next(request)
 
     if cors_origins is not None:
