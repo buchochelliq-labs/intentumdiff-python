@@ -754,26 +754,47 @@ def try_rust_finalize_review(
                 config_json,
             )
         )
-        if not isinstance(data, dict) or not data.get("used"):
+        # The authoritative Rust finalize_review_impl emits explicit arrays and
+        # booleans on every successful response. Never turn a missing or malformed
+        # field into an empty/style-only result: that silently discards engine
+        # evidence and can misclassify meaningful edits.
+        if not isinstance(data, dict) or type(data.get("used")) is not bool:
+            raise ValueError("invalid Rust finalize response: 'used' must be a boolean")
+        if not data["used"]:
+            # The only explicit Rust decline is the max-nodes guard.
+            if data.get("reason") != "tree_too_large":
+                raise ValueError("invalid Rust finalize response: unexpected decline")
             return None
+
+        for key in ("changes", "change_groups", "ignored_style_changes"):
+            if not isinstance(data.get(key), list):
+                raise ValueError(f"invalid Rust finalize response: '{key}' must be an array")
+        for key in ("is_style_only", "no_surviving_changes"):
+            if type(data.get(key)) is not bool:
+                raise ValueError(f"invalid Rust finalize response: '{key}' must be a boolean")
+
+        ignored = data["ignored_style_changes"]
+        if any(not isinstance(item, dict) for item in ignored):
+            raise ValueError("invalid Rust finalize response: malformed ignored-style item")
+        # Trace is optional: Rust omits it for parse-error/source-lifecycle
+        # responses, but when present it must be a well-formed array.
+        trace = data.get("trace", [])
+        if not isinstance(trace, list) or any(not isinstance(item, dict) for item in trace):
+            raise ValueError("invalid Rust finalize response: malformed trace")
+        fallback_diff = data.get("fallback_diff")
+        if fallback_diff is not None and not isinstance(fallback_diff, dict):
+            raise ValueError("invalid Rust finalize response: malformed fallback_diff")
+
         return {
-            "fallback_diff": SemanticDiff.model_validate(data["fallback_diff"]) if data.get("fallback_diff") else None,
-            "changes": [Change.model_validate(item) for item in data.get("changes") or []],
-            "change_groups": [
-                ChangeGroup.model_validate(item) for item in data.get("change_groups") or []
-            ],
-            "is_style_only": bool(data.get("is_style_only")),
-            "no_surviving_changes": bool(data.get("no_surviving_changes")),
-            "ignored_style_changes": [
-                dict(item)
-                for item in data.get("ignored_style_changes") or []
-                if isinstance(item, dict)
-            ],
-            "trace": [
-                dict(item)
-                for item in data.get("trace") or []
-                if isinstance(item, dict)
-            ],
+            "fallback_diff": (
+                SemanticDiff.model_validate(fallback_diff) if fallback_diff is not None else None
+            ),
+            "changes": [Change.model_validate(item) for item in data["changes"]],
+            "change_groups": [ChangeGroup.model_validate(item) for item in data["change_groups"]],
+            "is_style_only": data["is_style_only"],
+            "no_surviving_changes": data["no_surviving_changes"],
+            "ignored_style_changes": [dict(item) for item in ignored],
+            "trace": [dict(item) for item in trace],
         }
     except Exception as exc:  # noqa: BLE001 - an engine failure is not an unsupported decline.
         raise RuntimeError(f"Rust finalize review failed: {exc}") from exc
