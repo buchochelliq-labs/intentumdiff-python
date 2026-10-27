@@ -310,11 +310,14 @@ def create_app(
             chunks.append(chunk)
         body = b"".join(chunks)
         sent = False
+        upstream_receive = request._receive
 
         async def receive():  # type: ignore[no-untyped-def]
             nonlocal sent
             if sent:
-                return {"type": "http.request", "body": b"", "more_body": False}
+                # Once the buffered body is replayed, forward upstream ASGI events.
+                # Repeated fake http.request events break Starlette's disconnect listener.
+                return await upstream_receive()
             sent = True
             return {"type": "http.request", "body": body, "more_body": False}
 
