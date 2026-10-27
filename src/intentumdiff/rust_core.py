@@ -1404,25 +1404,21 @@ _registered_xml_dialects_fingerprint: str | None = None
 def try_register_user_xml_dialects(dialects: list[dict[str, Any]]) -> bool:
     """Marshal user XML dialect specs (issue #86) into the Rust registry.
 
-    Idempotent per payload; returns False when the backend or the entrypoint is
-    unavailable (older core), in which case the diff proceeds without user XML
-    dialects — the registration is additive, never load-bearing.
+    Idempotent per successfully registered payload. Backend and registration
+    failures propagate: configured matching rules must never be silently ignored.
+    An empty payload clears the native registry.
     """
     global _registered_xml_dialects_fingerprint
     payload = json.dumps(dialects, sort_keys=True)
     if payload == _registered_xml_dialects_fingerprint:
         return True
-    try:
-        backend = _load_backend()
-        register_fn = getattr(backend, "register_user_xml_dialects_json", None)
-        if not callable(register_fn):
-            return False
-        register_fn(payload)
-        _registered_xml_dialects_fingerprint = payload
-        return True
-    except Exception as exc:  # noqa: BLE001 - strangler boundary must fall back.
-        logger.debug("Rust XML dialect registration unavailable: %s", exc, exc_info=True)
-        return False
+    backend = _load_backend()
+    register_fn = getattr(backend, "register_user_xml_dialects_json", None)
+    if not callable(register_fn):
+        raise RuntimeError("backend does not expose register_user_xml_dialects_json")
+    register_fn(payload)
+    _registered_xml_dialects_fingerprint = payload
+    return True
 
 
 def _run_invariance_request(request: dict[str, Any]) -> RustInvarianceResult:

@@ -1217,8 +1217,8 @@ class SemanticDiffer:
             # the full set is safe for every xml diff.
             _user_profiles, _ = load_user_schema_profiles()
             _dialects = user_xml_dialects_payload(_user_profiles)
-            if _dialects:
-                try_register_user_xml_dialects(_dialects)
+            # Empty configuration must clear previously registered native dialects.
+            try_register_user_xml_dialects(_dialects)
         schema_fingerprint = schema_cache_fingerprint(schema_resolution)
         cache_schema_suffix = (
             "" if schema_fingerprint == "schema:none" else f"|{schema_fingerprint}"
