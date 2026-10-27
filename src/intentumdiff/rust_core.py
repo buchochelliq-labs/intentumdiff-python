@@ -702,6 +702,20 @@ def collect_lsp_hover_targets(root: SemanticNode, source: str) -> list[tuple[str
     return _hover_target_dtos(data)
 
 
+def attach_lsp_type_map(root: SemanticNode, type_map: dict[str, str]) -> SemanticNode:
+    """Attach host-observed LSP type DTOs using the Rust C ABI, never Python tree mutation."""
+    response = _required_engine_json(
+        "lsp_attach_type_map_json",
+        root.model_dump_json(),
+        json.dumps(type_map, sort_keys=True),
+        result_type=dict,
+    )
+    try:
+        return SemanticNode.model_validate(response)
+    except ValidationError as exc:
+        raise RuntimeError("Rust LSP type-map attachment returned invalid tree DTO") from exc
+
+
 def _hover_target_dtos(data: list[Any]) -> list[tuple[str, int, int]]:
     targets = []
     for item in data:
