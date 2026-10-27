@@ -1614,9 +1614,9 @@ class SemanticDiffer:
         with profiler.phase("semantic_node_validation"):
             old_tree = _enrich_literal_labels(old_tree, old_raw)
             new_tree = _enrich_literal_labels(new_tree, new_raw)
-            # Cross-language NodeFacts (issue #70): every tree (all parse branches converge here)
-            # gets language-agnostic structural facts derived in the Rust core, so the intent
-            # explainer has signal for ALL languages, not just Python. Idempotent + graceful.
+            # Cross-language NodeFacts (issue #70): Rust derives structural facts for
+            # every language. Missing or malformed native output is a contract failure,
+            # not permission to silently publish a semantically impoverished tree.
             old_tree = enrich_node_facts(old_tree)
             new_tree = enrich_node_facts(new_tree)
             # Profile-label enrichment runs in the Rust core (issue #57 port).
