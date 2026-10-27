@@ -754,7 +754,6 @@ def test_optional_rust_adapters_raise_on_engine_failure(
 @pytest.mark.parametrize(
     ("handler", "call"),
     [
-        ("generic_text_review_json", lambda root: rust_core.try_rust_generic_text_review("old", "new", 0)),
         ("markdown_section_review_json", lambda root: rust_core.try_rust_markdown_section_review("old", "new")),
         (
             "finalize_review_json",
@@ -779,6 +778,57 @@ def test_optional_rust_adapters_still_decline_when_handler_is_absent(
     assert call(root) is None
 
 
+
+
+def test_generic_text_review_missing_handler_fails_closed(monkeypatch: Any) -> None:
+    monkeypatch.setattr(rust_core, "_load_backend", lambda: SimpleNamespace())
+    with pytest.raises(RuntimeError, match="required Rust generic-text review handler"):
+        rust_core.try_rust_generic_text_review("before", "after", 1)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {"used": False},
+        {"used": False, "reason": "backend unavailable"},
+        {"used": True},
+        {"used": True, "changes": None},
+        {"used": True, "changes": [], "group": []},
+        [],
+    ],
+)
+def test_generic_text_review_rejects_uncertified_or_invalid_payload(
+    monkeypatch: Any, payload: Any
+) -> None:
+    def handler(*_args: Any) -> str:
+        return json.dumps(payload)
+
+    monkeypatch.setattr(
+        rust_core, "_load_backend", lambda: SimpleNamespace(generic_text_review_json=handler)
+    )
+    with pytest.raises(RuntimeError, match="Rust generic-text review failed"):
+        rust_core.try_rust_generic_text_review("old", "new", 1)
+
+
+def test_generic_text_review_accepts_explicit_rust_size_cap_decline(monkeypatch: Any) -> None:
+    def handler(*_args: Any) -> str:
+        return json.dumps({"used": False, "reason": "input too large for LCS table"})
+
+    monkeypatch.setattr(
+        rust_core, "_load_backend", lambda: SimpleNamespace(generic_text_review_json=handler)
+    )
+    assert rust_core.try_rust_generic_text_review("old", "new", 3) is None
+
+
+def test_generic_text_review_preserves_valid_empty_rust_result(monkeypatch: Any) -> None:
+    def handler(*_args: Any) -> str:
+        return json.dumps({"used": True, "changes": [], "group": None})
+
+    monkeypatch.setattr(
+        rust_core, "_load_backend", lambda: SimpleNamespace(generic_text_review_json=handler)
+    )
+    assert rust_core.try_rust_generic_text_review("old", "old", 0) == ([], [])
 
 
 def test_node_facts_enrichment_requires_authoritative_rust_handler(monkeypatch: Any) -> None:
