@@ -462,6 +462,75 @@ def test_rust_core_batch_diffs_accepts_multiple_complete_items(
     assert captured[1]["python_parser_backend"] == "wasm"
 
 
+def _batch_mapping_fixture(monkeypatch: Any, indices: list[Any]) -> None:
+    """Install a fake native batch that preserves each item's requested identity."""
+    diffs = [
+        SemanticDiff(old_filename="a.py", new_filename="a.py", language="python"),
+        SemanticDiff(old_filename="b.py", new_filename="b.py", language="python"),
+    ]
+    payload = {
+        "engine": "rust_core_batch_v4",
+        "diffs": [
+            {"index": indices[0], "status": "complete", "diff": diffs[0].model_dump(mode="json")},
+            {"index": indices[1], "status": "complete", "diff": diffs[1].model_dump(mode="json")},
+        ],
+    }
+    backend = SimpleNamespace(
+        version=lambda: "0.4.0",
+        supports_language=lambda language: language == "python",
+        diff_batch=lambda request: json.dumps(payload),
+    )
+    monkeypatch.setattr(rust_core, "_load_backend", lambda: backend)
+
+
+def _two_python_batch_inputs() -> list[dict[str, str]]:
+    return [
+        {
+            "old_source": "old",
+            "new_source": "new",
+            "old_filename": name,
+            "new_filename": name,
+            "language": "python",
+            "parser_wasm_path": "python_parser.wasm",
+        }
+        for name in ("a.py", "b.py")
+    ]
+
+
+def test_rust_batch_out_of_order_explicit_index_zero_is_not_remapped(
+    monkeypatch: Any,
+) -> None:
+    """Rust may return index 0 second; its diff must remain attached to source 0."""
+    _batch_mapping_fixture(monkeypatch, [1, 0])
+    attempt = rust_core.try_rust_core_batch_diffs(
+        files=_two_python_batch_inputs(),
+        config=DiffConfig(experimental_rust_core=True),
+    )
+    assert attempt.used is True
+    assert {index: diff.new_filename for index, diff in attempt.diffs.items()} == {
+        0: "b.py",
+        1: "a.py",
+    }
+
+
+@pytest.mark.parametrize(
+    "indices",
+    [[0, 0], [0, 2], [0, "1"], [0, True]],
+    ids=["duplicate", "out-of-range", "string", "boolean"],
+)
+def test_rust_batch_invalid_response_indexes_fail_closed(
+    monkeypatch: Any, indices: list[Any],
+) -> None:
+    _batch_mapping_fixture(monkeypatch, indices)
+    attempt = rust_core.try_rust_core_batch_diffs(
+        files=_two_python_batch_inputs(),
+        config=DiffConfig(experimental_rust_core=True),
+    )
+    assert attempt.used is False
+    assert not attempt.diffs
+    assert attempt.fallback_reason.startswith("invalid output:")
+
+
 def test_rust_core_batch_diffs_records_per_item_fallback(
     monkeypatch: Any,
 ) -> None:
