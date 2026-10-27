@@ -385,8 +385,17 @@ def test_rust_core_batch_diffs_accepts_multiple_complete_items(
     captured: list[dict[str, Any]] = []
 
     def diff_batch(request_json: str) -> str:
-        captured.append(json.loads(request_json))
-        return json.dumps(payload)
+        request = json.loads(request_json)
+        captured.append(request)
+        # The same backend fake serves a two-file and a one-file request.
+        # Return only requested items, preserving strict response-index validation.
+        count = len(request["files"])
+        response = {
+            **payload,
+            "diffs": payload["diffs"][:count],
+            "metadata": {**payload["metadata"], "batch_size": count},
+        }
+        return json.dumps(response)
 
     backend = SimpleNamespace(
         version=lambda: "0.4.0",
