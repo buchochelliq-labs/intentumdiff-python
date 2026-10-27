@@ -1444,16 +1444,20 @@ def _run_invariance_request(request: dict[str, Any]) -> RustInvarianceResult:
 
     if not isinstance(data, dict):
         raise RuntimeError("Rust invariance engine returned a non-object payload")
+    # Every Rust invariance mode returns all three arrays, even for genuinely
+    # empty results. Missing/null/mistyped fields cannot certify a style-only
+    # or no-change result and must not be silently replaced with empty lists.
+    for field in ("changes", "change_groups", "ignored_style_changes"):
+        if not isinstance(data.get(field), list):
+            raise RuntimeError(f"invalid Rust invariance result: {field} must be an array")
+    if any(not isinstance(item, dict) for item in data["ignored_style_changes"]):
+        raise RuntimeError(
+            "invalid Rust invariance result: ignored_style_changes entries must be objects"
+        )
     return RustInvarianceResult(
-        changes=[Change.model_validate(item) for item in data.get("changes") or []],
-        change_groups=[
-            ChangeGroup.model_validate(item) for item in data.get("change_groups") or []
-        ],
-        ignored_style_changes=[
-            dict(item)
-            for item in data.get("ignored_style_changes") or []
-            if isinstance(item, dict)
-        ],
+        changes=[Change.model_validate(item) for item in data["changes"]],
+        change_groups=[ChangeGroup.model_validate(item) for item in data["change_groups"]],
+        ignored_style_changes=[dict(item) for item in data["ignored_style_changes"]],
     )
 
 
