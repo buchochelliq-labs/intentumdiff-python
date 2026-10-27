@@ -134,6 +134,13 @@ def _token_fallback_diff(
 # ---------------------------------------------------------------------------
 
 
+def _enrich_literal_labels(root: SemanticNode, source: str) -> SemanticNode:
+    """Delegate literal-label enrichment to Rust; never reconstruct semantics."""
+    from intentumdiff.rust_core import enrich_literal_labels
+
+    return enrich_literal_labels(root, source)
+
+
 def _changes_to_stream_events(
     before: list[Change],
     after: list[Change],
