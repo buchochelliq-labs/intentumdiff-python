@@ -703,6 +703,117 @@ def test_optional_rust_adapters_still_decline_when_handler_is_absent(
     assert call(root) is None
 
 
+@pytest.mark.parametrize(
+    ("field", "invalid"),
+    [
+        ("used", "<missing>"),
+        ("used", "true"),
+        ("used", 1),
+        ("used", None),
+        ("changes", "<missing>"),
+        ("changes", None),
+        ("changes", {}),
+        ("change_groups", "<missing>"),
+        ("change_groups", None),
+        ("ignored_style_changes", "<missing>"),
+        ("ignored_style_changes", None),
+        ("ignored_style_changes", [None]),
+        ("is_style_only", "<missing>"),
+        ("is_style_only", "false"),
+        ("is_style_only", 0),
+        ("no_surviving_changes", "<missing>"),
+        ("no_surviving_changes", "true"),
+        ("no_surviving_changes", 1),
+        ("trace", None),
+        ("trace", ["dropped"]),
+        ("fallback_diff", []),
+    ],
+)
+def test_rust_finalize_rejects_malformed_success_envelopes(
+    monkeypatch: Any, field: str, invalid: Any,
+) -> None:
+    """Malformed Rust success must never become no-change or style-only evidence."""
+    response: dict[str, Any] = {
+        "used": True,
+        "changes": [],
+        "change_groups": [],
+        "ignored_style_changes": [],
+        "is_style_only": False,
+        "no_surviving_changes": True,
+    }
+    if invalid == "<missing>":
+        response.pop(field)
+    else:
+        response[field] = invalid
+    monkeypatch.setattr(
+        rust_core, "_load_backend",
+        lambda: SimpleNamespace(finalize_review_json=lambda *_: json.dumps(response)),
+    )
+    root = _node("root", "module", "module", line=0)
+    with pytest.raises(RuntimeError, match="invalid Rust finalize response"):
+        rust_core.try_rust_finalize_review(
+            old_tree=root, new_tree=root, old_source="old", new_source="new",
+            language="python", config=DiffConfig(),
+        )
+
+
+def test_rust_finalize_accepts_explicit_empty_arrays_and_false_booleans(
+    monkeypatch: Any,
+) -> None:
+    response = {
+        "used": True,
+        "changes": [],
+        "change_groups": [],
+        "ignored_style_changes": [],
+        "is_style_only": False,
+        "no_surviving_changes": False,
+    }
+    monkeypatch.setattr(
+        rust_core, "_load_backend",
+        lambda: SimpleNamespace(finalize_review_json=lambda *_: json.dumps(response)),
+    )
+    root = _node("root", "module", "module", line=0)
+    actual = rust_core.try_rust_finalize_review(
+        old_tree=root, new_tree=root, old_source="old", new_source="new",
+        language="python", config=DiffConfig(),
+    )
+    assert actual is not None
+    assert actual["changes"] == []
+    assert actual["change_groups"] == []
+    assert actual["ignored_style_changes"] == []
+    assert actual["is_style_only"] is False
+    assert actual["no_surviving_changes"] is False
+    assert actual["trace"] == []
+
+
+@pytest.mark.parametrize(
+    ("decline", "accepted"),
+    [
+        ({"used": False, "reason": "tree_too_large"}, True),
+        ({"used": False}, False),
+        ({"used": False, "reason": "engine_failed"}, False),
+    ],
+)
+def test_rust_finalize_declines_only_for_explicit_tree_limit(
+    monkeypatch: Any, decline: dict[str, Any], accepted: bool,
+) -> None:
+    monkeypatch.setattr(
+        rust_core, "_load_backend",
+        lambda: SimpleNamespace(finalize_review_json=lambda *_: json.dumps(decline)),
+    )
+    root = _node("root", "module", "module", line=0)
+    def attempt() -> dict[str, Any] | None:
+        return rust_core.try_rust_finalize_review(
+            old_tree=root, new_tree=root, old_source="old", new_source="new",
+            language="python", config=DiffConfig(),
+        )
+    if accepted:
+        assert attempt() is None
+    else:
+        with pytest.raises(RuntimeError, match="unexpected decline"):
+            attempt()
+
+
 def test_rust_core_tree_reconstructs_matching_and_changes(monkeypatch: Any) -> None:
     old_child = _node("old.fn", "function", "total", line=0)
     new_child = _node("new.fn", "function", "sum_total", line=0)
