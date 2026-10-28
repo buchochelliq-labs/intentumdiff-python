@@ -317,6 +317,30 @@ def check_vbnet_declaration_extent(case: dict, diff: dict) -> None:
     )
 
 
+def run_native_probe(native: Path, request: dict, case_id: str) -> dict:
+    """Run native parity with a bounded, attributable Rust failure diagnostic."""
+    result = subprocess.run(
+        [str(native)], input=json.dumps(request), text=True, encoding="utf-8",
+        capture_output=True, check=False,
+        env={**os.environ, "RUST_BACKTRACE": "1"},
+    )
+    if result.returncode != 0:
+        stderr = result.stderr.strip()
+        if len(stderr) > 12000:
+            stderr = stderr[:6000] + "\n...[truncated]...\n" + stderr[-6000:]
+        raise RuntimeError(
+            f"{case_id}: Rust migration_probe exited {result.returncode}; "
+            f"stderr:\n{stderr or '(empty)'}"
+        )
+    try:
+        return json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            f"{case_id}: Rust migration_probe emitted invalid JSON; "
+            f"stderr: {result.stderr[:2000]!r}"
+        ) from exc
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--core-dir', type=Path, required=True)
@@ -352,8 +376,7 @@ def main():
                         # filename-only selection can silently exercise the wrong parser.
                         request['handler'] = 'native_selection_diff'
                         request['config'] = {'language_hint': case['corpus_language'], 'strict_plugins': True}
-                    result = subprocess.run([str(native)], input=json.dumps(request), text=True, encoding='utf-8', capture_output=True, check=True)
-                    native_result = json.loads(result.stdout)
+                    native_result = run_native_probe(native, request, case['id'])
                     if 'corpus_language' in case:
                         assert isinstance(native_result, dict) and 'fallback' not in native_result, (
                             case['id'], 'native parser declined', native_result
