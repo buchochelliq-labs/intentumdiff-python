@@ -148,6 +148,47 @@ def verified_renderer_archive(blob: bytes, pins: dict[str, str]) -> dict[str, by
     return checked
 
 
+
+def write_reviewed_wasm_manifest(
+    wasm_dir: Path,
+    parser_pins: dict[str, str],
+    renderer_pins: dict[str, str],
+) -> Path:
+    """Attest the exact registry-approved staged set, or refuse packaging.
+
+    Deriving a SHA-256 manifest from arbitrary local bytes is NOT evidence that
+    those bytes came from a reviewed parser/renderer build. The immutable registry
+    checksums are an independent input, verified before we write the manifest.
+    """
+    script_dir = str(Path(__file__).resolve().parent)
+    if script_dir not in sys.path:
+        sys.path.insert(0, script_dir)
+    from wasm_provenance import MANIFEST_FILENAME, generate_manifest, verify_manifest, write_manifest
+
+    overlap = set(parser_pins) & set(renderer_pins)
+    if overlap:
+        raise ValueError(f"parser/renderer registry pins overlap: {sorted(overlap)}")
+    expected = {**parser_pins, **renderer_pins}
+    if not expected:
+        raise ValueError("no immutable Wasm pins available for provenance")
+    manifest = generate_manifest(wasm_dir, built_from_commit=REGISTRY_REF)
+    staged = manifest["artifacts"]
+    extra = set(staged) - set(expected)
+    missing = set(expected) - set(staged)
+    if extra or missing:
+        raise ValueError(
+            f"staged Wasm inventory differs from reviewed registry: "
+            f"extra={sorted(extra)}, missing={sorted(missing)}"
+        )
+    for name, pin in expected.items():
+        if staged[name]["sha256"] != pin:
+            raise ValueError(f"staged Wasm {name} does not match reviewed registry SHA-256")
+    verify_manifest(wasm_dir, manifest)
+    output = wasm_dir / MANIFEST_FILENAME
+    write_manifest(manifest, output)
+    return output
+
+
 # ── Parser components from sibling-repo CI artifacts (Phase D) ────────────────
 # The 69 intentumdiff-<lang>-parser repos each publish their built component as a
 # `parser-wasm` artifact on every successful CI run. Without those components the
@@ -384,28 +425,11 @@ def stage_wasm_from_artifacts(token: str, org: str = "buchochelliq-labs") -> int
     except urllib.error.HTTPError as exc:
         missing.append((renderer_repo, f"HTTP {exc.code} at {stage} ({exc.reason})"))
 
-    # Regenerate the provenance manifest for what was ACTUALLY staged.
-    #
-    # `stage_wasm()` copies a manifest if one happens to sit beside the source components;
-    # this artifact path had none, so after an artifact-based staging the manifest was stale
-    # or absent and the loader's provenance check either compared against the previous
-    # build's hashes or could not run at all. That check is the last line between a
-    # substituted component and the engine, so leaving it toothless in the path CI actually
-    # uses defeats it.
-    #
-    # The manifest is a per-build artifact and gitignored, so it is generated here rather
-    # than committed anywhere.
-    try:
-        sys.path.insert(0, str(Path(__file__).resolve().parent))
-        from wasm_provenance import MANIFEST_FILENAME, generate_manifest, write_manifest
-
-        write_manifest(generate_manifest(WASM_DEST), WASM_DEST / MANIFEST_FILENAME)
-        print(f"wrote {MANIFEST_FILENAME} for {staged} staged component(s)")
-    except Exception as exc:  # noqa: BLE001
-        # Do not fail provisioning over the manifest: the components are staged and usable,
-        # and a hard failure here would block a build for a diagnostic aid. Say so loudly
-        # instead - a silent absence is what made this worth fixing.
-        print(f"WARNING: could not write {MANIFEST_FILENAME}: {type(exc).__name__}: {exc}")
+    # Never invent source attestation by hashing whatever was staged. Verify the
+    # exact reviewed 69-parser/four-renderer registry inventory before generating
+    # a shipping manifest. Any provenance failure aborts provisioning.
+    manifest_path = write_reviewed_wasm_manifest(WASM_DEST, pins, renderer_pins)
+    print(f"wrote {manifest_path.name} for {staged} registry-approved component(s)")
 
     print(f"staged {staged} components into {WASM_DEST}")
     if missing:
