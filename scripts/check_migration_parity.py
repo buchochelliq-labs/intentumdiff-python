@@ -6,6 +6,7 @@ counts are excluded: those describe execution, not source changes.
 """
 from __future__ import annotations
 import argparse
+import hashlib
 import json
 import os
 import platform
@@ -194,12 +195,15 @@ def check_visible_corpus_tokens(case: dict, diff: dict) -> None:
     )
 
 
-def check_available_corpus_parser(case: dict, *, system: str | None = None, machine: str | None = None) -> None:
-    """Fail closed for deliberately unavailable native components, never accept generic.
+def check_available_corpus_parser(
+    case: dict, *, system: str | None = None, machine: str | None = None,
+    wasm_dir: Path | None = None,
+) -> None:
+    """Only Rust may lift a platform restriction, using pinned staged bytes.
 
-    The Rust C ABI owns platform exclusions. The Windows/ARM64 PowerShell Wasm
-    crashes Cranelift during compilation; this remains an explicit RC blocker,
-    not a silently skipped language or a successful generic fallback.
+    This is a release gate, not a Python fallback. A missing manifest, missing
+    artifact, unavailable C ABI or digest mismatch keeps the 74-language gate
+    blocked. No language can be silently waived.
     """
     from intentumdiff.rust_core import _c_abi_call
 
@@ -209,6 +213,26 @@ def check_available_corpus_parser(case: dict, *, system: str | None = None, mach
     assert isinstance(status, dict) and "reason" in status and "unavailable" in status, (
         case["id"], "malformed Rust parser availability contract", status,
     )
+    if status["reason"] is not None and wasm_dir is not None:
+        # Manifest lookup and SHA-256 are host I/O only. The Rust ABI evaluates
+        # the platform/component policy; the manifest alone never authorizes.
+        manifest_path = wasm_dir / "parser_manifest.json"
+        if manifest_path.is_file():
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            entry = manifest.get("parsers", {}).get(case["corpus_language"])
+            if isinstance(entry, dict) and isinstance(entry.get("wasm"), str):
+                component = wasm_dir / entry["wasm"]
+                try:
+                    digest = hashlib.sha256(component.read_bytes()).hexdigest()
+                except OSError:
+                    digest = ""  # Rust must deny absent/unreadable component bytes.
+                status = _c_abi_call(
+                    "parser_availability_with_digest",
+                    case["corpus_language"], case["filename"], system, machine, digest,
+                )
+                assert isinstance(status, dict) and "reason" in status and "unavailable" in status, (
+                    case["id"], "malformed Rust digest availability contract", status,
+                )
     assert status["reason"] is None and status["unavailable"] is None, (
         case["id"], f"semantic parser unavailable on {system}/{machine}", status,
         "0.0.2 parser blocker: https://github.com/buchochelliq-labs/intentumdiff-powershell-parser/issues/4; Rust host contract: https://github.com/buchochelliq-labs/intentumdiff-core/issues/183",
@@ -321,7 +345,7 @@ def main():
                 for case in cases:
                     request = dict(case, repo=str(root), wasm=str(wasm))
                     if 'corpus_language' in case:
-                        check_available_corpus_parser(case)
+                        check_available_corpus_parser(case, wasm_dir=wasm)
                         # Extensions such as .yml and .json are intentionally shared by
                         # multiple parsers (e.g. Databricks Workflow/YAML and ADF/JSON).
                         # Pin the corpus language in BOTH native and Python requests:
