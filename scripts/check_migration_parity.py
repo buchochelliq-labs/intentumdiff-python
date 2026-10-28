@@ -160,6 +160,10 @@ def full_corpus_cases() -> list[dict]:
                 "filename": manifest["filename"],
                 "mode": "sources",
                 "corpus_language": language,
+                # These edits change semantic content, never just formatting.
+                # Do not accept a false style reduction even when the same
+                # result also contains a real semantic change.
+                "forbid_ignored_style": True,
             })
     assert {case["corpus_language"] for case in cases} == {
         directory.name for directory in directories
