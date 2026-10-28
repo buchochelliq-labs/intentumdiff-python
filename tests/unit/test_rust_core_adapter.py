@@ -832,6 +832,59 @@ def test_generic_text_review_preserves_valid_empty_rust_result(monkeypatch: Any)
     assert rust_core.try_rust_generic_text_review("old", "old", 0) == ([], [])
 
 
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        [],
+        {"used": False},
+        {"used": "true"},
+        {"used": True},
+        {"used": True, "moves": None},
+        {"used": True, "moves": [], "renames": [], "moved_labels": [],
+         "old_heading_lines": [], "new_heading_lines": [], "move_group": None},
+        {"used": True, "moves": [], "renames": [], "moved_labels": [],
+         "old_heading_lines": [], "new_heading_lines": [], "move_group": [],
+         "rename_group": None},
+        {"used": True, "moves": [], "renames": [], "moved_labels": [2],
+         "old_heading_lines": [], "new_heading_lines": [], "move_group": None,
+         "rename_group": None},
+        {"used": True, "moves": [], "renames": [], "moved_labels": [],
+         "old_heading_lines": [True], "new_heading_lines": [], "move_group": None,
+         "rename_group": None},
+    ],
+)
+def test_markdown_review_invalid_native_envelopes_fail_closed(
+    monkeypatch: Any, payload: Any,
+) -> None:
+    monkeypatch.setattr(
+        rust_core, "_load_backend",
+        lambda: SimpleNamespace(markdown_section_review_json=lambda *_args: json.dumps(payload)),
+    )
+    with pytest.raises(RuntimeError, match="Rust markdown section review failed"):
+        rust_core.try_rust_markdown_section_review("# Old\\n", "# New\\n")
+
+
+def test_markdown_review_valid_empty_envelope_is_not_a_decline(
+    monkeypatch: Any,
+) -> None:
+    valid = {
+        "used": True,
+        "moves": [], "moved_labels": [], "move_group": None,
+        "renames": [], "old_heading_lines": [], "new_heading_lines": [],
+        "rename_group": None,
+    }
+    monkeypatch.setattr(
+        rust_core, "_load_backend",
+        lambda: SimpleNamespace(markdown_section_review_json=lambda *_args: json.dumps(valid)),
+    )
+    result = rust_core.try_rust_markdown_section_review("# Old\\n", "# Old\\n")
+    assert result is not None
+    assert result["moves"] == [] and result["renames"] == []
+    assert result["old_heading_lines"] == set()
+    assert result["new_heading_lines"] == set()
+
+
 def test_node_facts_enrichment_requires_authoritative_rust_handler(monkeypatch: Any) -> None:
     root = _node("root", "module", "module", line=0)
     monkeypatch.setattr(rust_core, "_load_backend", lambda: SimpleNamespace())
