@@ -87,6 +87,15 @@ def corpus_mutations(source: str, manifest: dict) -> list[tuple[str, str]]:
     return mutations
 
 
+_RELEASE_CORPUS_LANGUAGES = frozenset("""
+    abap adf asciidoc asm assemblyscript astro bash c clojure cmake cpp csharp css dart
+    databricks-workflow databricks dax delphi dockerfile elixir generic gitignore go
+    gomod graphql groovy haskell hcl html ini java javascript json kotlin latex lua m
+    make markdown mdx ocaml odin perl php plsql po postscript powershell proto puppet
+    python qsharp r reasonml ruby rust sas scala scss sql squirrel svelte swift toml
+    tsql tsx typescript vbnet vue wast wat xml yaml zig
+""".split())
+
 def full_corpus_cases() -> list[dict]:
     """Require every packaged corpus language and independently meaningful source edits.
 
@@ -96,7 +105,11 @@ def full_corpus_cases() -> list[dict]:
     root = Path(__file__).resolve().parents[1] / "tests/fixtures/corpus"
     assert root.is_dir(), "74-language corpus directory is missing"
     directories = sorted(p for p in root.iterdir() if p.is_dir())
-    assert len(directories) == 74, f"expected 74 corpus languages, found {len(directories)}"
+    actual_languages = {directory.name for directory in directories}
+    assert actual_languages == _RELEASE_CORPUS_LANGUAGES, (
+        f"missing: {sorted(_RELEASE_CORPUS_LANGUAGES - actual_languages)}; "
+        f"unexpected: {sorted(actual_languages - _RELEASE_CORPUS_LANGUAGES)}"
+    )
     cases = []
     for language_dir in directories:
         manifest_path = language_dir / "playground.expect.json"
@@ -212,6 +225,7 @@ def main():
                         for origin, output in (('native', rust), ('python', python)):
                             assert output['language'] == case['corpus_language'], (
                                 case['id'], origin, output['language'])
+                            assert output['changes'], (case['id'], origin, 'zero changes')
                             check_source_spans(case, output)
                     assert projection(rust) == projection(python), (case['id'], projection(rust), projection(python))
                     records.append(dict(case, rust=rust, python=python))
