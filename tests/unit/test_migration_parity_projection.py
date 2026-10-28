@@ -162,7 +162,7 @@ def test_corpus_spans_reject_unterminated_virtual_eof_row():
     with pytest.raises(AssertionError, match="non-source row"):
         checker(case, _diff(node))
 
-    case["new"] = "é\\n".replace("\\n", "\n")
+    case["new"] = "é\n"
     checker(case, _diff(node))
 
     node["position"]["end_col"] = 1
