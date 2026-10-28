@@ -243,7 +243,18 @@ def verify_wheel(
         raise ValueError("IntentumDiff release wheel must be native, not py3-none-any")
 
     with zipfile.ZipFile(wheel) as zf:
-        entries = zf.namelist()
+        members = zf.infolist()
+        # On Windows, Python's ZipInfo normalizes backslashes to forward
+        # slashes when reading an archive. namelist()/filename therefore
+        # cannot expose the original unsafe member name. Validate the raw
+        # central-directory name before trusting the normalized name.
+        for member in members:
+            if member.orig_filename != member.filename:
+                raise ValueError(
+                    f"wheel contains noncanonical archive path: {member.orig_filename!r}"
+                )
+            _validate_archive_entry_name(member.orig_filename)
+        entries = [member.filename for member in members]
         # A set would silently discard repeated ZIP members. Different wheel
         # installers can select different bytes for the same pathname, so even
         # byte-identical duplicates are invalid release inputs.
