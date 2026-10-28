@@ -795,6 +795,7 @@ def test_generic_text_review_missing_handler_fails_closed(monkeypatch: Any) -> N
         {"used": False, "reason": "backend unavailable"},
         {"used": True},
         {"used": True, "changes": None},
+        {"used": True, "changes": []},  # Rust must include the group field, even if null.
         {"used": True, "changes": [], "group": []},
         [],
     ],
