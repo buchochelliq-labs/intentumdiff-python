@@ -99,6 +99,21 @@ jobs:
           GIT_TERMINAL_PROMPT: "0"
           GH_TOKEN: ${{ secrets.SPLIT_REPO_TOKEN }}
 
+      - name: Audit exact staged Wasm opcodes for metered Wasmtime
+        if: env.HAS_SPLIT_TOKEN == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          # Provenance is verified before any file is presented as a pinned scan.
+          python scripts/wasm_provenance.py verify
+          # Pinned wasmparser traverses core modules nested inside components.
+          # GHSA-m63x-6p34-q65x affects the current 47.0.3 metered host
+          # when call_ref or try_table is present; fail closed, retain JSON.
+          cargo test --manifest-path scripts/wasm_fuel_audit/Cargo.toml
+          cargo run --manifest-path scripts/wasm_fuel_audit/Cargo.toml -- \
+            src/intentumdiff/wasm evidence/wasm-fuel-opcodes.json
+
       - name: Install intentumdiff + test dependencies
         # cffi first: the editable install is a maturin cffi-bindings build, which
         # requires the cffi module importable by the TARGET interpreter at build time.
