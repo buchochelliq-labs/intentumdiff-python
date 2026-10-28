@@ -90,3 +90,38 @@ def test_vbnet_declaration_extent_rejects_silently_missing_declaration():
     case = {"id": "corpus-vbnet-addition", "new": source, "old": ""}
     with pytest.raises(AssertionError, match="VB.NET Multiply full declaration span"):
         checker(case, _diff(_node("unrelated")))
+
+
+def test_corpus_addition_rejects_equal_but_fabricated_native_python_content():
+    """Two routes agreeing on invented labels must fail source-judged acceptance."""
+    checker = runpy.run_path(str(SCRIPT))["check_visible_corpus_tokens"]
+    case = {
+        "id": "corpus-python-addition",
+        "old": "",
+        "new": "def greet(name): return 'Hello'",
+        "required_visible_tokens": ["greet", "name", "Hello"],
+    }
+    fabricated = _diff(_node("NOT IN SOURCE"))
+    with pytest.raises(AssertionError, match="missing source-ratcheted semantic tokens"):
+        checker(case, fabricated)
+    # Presence must be inside the exposed new-tree descendants, not merely
+    # in the input source or the other route's result.
+    good = _diff(_node("module", children=[
+        _node("greet", children=[_node("name"), _node("Hello")]),
+    ]))
+    checker(case, good)
+    dropped_child = _diff(_node("module", children=[_node("greet")]))
+    with pytest.raises(AssertionError, match="missing source-ratcheted semantic tokens"):
+        checker(case, dropped_child)
+
+
+def test_manifest_visible_tokens_are_carried_into_every_addition_case():
+    harness = runpy.run_path(str(SCRIPT))
+    cases = harness["full_corpus_cases"]()
+    additions = [case for case in cases if case["id"].endswith("-addition")]
+    assert len(additions) == 74
+    for case in additions:
+        manifest = (Path(__file__).resolve().parents[1] / "fixtures" / "corpus"
+                    / case["corpus_language"] / "playground.expect.json")
+        expected = __import__("json").loads(manifest.read_text(encoding="utf-8"))
+        assert case["required_visible_tokens"] == expected["visible_tokens"], case["id"]
