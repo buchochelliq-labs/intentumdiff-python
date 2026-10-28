@@ -123,13 +123,13 @@ def _verify_builtin_provenance(path: Path) -> None:
     )
 
 
-def _check_rust_component_load_policy(path: Path) -> None:
-    """Ask Rust before Wasmtime compiles the actual staged component.
+def _check_rust_component_load_policy(path: Path) -> bytes | None:
+    """Ask Rust before compilation; return the exact approved bytes if guarded.
 
-    Python performs only host file I/O and typed error translation. The Rust
-    C ABI owns the platform/component decision; its absence is a hard error.
-    An empty digest first probes whether hashing is necessary, avoiding reads
-    of all the other bundled components during ordinary parser discovery.
+    Python owns only host I/O and error translation; Rust decides whether the
+    digest is compatible. A protected component must compile from the *same*
+    bytes that were hashed, rather than reopening the file after validation.
+    An empty digest probes the restriction without reading unrelated plugins.
     """
     from intentumdiff.rust_core import _c_abi_call
 
@@ -147,12 +147,13 @@ def _check_rust_component_load_policy(path: Path) -> None:
     if reason_for("") is None:
         return
     try:
-        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        approved_bytes = path.read_bytes()
     except OSError as exc:
         raise PluginLoadError(str(path), f"cannot hash staged Wasm component: {exc}") from exc
-    reason = reason_for(digest)
+    reason = reason_for(hashlib.sha256(approved_bytes).hexdigest())
     if reason is not None:
         raise PluginLoadError(str(path), reason)
+    return approved_bytes
 
 
 def _check_wasmtime_version(
@@ -1067,7 +1068,7 @@ def load_plugin(
 
     if not path.exists():
         raise PluginLoadError(str(path), "file not found")
-    _check_rust_component_load_policy(path)
+    approved_component_bytes = _check_rust_component_load_policy(path)
 
     try:
         cfg = Config()
@@ -1104,7 +1105,11 @@ def load_plugin(
             )
         engine = Engine(cfg)
 
-        component = Component.from_file(engine, str(path))
+        # Wasmtime Component(engine, bytes) compiles the exact buffer approved
+        # by Rust. Component.from_file would reopen a potentially replaced path.
+        component = (Component(engine, approved_component_bytes)
+                     if approved_component_bytes is not None
+                     else Component.from_file(engine, str(path)))
 
         linker = Linker(engine)
         linker.add_wasip2()
