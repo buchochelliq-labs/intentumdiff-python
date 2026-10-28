@@ -216,9 +216,26 @@ def main():
             with closing(SemanticDiffer()) as differ:
                 for case in cases:
                     request = dict(case, repo=str(root), wasm=str(wasm))
+                    if 'corpus_language' in case:
+                        # Extensions such as .yml and .json are intentionally shared by
+                        # multiple parsers (e.g. Databricks Workflow/YAML and ADF/JSON).
+                        # Pin the corpus language in BOTH native and Python requests:
+                        # filename-only selection can silently exercise the wrong parser.
+                        request['handler'] = 'native_selection_diff'
+                        request['config'] = {'language_hint': case['corpus_language']}
                     result = subprocess.run([str(native)], input=json.dumps(request), text=True, encoding='utf-8', capture_output=True, check=True)
-                    rust = json.loads(result.stdout)
-                    python = (review_text(case['old'], case['new'], filename=case['filename']) if case['mode'] == 'text' else differ.diff_strings(case['old'], case['new'], case['filename'])).model_dump(mode='json')
+                    native_result = json.loads(result.stdout)
+                    if 'corpus_language' in case:
+                        assert isinstance(native_result, dict) and 'fallback' not in native_result, (
+                            case['id'], 'native parser declined', native_result
+                        )
+                        assert isinstance(native_result.get('diff'), dict), (
+                            case['id'], 'native review response missing diff', native_result
+                        )
+                        rust = native_result['diff']
+                    else:
+                        rust = native_result
+                    python = (review_text(case['old'], case['new'], filename=case['filename']) if case['mode'] == 'text' else differ.diff_strings(case['old'], case['new'], case['filename'], language_hint=case.get('corpus_language'))).model_dump(mode='json')
                     check_expectations(case, rust)
                     check_expectations(case, python)
                     if 'corpus_language' in case:
