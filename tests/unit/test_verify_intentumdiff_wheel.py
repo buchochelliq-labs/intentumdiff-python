@@ -122,7 +122,7 @@ def test_verify_wheel_rejects_installation_path_aliases(
 def test_verify_wheel_rejects_raw_backslash_even_after_windows_normalization(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    raw_name = "intentumdiff/plugins\\\\config.py"
+    raw_name = r"intentumdiff/plugins\config.py"
     wheel = _write_wheel(
         tmp_path / "intentumdiff_python-0.0.1-cp312-cp312-win_amd64.whl",
         _valid_names(),
@@ -136,7 +136,7 @@ def test_verify_wheel_rejects_raw_backslash_even_after_windows_normalization(
     monkeypatch.setattr(
         zipfile,
         "_sanitize_filename",
-        lambda filename: original_sanitize(filename).replace("\\\\", "/"),
+        lambda filename: original_sanitize(filename).replace("\\", "/"),
     )
     with zipfile.ZipFile(wheel) as zf:
         member = next(member for member in zf.infolist() if member.orig_filename == raw_name)
