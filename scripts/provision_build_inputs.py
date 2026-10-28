@@ -30,8 +30,9 @@ CORE_REPO = "https://github.com/buchochelliq-labs/intentumdiff-core"
 # Immutable reviewed engine candidate for this binding. Override for an explicit
 # integration build; never let a moving branch silently change the engine under CI.
 CORE_REF = os.environ.get("INTENTUMDIFF_CORE_REF", "60237b1d9f820e8ebaffb718e8e4a5c752d9cda1")
-# Reviewed registry RC: source-span/SAS fixes plus earlier Svelte and JS/TS fixes.
-REGISTRY_REF = "59d7c91fa4e466b4130628202e6a126792b6f9d7"
+# Source-judged registry RC candidate from registry PR #13: pins the corrected
+# VB.NET parser Wasm artifact by immutable source ref and verified inner SHA-256.
+REGISTRY_REF = "cc8eb1468ce1b415c96c2293b445f8da9604637e"
 
 
 def load_reviewed_registry(get, api: str, org: str):
