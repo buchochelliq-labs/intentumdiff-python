@@ -222,7 +222,10 @@ def check_source_spans(case: dict, diff: dict) -> None:
             node = change.get(side)
             if node is None:
                 continue
-            lines = case[source_key].splitlines(keepends=True)
+            # SourceSpan byte columns must land on UTF-8 character boundaries.
+            # Newlines are not part of a source line's column space: counting
+            # keepends=True allows offsets into CRLF or past the visible text.
+            lines = case[source_key].splitlines()
             stack = [node]
             while stack:
                 current = stack.pop()
@@ -237,13 +240,16 @@ def check_source_spans(case: dict, diff: dict) -> None:
                     assert 0 <= line_number <= len(lines), (
                         case["id"], side, position, len(lines)
                     )
-                    limit = (
-                        len(lines[line_number].encode("utf-8"))
-                        if line_number < len(lines) else 0
-                    )
-                    assert 0 <= column <= limit, (
+                    line = lines[line_number] if line_number < len(lines) else ""
+                    boundaries = {0}
+                    offset = 0
+                    for char in line:
+                        offset += len(char.encode("utf-8"))
+                        boundaries.add(offset)
+                    assert column in boundaries, (
                         case["id"], side, current.get("label"), position,
-                        f"line {line_number} max UTF-8 byte column {limit}"
+                        f"line {line_number} invalid UTF-8 byte boundary {column}; "
+                        f"valid columns: {sorted(boundaries)}"
                     )
                 stack.extend(current.get("children") or [])
 
