@@ -195,6 +195,42 @@ def check_source_spans(case: dict, diff: dict) -> None:
                     )
                 stack.extend(current.get("children") or [])
 
+
+def check_vbnet_declaration_extent(case: dict, diff: dict) -> None:
+    """Source-judge the full VB.NET declaration span, including End Function.
+
+    The previous pinned Wasm used the last body child's end line with the
+    opening declaration's byte width (e.g. row 10, column 60 for a 21-byte
+    line). Merely bounding column values is weaker than checking this
+    exact fixture against the actual closing source line.
+    """
+    if case["id"] != "corpus-vbnet-addition":
+        return
+    lines = case["new"].splitlines()
+    opening = next(i for i, line in enumerate(lines)
+                   if line.strip().startswith("Function Multiply("))
+    closing = next(i for i in range(opening + 1, len(lines))
+                   if lines[i].strip().lower() == "end function")
+    start_col = len(lines[opening].encode("utf-8")) - len(lines[opening].lstrip().encode("utf-8"))
+    expected = (opening, start_col, closing, len(lines[closing].encode("utf-8")))
+    found = []
+    for change in diff["changes"]:
+        root = change.get("new_node")
+        if root is None:
+            continue
+        stack = [root]
+        while stack:
+            node = stack.pop()
+            if node.get("label") == "Multiply" and node.get("node_type") == "function_statement":
+                pos = node["position"]
+                found.append(tuple(pos[k] for k in
+                                   ("start_line", "start_col", "end_line", "end_col")))
+            stack.extend(node.get("children") or [])
+    assert found and set(found) == {expected}, (
+        case["id"], "VB.NET Multiply full declaration span", expected, found
+    )
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--core-dir', type=Path, required=True)
@@ -250,6 +286,7 @@ def main():
                                 case['id'], origin, output['language'])
                             assert output['changes'], (case['id'], origin, 'zero changes')
                             check_source_spans(case, output)
+                            check_vbnet_declaration_extent(case, output)
                     assert projection(rust) == projection(python), (case['id'], projection(rust), projection(python))
                     records.append(dict(case, rust=rust, python=python))
         finally:
