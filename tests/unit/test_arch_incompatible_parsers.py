@@ -118,19 +118,23 @@ def test_discovery_is_silent_so_an_ordinary_diff_stays_quiet(caplog: pytest.LogC
 
 
 @pytest.mark.parametrize("filename", ["deploy.ps1", "Module.psm1", "Manifest.psd1", "DEPLOY.PS1"])
-def test_the_user_is_told_when_they_diff_the_affected_language(filename: str) -> None:
-    """Silence is only acceptable if the explanation arrives where it is relevant.
+def test_the_user_is_told_when_staged_powershell_is_unverified(
+    filename: str, tmp_path, monkeypatch,
+) -> None:
+    """Never explain away a missing parser as verified, or warn for good bytes.
 
-    Without this the user sees "unknown language" on a PowerShell file and has no way to learn
-    why - indistinguishable from the product being broken.
+    Use intentionally incorrect staged bytes: the true release artifact is
+    certified separately against the immutable registry checksum.
     """
+    (tmp_path / "powershell_parser.wasm").write_bytes(b"not the vetted PowerShell Wasm")
+    monkeypatch.setattr(registry, "_wasm_dir", lambda: tmp_path)
     sys_p, mach_p = _on("Windows", "ARM64")
     with sys_p, mach_p:
         found = registry.unavailable_parser_for(filename)
-    assert found is not None, f"{filename} should be explained on Windows/ARM64"
+    assert found is not None, f"{filename} should be excluded on Windows/ARM64"
     name, reason = found
     assert name == "powershell"
-    assert "aborts the process" in reason
+    assert "not verified" in reason
 
 
 @pytest.mark.parametrize("filename", ["main.py", "lib.rs", "README.md", "deploy.ps1"])
