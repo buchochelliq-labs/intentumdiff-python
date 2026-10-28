@@ -89,6 +89,27 @@ def test_verify_wheel_rejects_duplicate_zip_members_even_when_bytes_match(
         verify_wheel(wheel)
 
 
+@pytest.mark.parametrize(
+    ("alias", "message"),
+    [
+        ("intentumdiff/./__init__.py", "noncanonical archive path"),
+        ("intentumdiff//__init__.py", "noncanonical archive path"),
+        ("intentumdiff/plugins\\config.py", "noncanonical archive path"),
+        ("intentumdiff/__INIT__.py", "platform-aliasing archive entries"),
+        ("intentumdiff/wasm/PYTHON_PARSER.WASM", "platform-aliasing archive entries"),
+    ],
+)
+def test_verify_wheel_rejects_installation_path_aliases(
+    tmp_path: Path, alias: str, message: str,
+) -> None:
+    wheel = _write_wheel(
+        tmp_path / "intentumdiff_python-0.0.1-cp312-cp312-win_amd64.whl",
+        [*_valid_names(), alias],
+    )
+    with pytest.raises(ValueError, match=message):
+        verify_wheel(wheel)
+
+
 def test_verify_wheel_accepts_windows_arm64_wheel(tmp_path: Path) -> None:
     names = [
         name.replace("win_amd64", "win_arm64")

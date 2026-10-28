@@ -111,6 +111,12 @@ def _validate_archive_entry_name(name: str) -> None:
         or ".." in windows.parts
     ):
         raise ValueError(f"wheel contains unsafe archive path: {name!r}")
+    # ZIP member names are POSIX paths. Dot/empty segments and backslashes
+    # can resolve to another install target on Windows even when their raw
+    # names differ from the reviewed files.
+    canonical = posix.as_posix() + ("/" if name.endswith("/") else "")
+    if "\\" in name or canonical != name:
+        raise ValueError(f"wheel contains noncanonical archive path: {name!r}")
 
 
 def _validate_wheel_entries(
@@ -251,6 +257,17 @@ def verify_wheel(
         expected_name=expected_name,
         expected_version=expected_version,
     )
+    # On case-insensitive filesystems two distinct ZIP names can extract to
+    # the same path. Reject aliases before validating Wasm/native payloads.
+    # Exact-name duplicates have already been rejected above.
+    install_targets: dict[str, str] = {}
+    for entry in entries:
+        target = PurePosixPath(entry).as_posix().rstrip("/").casefold()
+        previous = install_targets.setdefault(target, entry)
+        if previous is not None and previous != entry:
+            raise ValueError(
+                f"wheel contains platform-aliasing archive entries: {previous!r}, {entry!r}"
+            )
 
     missing_packages = sorted(REQUIRED_PACKAGES - names)
     if missing_packages:
