@@ -151,6 +151,25 @@ def test_corpus_spans_require_utf8_character_boundaries_and_exclude_newlines():
         checker(case, _diff(node))
 
 
+def test_corpus_spans_reject_unterminated_virtual_eof_row():
+    """A next-line EOF position is only legal after an actual source newline."""
+    checker = runpy.run_path(str(SCRIPT))["check_source_spans"]
+    case = {"id": "corpus-eof-span", "old": "", "new": "é"}
+    node = _node("é", col=0)
+    node["position"] = {
+        "start_line": 0, "start_col": 0, "end_line": 1, "end_col": 0,
+    }
+    with pytest.raises(AssertionError, match="non-source row"):
+        checker(case, _diff(node))
+
+    case["new"] = "é\\n".replace("\\n", "\n")
+    checker(case, _diff(node))
+
+    node["position"]["end_col"] = 1
+    with pytest.raises(AssertionError, match="non-source row"):
+        checker(case, _diff(node))
+
+
 def test_corpus_gate_rejects_known_platform_parser_exclusion():
     """The 74-language gate cannot certify generic text in lieu of PowerShell."""
     check = runpy.run_path(str(SCRIPT))["check_available_corpus_parser"]
