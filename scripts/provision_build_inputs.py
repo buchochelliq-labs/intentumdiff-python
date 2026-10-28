@@ -29,7 +29,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 CORE_REPO = "https://github.com/buchochelliq-labs/intentumdiff-core"
 # Immutable reviewed engine candidate for this binding. Override for an explicit
 # integration build; never let a moving branch silently change the engine under CI.
-CORE_REF = os.environ.get("INTENTUMDIFF_CORE_REF", "60237b1d9f820e8ebaffb718e8e4a5c752d9cda1")
+CORE_REF = os.environ.get("INTENTUMDIFF_CORE_REF", "32bc104180f03e433525483ed0e9945a65aef6a0")
 # Reviewed registry RC candidate: includes verified VB.NET multiline-span Wasm fix.
 # Registry PR #13 must be vetted before this becomes the final integration pin.
 REGISTRY_REF = "9ab6d84546e704e38661f2d4c9eeeaa5059a661c"
