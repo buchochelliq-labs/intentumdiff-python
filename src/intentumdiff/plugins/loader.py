@@ -85,50 +85,50 @@ def _is_trusted_wasm_path(wasm_path: str | Path | None) -> bool:
         return False
 
 
-#: The #89 provenance manifest shipped alongside the bundled parsers (filename -> SHA-256).
+#: First-party bundled Wasm is always verified before execution. There is no
+#: release runtime waiver: absent, malformed or divergent provenance is unsafe.
 _PROVENANCE_MANIFEST = _BUILTIN_WASM_DIR / "wasm_provenance.json"
-#: Opt-in to make a bundled-wasm provenance mismatch a hard load failure (release/CI). Off by
-#: default so a dev tree without the manifest — or with a stale one after a manual wasm copy —
-#: is not broken; the mismatch is still logged.
-_ENFORCE_PROVENANCE_ENV = "INTENTUMDIFF_ENFORCE_WASM_PROVENANCE"
 
 
-def _verify_builtin_provenance(path: Path) -> None:
-    """Verify a bundled first-party Wasm against the #89 provenance manifest, when present.
+def _verify_builtin_provenance(path: Path) -> bytes | None:
+    """Check bundled Wasm against the shipping manifest and return those bytes.
 
-    Parallels hub.py's third-party checksum path, but for the first-party bundled parsers: a
-    mismatch — or an artifact the manifest never saw (the #87 stale-artifact case) — is a
-    supply-chain red flag. It is logged as a warning, and raised as a ``PluginSecurityError`` (a ``PluginLoadError`` subtype) when
-    ``INTENTUMDIFF_ENFORCE_WASM_PROVENANCE=1``. A missing/unreadable manifest (a dev build without
-    the package-time provenance step) is skipped — verification is optional by design (#89).
+    Read and hash the same buffer that will be passed to Wasmtime; checking a
+    path and reopening it later permits replacement between the two operations.
+    Third-party plugin provenance is checked independently by the plugin hub.
     """
-    if not _is_trusted_wasm_path(path) or not _PROVENANCE_MANIFEST.is_file():
-        return
+    if not _is_trusted_wasm_path(path):
+        return None
     try:
         manifest = json.loads(_PROVENANCE_MANIFEST.read_text(encoding="utf-8"))
-        artifacts = manifest.get("artifacts", {})
-    except (OSError, ValueError):
-        return  # unreadable manifest — do not block on a broken dev artifact
+    except (OSError, ValueError, UnicodeError) as exc:
+        raise PluginSecurityError(
+            str(path), f"bundled Wasm provenance manifest is missing or invalid: {exc}"
+        ) from exc
+    if not isinstance(manifest, dict) or manifest.get("schema_version") != 1:
+        raise PluginSecurityError(str(path), "bundled Wasm provenance has invalid schema")
+    artifacts = manifest.get("artifacts")
     if not isinstance(artifacts, dict):
-        return
-    name = Path(path).name
+        raise PluginSecurityError(str(path), "bundled Wasm provenance lacks artifacts map")
+    name = path.name
     expected = artifacts.get(name)
-    problem: str | None = None
-    if expected is None:
-        problem = f"bundled Wasm {name!r} is not listed in the provenance manifest"
-    else:
-        digest = hashlib.sha256(Path(path).read_bytes()).hexdigest()
-        if digest != expected.get("sha256"):
-            problem = f"bundled Wasm {name!r} does not match its provenance SHA-256"
-    if problem is None:
-        return
-    if os.environ.get(_ENFORCE_PROVENANCE_ENV) == "1":
-        raise PluginSecurityError(str(path), problem)
-    logger.warning(
-        "Wasm provenance check: %s (set %s=1 to make this a hard failure).",
-        problem,
-        _ENFORCE_PROVENANCE_ENV,
-    )
+    if not isinstance(expected, dict):
+        raise PluginSecurityError(
+            str(path), f"bundled Wasm {name!r} is not listed in the provenance manifest"
+        )
+    digest = expected.get("sha256")
+    size = expected.get("size_bytes")
+    if (not isinstance(digest, str) or len(digest) != 64
+            or any(c not in "0123456789abcdef" for c in digest)
+            or not isinstance(size, int) or isinstance(size, bool) or size < 0):
+        raise PluginSecurityError(str(path), f"bundled Wasm {name!r} has invalid provenance metadata")
+    try:
+        payload = path.read_bytes()
+    except OSError as exc:
+        raise PluginSecurityError(str(path), f"bundled Wasm cannot be read: {exc}") from exc
+    if len(payload) != size or hashlib.sha256(payload).hexdigest() != digest:
+        raise PluginSecurityError(str(path), f"bundled Wasm {name!r} does not match provenance SHA-256/size")
+    return payload
 
 
 def _check_rust_component_load_policy(path: Path) -> bytes | None:
@@ -1070,7 +1070,7 @@ def load_plugin(
     _unlimited = fuel == -1
     path = Path(wasm_path)
     trusted = trusted or _is_trusted_wasm_path(path)
-    _verify_builtin_provenance(path)                     # #89 first-party provenance (optional)
+    verified_component_bytes = _verify_builtin_provenance(path)  # #89, always fail closed
     _check_wasmtime_version(path, trusted=trusted)       # fast sync blocklist
     _check_osv_cache_or_block(path, trusted=trusted)     # fast sync OSV gate
     _maybe_start_osv_check()                             # async refresh
@@ -1078,6 +1078,11 @@ def load_plugin(
     if not path.exists():
         raise PluginLoadError(str(path), "file not found")
     approved_component_bytes = _check_rust_component_load_policy(path)
+    if (verified_component_bytes is not None and approved_component_bytes is not None
+            and verified_component_bytes != approved_component_bytes):
+        raise PluginSecurityError(str(path), "bundled Wasm changed between provenance and Rust approval")
+    component_bytes = (approved_component_bytes
+                       if approved_component_bytes is not None else verified_component_bytes)
 
     try:
         cfg = Config()
@@ -1116,8 +1121,8 @@ def load_plugin(
 
         # Wasmtime Component(engine, bytes) compiles the exact buffer approved
         # by Rust. Component.from_file would reopen a potentially replaced path.
-        component = (Component(engine, approved_component_bytes)
-                     if approved_component_bytes is not None
+        component = (Component(engine, component_bytes)
+                     if component_bytes is not None
                      else Component.from_file(engine, str(path)))
 
         linker = Linker(engine)
