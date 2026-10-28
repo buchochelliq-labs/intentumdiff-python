@@ -153,12 +153,13 @@ def write_reviewed_wasm_manifest(
     wasm_dir: Path,
     parser_pins: dict[str, str],
     renderer_pins: dict[str, str],
+    sources: dict[str, dict],
 ) -> Path:
-    """Attest the exact registry-approved staged set, or refuse packaging.
+    """Attest registry-approved Wasm bytes AND the CI artifact that supplied each.
 
-    Deriving a SHA-256 manifest from arbitrary local bytes is NOT evidence that
-    those bytes came from a reviewed parser/renderer build. The immutable registry
-    checksums are an independent input, verified before we write the manifest.
+    A locally generated digest is never accepted as an independent source pin.
+    Every staged component needs an immutable registry checksum, source commit,
+    CI artifact identity and exact downloaded archive checksum before packaging.
     """
     script_dir = str(Path(__file__).resolve().parent)
     if script_dir not in sys.path:
@@ -171,18 +172,51 @@ def write_reviewed_wasm_manifest(
     expected = {**parser_pins, **renderer_pins}
     if not expected:
         raise ValueError("no immutable Wasm pins available for provenance")
-    manifest = generate_manifest(wasm_dir, built_from_commit=REGISTRY_REF)
+    manifest = generate_manifest(wasm_dir)
     staged = manifest["artifacts"]
     extra = set(staged) - set(expected)
     missing = set(expected) - set(staged)
     if extra or missing:
         raise ValueError(
-            f"staged Wasm inventory differs from reviewed registry: "
+            "staged Wasm inventory differs from reviewed registry: "
             f"extra={sorted(extra)}, missing={sorted(missing)}"
+        )
+    if set(sources) != set(expected):
+        raise ValueError(
+            "component source inventory differs from reviewed registry: "
+            f"extra={sorted(set(sources) - set(expected))}, "
+            f"missing={sorted(set(expected) - set(sources))}"
         )
     for name, pin in expected.items():
         if staged[name]["sha256"] != pin:
             raise ValueError(f"staged Wasm {name} does not match reviewed registry SHA-256")
+        source = sources[name]
+        if not isinstance(source, dict) or set(source) != {
+            "repository", "commit", "artifact", "artifact_id",
+            "artifact_archive_sha256", "abi_target",
+        }:
+            raise ValueError(f"staged Wasm {name} has incomplete source attribution")
+        repo, commit = source["repository"], source["commit"]
+        if (not isinstance(repo, str)
+                or not repo.startswith("https://github.com/buchochelliq-labs/intentumdiff-")
+                or not isinstance(commit, str) or len(commit) != 40
+                or any(c not in "0123456789abcdef" for c in commit)):
+            raise ValueError(f"staged Wasm {name} lacks immutable source repository/commit")
+        archive_sha = source["artifact_archive_sha256"]
+        if (not isinstance(archive_sha, str) or len(archive_sha) != 64
+                or any(c not in "0123456789abcdef" for c in archive_sha)
+                or not isinstance(source["artifact_id"], int)
+                or isinstance(source["artifact_id"], bool)
+                or source["artifact_id"] < 1
+                or source["artifact"] not in ("parser-wasm", "renderer-components")
+                or (source["artifact"] == "renderer-components") != (name in renderer_pins)
+                or (source["abi_target"] is not None
+                    and not isinstance(source["abi_target"], str))):
+            raise ValueError(f"staged Wasm {name} has invalid CI artifact attribution")
+        staged[name]["source"] = dict(source)
+    # This is the immutable *registry* commit, never mislabelled as a component
+    # build commit; each component records its own actual source commit above.
+    manifest["registry_commit"] = REGISTRY_REF
     verify_manifest(wasm_dir, manifest)
     output = wasm_dir / MANIFEST_FILENAME
     write_manifest(manifest, output)
