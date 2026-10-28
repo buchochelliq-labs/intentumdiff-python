@@ -59,6 +59,98 @@ def check_expectations(case, diff):
     assert diff['has_semantic_changes'] and not diff['is_style_only'], (case['id'], diff)
 
 
+
+def full_corpus_cases() -> list[dict]:
+    """Require every packaged corpus language and independently meaningful source edits.
+
+    This is not a Python semantic oracle: the edits come from corpus source and
+    each native/Python result must pass source-derived expectations separately.
+    """
+    from tests.unit.test_corpus_invariants import _mutations
+
+    root = Path(__file__).resolve().parents[1] / "tests/fixtures/corpus"
+    assert root.is_dir(), "74-language corpus directory is missing"
+    directories = sorted(p for p in root.iterdir() if p.is_dir())
+    assert len(directories) == 74, f"expected 74 corpus languages, found {len(directories)}"
+    cases = []
+    for language_dir in directories:
+        manifest_path = language_dir / "playground.expect.json"
+        assert manifest_path.is_file(), f"missing {manifest_path}"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        language = manifest["language"]
+        assert language == language_dir.name, (language_dir, language)
+        assert manifest.get("filename"), manifest_path
+        assert not manifest.get("mutation_xfail"), (
+            f"{language}: no 0.0.2 content-mutation exemptions permitted"
+        )
+        sources = [
+            path for path in language_dir.glob("playground.*")
+            if not path.name.endswith(".expect.json")
+        ]
+        assert len(sources) == 1, f"expected exactly one playground source for {language}"
+        source = sources[0].read_text(encoding="utf-8")
+        assert source.strip(), f"empty corpus source for {language}"
+        cases.append({
+            "id": f"corpus-{language}-addition",
+            "old": "",
+            "new": source,
+            "filename": manifest["filename"],
+            "mode": "sources",
+            "corpus_language": language,
+            "forbid_ignored_style": True,
+        })
+        for mutation_name, edited in _mutations(source, manifest):
+            assert edited != source, (language, mutation_name)
+            cases.append({
+                "id": f"corpus-{language}-{mutation_name}",
+                "old": source,
+                "new": edited,
+                "filename": manifest["filename"],
+                "mode": "sources",
+                "corpus_language": language,
+            })
+    assert {case["corpus_language"] for case in cases} == {
+        directory.name for directory in directories
+    }
+    return cases
+
+
+def check_source_spans(case: dict, diff: dict) -> None:
+    """Check every exposed changed-tree span against actual UTF-8 source bytes.
+
+    Equality across Rust and Python alone is insufficient: both could agree on
+    the same invalid offsets. This catches non-source-grounded synthetic nodes.
+    """
+    for change in diff["changes"]:
+        for side, source_key in (("old_node", "old"), ("new_node", "new")):
+            node = change.get(side)
+            if node is None:
+                continue
+            lines = case[source_key].splitlines(keepends=True)
+            stack = [node]
+            while stack:
+                current = stack.pop()
+                position = current["position"]
+                start = (position["start_line"], position["start_col"])
+                end = (position["end_line"], position["end_col"])
+                assert start <= end, (case["id"], side, current.get("label"), position)
+                for line_number, column in (start, end):
+                    assert type(line_number) is int and type(column) is int, (
+                        case["id"], side, position
+                    )
+                    assert 0 <= line_number <= len(lines), (
+                        case["id"], side, position, len(lines)
+                    )
+                    limit = (
+                        len(lines[line_number].encode("utf-8"))
+                        if line_number < len(lines) else 0
+                    )
+                    assert 0 <= column <= limit, (
+                        case["id"], side, current.get("label"), position,
+                        f"line {line_number} max UTF-8 byte column {limit}"
+                    )
+                stack.extend(current.get("children") or [])
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--core-dir', type=Path, required=True)
@@ -71,6 +163,9 @@ def main():
     cases = [dict(c, filename='doc.md', mode='text') for c in cases]
     schema = json.loads((core / 'tests/corpus/schema_custom_identity.json').read_text(encoding='utf-8'))
     cases.append(dict(schema, id='schema-custom-identity', mode='sources'))
+    corpus_cases = full_corpus_cases()
+    cases.extend(corpus_cases)
+    assert len({case['corpus_language'] for case in corpus_cases}) == 74
     records = []
     original = Path.cwd()
     with tempfile.TemporaryDirectory() as directory:
@@ -88,6 +183,11 @@ def main():
                     python = (review_text(case['old'], case['new'], filename=case['filename']) if case['mode'] == 'text' else differ.diff_strings(case['old'], case['new'], case['filename'])).model_dump(mode='json')
                     check_expectations(case, rust)
                     check_expectations(case, python)
+                    if 'corpus_language' in case:
+                        for origin, output in (('native', rust), ('python', python)):
+                            assert output['language'] == case['corpus_language'], (
+                                case['id'], origin, output['language'])
+                            check_source_spans(case, output)
                     assert projection(rust) == projection(python), (case['id'], projection(rust), projection(python))
                     records.append(dict(case, rust=rust, python=python))
         finally:
