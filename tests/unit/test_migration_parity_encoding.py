@@ -49,6 +49,9 @@ def test_parity_harness_uses_utf8_for_files_and_native_transport(tmp_path, monke
     monkeypatch.setattr(Path, 'write_text', windows_locale_write)
     monkeypatch.setattr(harness['subprocess'], 'run', native_transport)
     harness['main'].__globals__['SemanticDiffer'] = Differ
+    # Keep this UTF-8 transport regression scoped to its two synthetic cases;
+    # the 74-language integration suite has its own dedicated acceptance gate.
+    harness['main'].__globals__['full_corpus_cases'] = lambda: []
     monkeypatch.setattr('sys.argv', [str(script), '--core-dir', str(core), '--native', 'probe',
                                     '--wasm-dir', str(tmp_path), '--evidence', str(evidence)])
     harness['main']()
