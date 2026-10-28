@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import runpy
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -67,3 +68,33 @@ def test_unavailable_component_never_certifies_a_language(tmp_path, monkeypatch,
     with pytest.raises(AssertionError, match="semantic parser unavailable"):
         _checker()(CASE, system="Windows", machine="ARM64", wasm_dir=tmp_path)
     assert calls and calls[0][0] == "parser_availability"
+
+
+def test_native_probe_reports_case_and_panic(monkeypatch):
+    """A Rust exit 101 must identify the corpus case and include panic stderr."""
+    captured = {}
+
+    def failed_probe(command, **kwargs):
+        captured.update(kwargs)
+        return subprocess.CompletedProcess(command, 101, "", "thread panicked: function too large")
+
+    monkeypatch.setattr(subprocess, "run", failed_probe)
+    native_probe = runpy.run_path(str(SCRIPT))["run_native_probe"]
+    with pytest.raises(RuntimeError) as error:
+        native_probe(Path("migration_probe.exe"), {"handler": "native_selection_diff"},
+                     "corpus-powershell-addition")
+    assert "corpus-powershell-addition" in str(error.value)
+    assert "exited 101" in str(error.value)
+    assert "function too large" in str(error.value)
+    assert captured["env"]["RUST_BACKTRACE"] == "1"
+
+
+def test_native_probe_preserves_valid_json_output(monkeypatch):
+    def successful_probe(command, **kwargs):
+        return subprocess.CompletedProcess(command, 0, '{"diff":{"changes":[]}}', "")
+
+    monkeypatch.setattr(subprocess, "run", successful_probe)
+    native_probe = runpy.run_path(str(SCRIPT))["run_native_probe"]
+    result = native_probe(Path("migration_probe.exe"), {"handler": "native_selection_diff"},
+                          "corpus-powershell-addition")
+    assert result == {"diff": {"changes": []}}
