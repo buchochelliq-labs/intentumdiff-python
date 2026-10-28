@@ -207,7 +207,7 @@ def check_available_corpus_parser(case: dict, *, system: str | None = None, mach
     )
     assert status["reason"] is None and status["unavailable"] is None, (
         case["id"], f"semantic parser unavailable on {system}/{machine}", status,
-        "0.0.2 release blocker: https://github.com/buchochelliq-labs/intentumdiff-python/issues/42",
+        "0.0.2 parser blocker: https://github.com/buchochelliq-labs/intentumdiff-powershell-parser/issues/4; Rust host contract: https://github.com/buchochelliq-labs/intentumdiff-core/issues/183",
     )
 
 
