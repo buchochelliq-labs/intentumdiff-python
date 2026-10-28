@@ -30,15 +30,31 @@ def _provision():
     return runpy.run_path(str(SCRIPT))["write_reviewed_wasm_manifest"]
 
 
+def _sources(*names: str) -> dict[str, dict]:
+    return {
+        name: {
+            "repository": "https://github.com/buchochelliq-labs/intentumdiff-python-parser",
+            "commit": "a" * 40,
+            "artifact": "renderer-components" if name.endswith("_renderer.wasm") else "parser-wasm",
+            "artifact_id": 123,
+            "artifact_archive_sha256": "b" * 64,
+            "abi_target": None if name.endswith("_renderer.wasm") else "1.0.0",
+        }
+        for name in names
+    }
+
+
 def test_manifest_requires_independently_reviewed_parser_and_renderer_pins(tmp_path: Path):
     parser = _write(tmp_path, {"python_parser.wasm": b"parser"})
     renderer = _write(tmp_path, {"html_renderer.wasm": b"renderer"})
-    path = _provision()(tmp_path, parser, renderer)
+    path = _provision()(tmp_path, parser, renderer, _sources(*parser, *renderer))
     manifest = json.loads(path.read_text(encoding="utf-8"))
     assert set(manifest["artifacts"]) == set(parser) | set(renderer)
     assert manifest["artifacts"]["python_parser.wasm"]["sha256"] == parser["python_parser.wasm"]
     assert manifest["artifacts"]["html_renderer.wasm"]["sha256"] == renderer["html_renderer.wasm"]
-    assert manifest["built_from_commit"]  # registry reference is immutable
+    assert manifest["built_from_commit"] is None
+    assert len(manifest["registry_commit"]) == 40
+    assert manifest["artifacts"]["python_parser.wasm"]["source"]["commit"] == "a" * 40
 
 
 @pytest.mark.parametrize(
@@ -69,5 +85,29 @@ def test_manifest_cannot_attest_unreviewed_or_incomplete_staging(
         renderer.clear()
 
     with pytest.raises(ValueError, match=message):
-        _provision()(tmp_path, parser, renderer)
+        _provision()(tmp_path, parser, renderer, _sources(*parser, *renderer))
+    assert not (tmp_path / "wasm_provenance.json").exists()
+
+@pytest.mark.parametrize(
+    ("defect", "message"),
+    [
+        ("missing_source", "source inventory differs"),
+        ("invalid_commit", "lacks immutable source"),
+        ("missing_archive", "incomplete source attribution"),
+    ],
+)
+def test_incomplete_source_attribution_cannot_create_release_manifest(
+    tmp_path: Path, defect: str, message: str
+):
+    parser = _write(tmp_path, {"python_parser.wasm": b"parser"})
+    renderer = _write(tmp_path, {"html_renderer.wasm": b"renderer"})
+    sources = _sources(*parser, *renderer)
+    if defect == "missing_source":
+        del sources["python_parser.wasm"]
+    elif defect == "invalid_commit":
+        sources["python_parser.wasm"]["commit"] = "main"
+    elif defect == "missing_archive":
+        del sources["html_renderer.wasm"]["artifact_archive_sha256"]
+    with pytest.raises(ValueError, match=message):
+        _provision()(tmp_path, parser, renderer, sources)
     assert not (tmp_path / "wasm_provenance.json").exists()
