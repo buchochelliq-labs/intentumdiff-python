@@ -658,7 +658,7 @@ def try_rust_markdown_section_review(
     old_source: str,
     new_source: str,
 ) -> dict[str, object] | None:
-    """Run the Rust markdown section review (moves + heading renames); None -> Python.
+    """Run Rust markdown section review; only explicit Rust declines return None.
 
     Engine-side port of the markdown post-presentation rules (issue #36): section
     identity by content hash, LIS insertion-shift discrimination for moves, and
@@ -668,7 +668,7 @@ def try_rust_markdown_section_review(
         backend = _load_backend()
         review_fn = getattr(backend, "markdown_section_review_json", None)
         if not callable(review_fn):
-            return None
+            raise RuntimeError("required Rust markdown section review handler is unavailable")
         data = json.loads(review_fn(old_source, new_source))
         if not isinstance(data, dict) or not data.get("used"):
             return None
@@ -734,13 +734,13 @@ def try_rust_finalize_review(
     """Route the per-stage draft finalization through the Rust core (issue #57).
 
     Runs the SAME refine+finalize pipeline as the certified batch from the provided
-    semantic trees. None -> caller stays on the Python transitional path.
+    semantic trees. Only an explicit Rust tree-size guard may decline.
     """
     try:
         backend = _load_backend()
         finalize_fn = getattr(backend, "finalize_review_json", None)
         if not callable(finalize_fn):
-            return None
+            raise RuntimeError("required Rust finalize_review_json handler is unavailable")
         config_json = json.dumps(
             {
                 "min_height": config.min_height,
