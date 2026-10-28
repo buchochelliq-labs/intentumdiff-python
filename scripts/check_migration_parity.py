@@ -142,6 +142,7 @@ def full_corpus_cases() -> list[dict]:
             "mode": "sources",
             "corpus_language": language,
             "forbid_ignored_style": True,
+            "required_visible_tokens": list(manifest.get("visible_tokens") or []),
         })
         for mutation_name, edited in corpus_mutations(source, manifest):
             assert edited != source, (language, mutation_name)
@@ -157,6 +158,34 @@ def full_corpus_cases() -> list[dict]:
         directory.name for directory in directories
     }
     return cases
+
+
+def check_visible_corpus_tokens(case: dict, diff: dict) -> None:
+    """Validate manifest-ratcheted semantic content independently for each API.
+
+    Agreement alone can hide shared parser regressions. Inspect the entire
+    changed subtree and require all previously visible source tokens.
+    """
+    expected = case.get("required_visible_tokens")
+    if expected is None:
+        return
+    labels: list[str] = []
+    for change in diff["changes"]:
+        root = change.get("new_node")
+        if root is None:
+            continue
+        stack = [root]
+        while stack:
+            node = stack.pop()
+            if node.get("label"):
+                labels.append(node["label"])
+            stack.extend(node.get("children") or [])
+    visible = "\\n".join(labels)
+    missing = [token for token in expected if token not in visible]
+    assert not missing, (
+        case["id"], "missing source-ratcheted semantic tokens", missing,
+        "labels seen", visible[:2000],
+    )
 
 
 def check_source_spans(case: dict, diff: dict) -> None:
@@ -286,6 +315,7 @@ def main():
                                 case['id'], origin, output['language'])
                             assert output['changes'], (case['id'], origin, 'zero changes')
                             check_source_spans(case, output)
+                            check_visible_corpus_tokens(case, output)
                             check_vbnet_declaration_extent(case, output)
                     assert projection(rust) == projection(python), (case['id'], projection(rust), projection(python))
                     records.append(dict(case, rust=rust, python=python))
