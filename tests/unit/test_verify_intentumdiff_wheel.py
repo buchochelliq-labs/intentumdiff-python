@@ -104,9 +104,44 @@ def test_verify_wheel_rejects_installation_path_aliases(
 ) -> None:
     wheel = _write_wheel(
         tmp_path / "intentumdiff_python-0.0.1-cp312-cp312-win_amd64.whl",
-        [*_valid_names(), alias],
+        _valid_names(),
     )
+    # ZipInfo sanitizes Windows separators during construction. Preserve the
+    # original central-directory spelling to ensure this actually exercises
+    # raw backslash entries on Windows, rather than a normalized safe path.
+    with zipfile.ZipFile(wheel, "a") as zf:
+        raw_member = zipfile.ZipInfo(alias)
+        raw_member.filename = alias
+        zf.writestr(raw_member, "")
+    with zipfile.ZipFile(wheel) as zf:
+        assert alias in [member.orig_filename for member in zf.infolist()]
     with pytest.raises(ValueError, match=message):
+        verify_wheel(wheel)
+
+
+def test_verify_wheel_rejects_raw_backslash_even_after_windows_normalization(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    raw_name = "intentumdiff/plugins\\\\config.py"
+    wheel = _write_wheel(
+        tmp_path / "intentumdiff_python-0.0.1-cp312-cp312-win_amd64.whl",
+        _valid_names(),
+    )
+    with zipfile.ZipFile(wheel, "a") as zf:
+        raw_member = zipfile.ZipInfo(raw_name)
+        raw_member.filename = raw_name
+        zf.writestr(raw_member, "")
+    # Simulate Windows ZipInfo._sanitize_filename on non-Windows CI.
+    original_sanitize = zipfile._sanitize_filename
+    monkeypatch.setattr(
+        zipfile,
+        "_sanitize_filename",
+        lambda filename: original_sanitize(filename).replace("\\\\", "/"),
+    )
+    with zipfile.ZipFile(wheel) as zf:
+        member = next(member for member in zf.infolist() if member.orig_filename == raw_name)
+        assert member.filename == "intentumdiff/plugins/config.py"
+    with pytest.raises(ValueError, match="noncanonical archive path"):
         verify_wheel(wheel)
 
 
