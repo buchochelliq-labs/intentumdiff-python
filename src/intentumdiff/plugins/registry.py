@@ -27,6 +27,7 @@ not handled by the allowed list.
 
 from __future__ import annotations
 
+import hashlib
 import importlib.metadata
 import logging
 import os
@@ -68,17 +69,54 @@ PhaseRecorder = Callable[[str, float], None]
 # installs safe even when stale entry-point metadata still lists the plugin.
 _DISABLED_BUILTIN_PARSER_ENTRYPOINTS: frozenset[str] = frozenset({"freebasic"})
 
-def arch_incompatible_reason(entry_point_name: str) -> str | None:
-    """Ask the shared Rust policy before compiling a discovered component."""
+def arch_incompatible_reason(
+    entry_point_name: str, wasm_path: str | Path | None = None,
+) -> str | None:
+    """Delegate architecture policy to Rust using the actual staged Wasm digest.
+
+    Python only resolves and hashes host files. With no concrete component, the
+    legacy Rust API must remain fail-closed for unverified PowerShell on ARM64.
+    """
     from intentumdiff.rust_core import _c_abi_call
-    return _c_abi_call("parser_availability", entry_point_name, "", platform.system(), platform.machine())["reason"]
+    system, machine = platform.system(), platform.machine()
+    legacy = _c_abi_call("parser_availability", entry_point_name, "", system, machine)
+    reason = legacy["reason"]
+    if reason is None or wasm_path is None:
+        return reason
+    try:
+        digest = hashlib.sha256(Path(wasm_path).read_bytes()).hexdigest()
+    except OSError:
+        return reason  # Unreadable bytes cannot lift a Rust-owned restriction.
+    checked = _c_abi_call(
+        "parser_availability_with_digest", entry_point_name, "", system, machine, digest,
+    )
+    if not isinstance(checked, dict) or "reason" not in checked:
+        raise PluginLoadError(str(wasm_path), "malformed Rust digest availability response")
+    return checked["reason"]
 
 
 def unavailable_parser_for(filename: str) -> tuple[str, str] | None:
-    """Explain a platform exclusion at point of use; discovery stays silent."""
+    """Explain a Rust-owned platform exclusion only when its bytes are excluded."""
     from intentumdiff.rust_core import _c_abi_call
-    result = _c_abi_call("parser_availability", "", filename, platform.system(), platform.machine())["unavailable"]
-    return tuple(result) if result is not None else None
+    system, machine = platform.system(), platform.machine()
+    legacy = _c_abi_call("parser_availability", "", filename, system, machine)["unavailable"]
+    if legacy is None:
+        return None
+    # The built-in path is transport metadata, not a Python semantic policy.
+    # A third-party parser may have a different path; never presume it verified.
+    name = legacy[0]
+    staged = _wasm_dir() / f"{name}_parser.wasm"
+    try:
+        digest = hashlib.sha256(staged.read_bytes()).hexdigest()
+    except OSError:
+        return tuple(legacy)
+    checked = _c_abi_call(
+        "parser_availability_with_digest", "", filename, system, machine, digest,
+    )
+    if not isinstance(checked, dict) or "unavailable" not in checked:
+        raise PluginLoadError(str(staged), "malformed Rust digest availability response")
+    unavailable = checked["unavailable"]
+    return tuple(unavailable) if unavailable is not None else None
 
 
 # Normalised names of first-party packages whose entry-point callables are
@@ -877,17 +915,23 @@ def _discover_parser_catalog(
                 continue
             incompatible = arch_incompatible_reason(ep.name)
             if incompatible is not None:
-                # DEBUG, not warning. Discovery runs on the first diff of ANY file, so warning
-                # here told someone diffing Python that PowerShell was unavailable - noise
-                # beside a correct result, which is precisely the 0.0.1 failure mode.
-                # The user is told at the point of USE instead, where it is relevant: see
-                # unavailable_parser_for() and PluginNotFoundError below.
-                logger.debug(
-                    "Parser %r is unavailable on %s/%s: %s",
-                    ep.name, platform.system(), platform.machine(), incompatible,
-                )
-                continue
-            wasm_path = _wasm_path_from_ep(ep)
+                # A trusted staged replacement may now be compatible. Resolve
+                # its host path without compiling Wasm, then ask the same Rust
+                # policy again using its real SHA-256. On any error retain the
+                # original fail-closed exclusion and keep discovery silent.
+                try:
+                    wasm_path = _wasm_path_from_ep(ep)
+                    incompatible = arch_incompatible_reason(ep.name, wasm_path)
+                except Exception:
+                    pass
+                if incompatible is not None:
+                    logger.debug(
+                        "Parser %r is unavailable on %s/%s: %s",
+                        ep.name, platform.system(), platform.machine(), incompatible,
+                    )
+                    continue
+            else:
+                wasm_path = _wasm_path_from_ep(ep)
             resolved = str(Path(wasm_path).resolve())
             existing = by_path.get(resolved)
             if existing is not None:
@@ -939,13 +983,13 @@ def _add_first_party_parser_entrypoint_fallbacks(
         # entries directly from builtin callables, bypassing that path entirely - which is
         # exactly how powershell kept reaching the catalog on Windows/aarch64 while the gate
         # itself correctly reported "excluded". Two ways in, one of them guarded, is no guard.
-        if arch_incompatible_reason(name) is not None:
-            logger.debug("Fallback skipped for %r: unavailable on this platform", name)
-            continue
         entry_callable = getattr(builtins, callable_name, None)
         if entry_callable is None:
             continue
         wasm_path = entry_callable()
+        if arch_incompatible_reason(name, wasm_path) is not None:
+            logger.debug("Fallback skipped for %r: unverified staged component on this platform", name)
+            continue
         if not Path(wasm_path).exists():
             continue
         resolved = str(Path(wasm_path).resolve())
