@@ -347,6 +347,7 @@ def stage_wasm_from_artifacts(token: str, org: str = "buchochelliq-labs") -> int
     print(f"renderer bundle: {renderer_repo}@{renderer_ref} ({len(renderer_pins)} SHA-256 pins)")
     pins: dict[str, str] = {}
     refs: dict[str, str] = {}
+    provenance_sources: dict[str, dict] = {}
     for plugin, entry in (registry.get("plugins") or {}).items():
         pins.update(entry.get("wasm_checksums") or {})
         if entry.get("ref"):
@@ -378,6 +379,10 @@ def stage_wasm_from_artifacts(token: str, org: str = "buchochelliq-labs") -> int
             # at a different build, and the checksum gate then fires for the wrong
             # reason, reporting "the component changed" when only the commit did.
             ref = refs.get(name)
+            if (not isinstance(ref, str) or len(ref) != 40
+                    or any(c not in "0123456789abcdef" for c in ref)):
+                missing.append((name, "registry has no immutable parser source commit"))
+                continue
             wr = _successful_artifact_runs(get, api, org, name, ref)
             if not wr:
                 missing.append((name, f"no successful run at pinned ref {ref[:8]}" if ref
@@ -424,6 +429,22 @@ def stage_wasm_from_artifacts(token: str, org: str = "buchochelliq-labs") -> int
                             missing.append((name, f"{out} CHECKSUM MISMATCH (registry pins "
                                                   f"{pinned[:16]}..., artifact is {digest[:16]}...)"))
                             continue
+                        if out in provenance_sources:
+                            missing.append((name, f"duplicate staged component {out}"))
+                            continue
+                        metadata = (registry.get("plugins") or {}).get(name, {})
+                        abi_target = metadata.get("abi_target")
+                        if not isinstance(abi_target, str) or not abi_target:
+                            missing.append((name, f"{out} has no registry WIT/ABI target"))
+                            continue
+                        provenance_sources[out] = {
+                            "repository": f"https://github.com/{org}/{name}",
+                            "commit": ref,
+                            "artifact": "parser-wasm",
+                            "artifact_id": art["id"],
+                            "artifact_archive_sha256": _hashlib.sha256(blob).hexdigest(),
+                            "abi_target": abi_target,
+                        }
                         (WASM_DEST / out).write_bytes(payload)
                         staged += 1
         except urllib.error.HTTPError as exc:
@@ -453,6 +474,14 @@ def stage_wasm_from_artifacts(token: str, org: str = "buchochelliq-labs") -> int
                 missing.append((renderer_repo, str(exc)))
             else:
                 for name, payload in checked.items():
+                    provenance_sources[name] = {
+                        "repository": f"https://github.com/{org}/{renderer_repo}",
+                        "commit": renderer_ref,
+                        "artifact": renderer_artifact,
+                        "artifact_id": art["id"],
+                        "artifact_archive_sha256": _hashlib.sha256(blob).hexdigest(),
+                        "abi_target": None,
+                    }
                     (WASM_DEST / name).write_bytes(payload)
                     staged += 1
                 print(f"  verified and staged {len(checked)}/{len(REQUIRED_RENDERER_FILES)} renderer components")
@@ -462,15 +491,15 @@ def stage_wasm_from_artifacts(token: str, org: str = "buchochelliq-labs") -> int
     # Never invent source attestation by hashing whatever was staged. Verify the
     # exact reviewed 69-parser/four-renderer registry inventory before generating
     # a shipping manifest. Any provenance failure aborts provisioning.
-    manifest_path = write_reviewed_wasm_manifest(WASM_DEST, pins, renderer_pins)
-    print(f"wrote {manifest_path.name} for {staged} registry-approved component(s)")
-
-    print(f"staged {staged} components into {WASM_DEST}")
     if missing:
         print(f"MISSING ({len(missing)}):")
         for m in missing:
             print("  ", m)
-    return len(missing)
+        return len(missing)
+    manifest_path = write_reviewed_wasm_manifest(WASM_DEST, pins, renderer_pins, provenance_sources)
+    print(f"wrote {manifest_path.name} for {staged} registry-approved component(s)")
+    print(f"staged {staged} components into {WASM_DEST}")
+    return 0
 
 
 def main() -> None:
