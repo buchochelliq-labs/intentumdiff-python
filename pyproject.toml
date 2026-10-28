@@ -29,7 +29,10 @@ dependencies = [
     "rich-click>=1.8",
     "pygments>=2.17",
     "pyyaml>=6.0",
-    "wasmtime>=47.0.1",
+    # Exact Python Wasmtime 50.0.1 native wheel (including win_arm64). Unlike the
+    # Rust/Cargo 48.0.7 patch line, PyPI has no Python 48.0.7 binding.
+    # Avoid the pre-patch ARM64 sandbox escape / component stream vulnerabilities.
+    "wasmtime==50.0.1",
     "defusedxml>=0.7",
     "watchdog>=3.0",
 ]

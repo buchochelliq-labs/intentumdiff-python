@@ -57,8 +57,16 @@ _MAX_TELEMETRY_RECORDS = 128
 # fast offline check.  For a live OSV scan run: ``intentumdiff security-check``.
 _VULNERABLE_WASMTIME_VERSIONS: frozenset[str] = frozenset({
     "44.0.0",   # CVE-2026-44216 / GHSA-p8xm-42r7-89xg — host panic via memory64
+    # GHSA-mghf-wjfp-p5xm — aarch64 br_table sandbox escape (critical).
+    # GHSA-9pvw-hwfg-92h5 — host panic through component streams/futures.
+    # Pre-patch Python bindings listed below contain affected native Wasmtime.
+    "45.0.0",
+    "46.0.1",
+    "47.0.1",
+    "48.0.0",
+    "49.0.0",
 })
-_WASMTIME_ADVISORY = "CVE-2026-44216 / GHSA-p8xm-42r7-89xg"
+_WASMTIME_ADVISORY = "GHSA-p8xm-42r7-89xg / GHSA-mghf-wjfp-p5xm / GHSA-9pvw-hwfg-92h5"
 _WASMTIME_ADVISORY_URL = (
     "https://github.com/bytecodealliance/wasmtime/security/advisories/"
     "GHSA-p8xm-42r7-89xg"
@@ -167,11 +175,12 @@ def _check_wasmtime_version(
     Wasm module to panic the host process by allocating an extremely large
     WebAssembly table under the default on-demand allocator with memory64.
 
-    The normal dependency path now requires a fixed Python binding
-    (wasmtime>=45.0).  This offline runtime gate remains as defense-in-depth
-    for stale or manually pinned environments.
+    The release-candidate Python dependency pins wasmtime==50.0.1, the
+    available Python binding after the 2026 ARM64 Wasmtime advisories.
+    This offline runtime gate remains as defense-in-depth for stale or
+    manually pinned environments. Rust Core independently pins 48.0.7.
 
-    See: https://github.com/bytecodealliance/wasmtime/security/advisories/GHSA-p8xm-42r7-89xg
+    See: https://github.com/bytecodealliance/wasmtime/security/advisories/GHSA-mghf-wjfp-p5xm
     """
     try:
         version = _importlib_metadata.version("wasmtime")
@@ -197,8 +206,8 @@ def _check_wasmtime_version(
     raise PluginSecurityError(
         "<wasmtime-version-check>",
         f"wasmtime=={version} is in the known-vulnerable blocklist "
-        f"({_WASMTIME_ADVISORY} — host-process panic on large table allocation "
-        f"with memory64). Upgrade wasmtime or set INTENTUMDIFF_ALLOW_VULNERABLE_WASMTIME=1 "
+        f"({_WASMTIME_ADVISORY} — unsafe host behaviour including aarch64 "
+        f"sandbox escape or process panic). Upgrade wasmtime or set INTENTUMDIFF_ALLOW_VULNERABLE_WASMTIME=1 "
         f"to override (not recommended). Run 'intentumdiff security-check' for a live "
         f"OSV scan. See: {_WASMTIME_ADVISORY_URL}",
     )
