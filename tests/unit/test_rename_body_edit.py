@@ -171,8 +171,8 @@ def test_extraction_declines_binding_or_definition_side_effects(differ, old, new
     ("1", "0x1", True), ("1_000", "1000", True),
     ("50", "75", False), ("9007199254740992", "9007199254740993", False),
 ])
-def test_overlapping_literal_evaluators_against_exact_integer_expectations(before, after, equivalent):
-    from intentumdiff.analysis.invariances import apply_invariances as python_apply
+def test_rust_literal_equivalence_against_exact_integer_expectations(before, after, equivalent):
+    # Rust alone owns canonical integer semantics. The old Python evaluator was deleted.
     from intentumdiff.rust_core import apply_invariances as rust_apply
     from intentumdiff.core.models import Change, NodePosition, SemanticNode
 
@@ -184,11 +184,10 @@ def test_overlapping_literal_evaluators_against_exact_integer_expectations(befor
     old, new = node(before), node(after)
     change = Change(change_type="MODIFICATION", old_node=old, new_node=new,
                     confidence=1, description="Integer edit")
-    for apply in (python_apply, rust_apply):
-        result = apply([change], old_tree=old, new_tree=new,
-                       old_source=before, new_source=after, language="python")
-        assert bool(result.changes) is not equivalent
-        assert bool(result.change_groups) is equivalent
+    result = rust_apply([change], old_tree=old, new_tree=new,
+                        old_source=before, new_source=after, language="python")
+    assert bool(result.changes) is not equivalent
+    assert bool(result.change_groups) is equivalent
 
 
 @pytest.mark.parametrize("extension,language,parameter", [
