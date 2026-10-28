@@ -128,6 +128,29 @@ def test_manifest_visible_tokens_are_carried_into_every_addition_case():
         assert case["required_visible_tokens"] == expected["visible_tokens"], case["id"]
 
 
+def test_corpus_spans_require_utf8_character_boundaries_and_exclude_newlines():
+    """In-bounds byte offsets may still point into a code point or CRLF."""
+    checker = runpy.run_path(str(SCRIPT))["check_source_spans"]
+    case = {"id": "corpus-utf8-addition", "old": "", "new": "é\r\n"}
+    node = _node("é", col=0)
+    # The single visible character occupies exactly bytes [0, 2].
+    node["position"] = {
+        "start_line": 0, "start_col": 0, "end_line": 0, "end_col": 2,
+    }
+    checker(case, _diff(node))
+
+    # Column 1 splits the two-byte UTF-8 encoding of 'é'.
+    node["position"]["start_col"] = 1
+    with pytest.raises(AssertionError, match="invalid UTF-8 byte boundary"):
+        checker(case, _diff(node))
+
+    # CRLF bytes are not part of the visible source line's column space.
+    node["position"]["start_col"] = 0
+    node["position"]["end_col"] = 3
+    with pytest.raises(AssertionError, match="invalid UTF-8 byte boundary"):
+        checker(case, _diff(node))
+
+
 def test_corpus_gate_rejects_known_platform_parser_exclusion():
     """The 74-language gate cannot certify generic text in lieu of PowerShell."""
     check = runpy.run_path(str(SCRIPT))["check_available_corpus_parser"]
