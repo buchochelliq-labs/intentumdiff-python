@@ -1,6 +1,7 @@
 """Regression guards for semantic subtree parity in the 0.0.2 release gate."""
 from __future__ import annotations
 
+import json
 import runpy
 from pathlib import Path
 
@@ -123,5 +124,5 @@ def test_manifest_visible_tokens_are_carried_into_every_addition_case():
     for case in additions:
         manifest = (Path(__file__).resolve().parents[1] / "fixtures" / "corpus"
                     / case["corpus_language"] / "playground.expect.json")
-        expected = __import__("json").loads(manifest.read_text(encoding="utf-8"))
+        expected = json.loads(manifest.read_text(encoding="utf-8"))
         assert case["required_visible_tokens"] == expected["visible_tokens"], case["id"]
