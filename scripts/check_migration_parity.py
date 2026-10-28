@@ -19,7 +19,13 @@ def projection(diff):
     def node(value):
         if value is None:
             return None
-        return {k: value[k] for k in ('node_type', 'label', 'position')}
+        # Preserve the full semantic subtree. Comparing only the change root
+        # can accept a native route that drops descendants or corrupts their
+        # positions while Python still returns the complete changed tree.
+        return {
+            **{k: value[k] for k in ('node_type', 'label', 'position')},
+            'children': [node(child) for child in (value.get('children') or [])],
+        }
     return {
         'changes': [{'change_type': c['change_type'], 'old_node': node(c.get('old_node')),
                      'new_node': node(c.get('new_node')), 'refactoring_kind': c.get('refactoring_kind')}
