@@ -768,14 +768,15 @@ def test_optional_rust_adapters_raise_on_engine_failure(
         ),
     ],
 )
-def test_optional_rust_adapters_still_decline_when_handler_is_absent(
+def test_required_rust_review_adapters_fail_closed_when_handler_is_absent(
     monkeypatch: Any,
     handler: str,
     call: Any,
 ) -> None:
     root = _node("root", "module", "module", line=0)
     monkeypatch.setattr(rust_core, "_load_backend", lambda: SimpleNamespace())
-    assert call(root) is None
+    with pytest.raises(RuntimeError, match="required Rust"):
+        call(root)
 
 
 
@@ -1470,14 +1471,7 @@ def test_rust_core_commit_json_adapter_rejects_byte_size_mismatch(
     assert "byte size mismatch" in attempt.fallback_reason
 
 
-@pytest.mark.skipif(
-    _RUST_ONLY,
-    reason=(
-        "Exercises the coarse token-level fallback (synthetic backend exposes no "
-        "finalize_review_json -> rust_finalize_declined), which the RUST_ONLY gate forbids."
-    ),
-)
-def test_semantic_differ_batch_fallback_continues_python_pipeline(monkeypatch: Any) -> None:
+def test_semantic_differ_batch_decline_requires_native_finalize_handler(monkeypatch: Any) -> None:
     payload = {
         "schema_version": 1,
         "status": "fallback",
@@ -1503,27 +1497,16 @@ def test_semantic_differ_batch_fallback_continues_python_pipeline(monkeypatch: A
     )
     monkeypatch.setattr(rust_core, "_load_backend", lambda: backend)
 
-    diff = SemanticDiffer(
-        DiffConfig(experimental_rust_core=True, profile_phases=True)
-    ).diff_strings(
-        "def total(items):\n    return sum(items)\n",
-        "def total(items):\n    return sum(item for item in items)\n",
-        "example.py",
-        language_hint="python",
-    )
-
-    assert diff.metadata["engine_owner"] == "rust"
-    assert diff.metadata["semantic_contract"] == "rust_source_fallback_v1"
-    assert diff.has_semantic_changes is True
-    phases = [phase["name"] for phase in diff.metadata["phase_timings"]["phases"]]
-    assert "rust_core_batch_execution" in phases
-    # Post-retirement degradation chain (issue #57 payoff, stage 4b): batch declined ->
-    # the per-stage Rust finalize is attempted next; this synthetic backend exposes no
-    # finalize_review_json, so the pipeline degrades to the Rust source fallback
-    # (the python stages are retired). A REAL backend serves at the finalize tier.
-    assert "rust_finalize_review" in phases
-    assert diff.metadata.get("fallback_reason") == "rust_finalize_declined"
-
+    # An absent required Rust finalizer cannot silently become a coarse source diff.
+    with pytest.raises(RuntimeError, match="required Rust finalize_review_json handler is unavailable"):
+        SemanticDiffer(
+            DiffConfig(experimental_rust_core=True, profile_phases=True)
+        ).diff_strings(
+            "def total(items):\n    return sum(items)\n",
+            "def total(items):\n    return sum(item for item in items)\n",
+            "example.py",
+            language_hint="python",
+        )
 
 def test_semantic_differ_skips_rust_batch_when_guardrails_may_apply(
     monkeypatch: Any,
