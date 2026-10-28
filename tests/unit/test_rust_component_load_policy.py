@@ -26,7 +26,9 @@ def test_loader_hashes_staged_bytes_only_after_rust_flags_a_component(tmp_path, 
         )
 
     monkeypatch.setattr(rust_core, "_c_abi_call", rust)
-    loader._check_rust_component_load_policy(wasm)
+    assert loader._check_rust_component_load_policy(wasm) == raw, (
+        "the Wasmtime host must compile the same bytes the Rust policy approved"
+    )
     assert [args[3] for args in calls] == ["", expected]
 
 
@@ -43,7 +45,7 @@ def test_loader_does_not_hash_unrestricted_components(tmp_path, monkeypatch):
     monkeypatch.setattr(rust_core, "_c_abi_call", lambda _operation, *args: {"reason": None})
     # No file was created: unrestricted components do not require a SHA-256
     # before the normal loader's later existence/provenance checks.
-    loader._check_rust_component_load_policy(wasm)
+    assert loader._check_rust_component_load_policy(wasm) is None
 
 
 def test_loader_rejects_malformed_rust_response_and_missing_bytes(tmp_path, monkeypatch):
