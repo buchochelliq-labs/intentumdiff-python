@@ -60,14 +60,39 @@ def check_expectations(case, diff):
 
 
 
+
+def corpus_mutations(source: str, manifest: dict) -> list[tuple[str, str]]:
+    """Deterministic source edits matching the existing corpus unit-test fixture.
+
+    This generates inputs only; all judgments remain independently source-based.
+    """
+    import re
+
+    mutations: list[tuple[str, str]] = []
+    bumped = re.sub(
+        r"(?<![\w.])(\d+)(?![\w.])", lambda match: str(int(match.group(1)) + 1),
+        source, count=1,
+    )
+    if bumped != source:
+        mutations.append(("bump_numeric_literal", bumped))
+    for quote in ("'", '"'):
+        pattern = re.compile(rf"{quote}([^{quote}\n]{{2,}}){quote}")
+        edited = pattern.sub(lambda match: f"{quote}{match.group(1)}X{quote}", source, count=1)
+        if edited != source:
+            mutations.append((f"edit_{quote}_string", edited))
+            break
+    append = manifest.get("append_statement")
+    if append:
+        mutations.append(("append_statement", source.rstrip("\n") + "\n" + append + "\n"))
+    return mutations
+
+
 def full_corpus_cases() -> list[dict]:
     """Require every packaged corpus language and independently meaningful source edits.
 
     This is not a Python semantic oracle: the edits come from corpus source and
     each native/Python result must pass source-derived expectations separately.
     """
-    from tests.unit.test_corpus_invariants import _mutations
-
     root = Path(__file__).resolve().parents[1] / "tests/fixtures/corpus"
     assert root.is_dir(), "74-language corpus directory is missing"
     directories = sorted(p for p in root.iterdir() if p.is_dir())
@@ -99,7 +124,7 @@ def full_corpus_cases() -> list[dict]:
             "corpus_language": language,
             "forbid_ignored_style": True,
         })
-        for mutation_name, edited in _mutations(source, manifest):
+        for mutation_name, edited in corpus_mutations(source, manifest):
             assert edited != source, (language, mutation_name)
             cases.append({
                 "id": f"corpus-{language}-{mutation_name}",
