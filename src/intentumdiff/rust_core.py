@@ -658,7 +658,7 @@ def try_rust_markdown_section_review(
     old_source: str,
     new_source: str,
 ) -> dict[str, object] | None:
-    """Run Rust markdown section review; only explicit Rust declines return None.
+    """Run required Rust Markdown section review; malformed native data must fail closed.
 
     Engine-side port of the markdown post-presentation rules (issue #36): section
     identity by content hash, LIS insertion-shift discrimination for moves, and
