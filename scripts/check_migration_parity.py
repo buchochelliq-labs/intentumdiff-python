@@ -180,7 +180,7 @@ def check_visible_corpus_tokens(case: dict, diff: dict) -> None:
             if node.get("label"):
                 labels.append(node["label"])
             stack.extend(node.get("children") or [])
-    visible = "\\n".join(labels)
+    visible = "\n".join(labels)
     missing = [token for token in expected if token not in visible]
     assert not missing, (
         case["id"], "missing source-ratcheted semantic tokens", missing,
@@ -274,7 +274,7 @@ def main():
     cases.append(dict(schema, id='schema-custom-identity', mode='sources'))
     corpus_cases = full_corpus_cases()
     cases.extend(corpus_cases)
-    assert len({case['corpus_language'] for case in corpus_cases}) == 74
+    # full_corpus_cases independently enforces the exact 74-language inventory.
     records = []
     original = Path.cwd()
     with tempfile.TemporaryDirectory() as directory:
