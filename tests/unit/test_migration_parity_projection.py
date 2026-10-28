@@ -180,6 +180,25 @@ def test_corpus_gate_rejects_known_platform_parser_exclusion():
     check(case, system="Linux", machine="x86_64")
 
 
+def test_all_corpus_semantic_mutations_reject_false_style_reduction():
+    """The 74-language gate must reject suppressed edits, not just additions."""
+    harness = runpy.run_path(str(SCRIPT))
+    cases = harness["full_corpus_cases"]()
+    mutations = [case for case in cases if not case["id"].endswith("-addition")]
+    assert mutations, "no semantic content mutations in the release corpus"
+    assert all(case.get("forbid_ignored_style") is True for case in cases)
+
+    # Both API routes could agree that a content edit is partly 'ignored
+    # style' and still report a semantic change. That must not certify parity.
+    case = mutations[0]
+    fabricated = _diff(_node("updated_content"))
+    fabricated["metadata"] = {"ignored_style_changes": 1}
+    with pytest.raises(AssertionError):
+        harness["check_expectations"](case, fabricated)
+    fabricated["metadata"]["ignored_style_changes"] = 0
+    harness["check_expectations"](case, fabricated)
+
+
 def test_corpus_fallback_is_rejected_even_when_both_routes_have_changes():
     """Parser availability and route equality cannot certify a generic fallback."""
     checker = runpy.run_path(str(SCRIPT))["check_expectations"]
