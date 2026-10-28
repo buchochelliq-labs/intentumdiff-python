@@ -253,7 +253,12 @@ def check_source_spans(case: dict, diff: dict) -> None:
             # SourceSpan byte columns must land on UTF-8 character boundaries.
             # Newlines are not part of a source line's column space: counting
             # keepends=True allows offsets into CRLF or past the visible text.
-            lines = case[source_key].splitlines()
+            source_text = case[source_key]
+            lines = source_text.splitlines()
+            # A virtual terminal row at len(lines) is valid only for an empty
+            # source or when the source ends with a line terminator. Otherwise
+            # (last_row + 1, 0) is not a position in the supplied source bytes.
+            permits_terminal_row = not source_text or source_text.endswith(("\n", "\r"))
             stack = [node]
             while stack:
                 current = stack.pop()
@@ -265,9 +270,10 @@ def check_source_spans(case: dict, diff: dict) -> None:
                     assert type(line_number) is int and type(column) is int, (
                         case["id"], side, position
                     )
-                    assert 0 <= line_number <= len(lines), (
-                        case["id"], side, position, len(lines)
-                    )
+                    assert (
+                        0 <= line_number < len(lines)
+                        or (line_number == len(lines) and permits_terminal_row and column == 0)
+                    ), (case["id"], side, "non-source row or terminal column", position, len(lines))
                     line = lines[line_number] if line_number < len(lines) else ""
                     boundaries = {0}
                     offset = 0
