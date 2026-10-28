@@ -22,6 +22,7 @@ import importlib.metadata as _importlib_metadata
 import json
 import logging
 import os
+import platform
 import ssl
 import threading
 import time as _time
@@ -120,6 +121,38 @@ def _verify_builtin_provenance(path: Path) -> None:
         problem,
         _ENFORCE_PROVENANCE_ENV,
     )
+
+
+def _check_rust_component_load_policy(path: Path) -> None:
+    """Ask Rust before Wasmtime compiles the actual staged component.
+
+    Python performs only host file I/O and typed error translation. The Rust
+    C ABI owns the platform/component decision; its absence is a hard error.
+    An empty digest first probes whether hashing is necessary, avoiding reads
+    of all the other bundled components during ordinary parser discovery.
+    """
+    from intentumdiff.rust_core import _c_abi_call
+
+    name, system, machine = path.name, platform.system(), platform.machine()
+
+    def reason_for(digest: str) -> str | None:
+        status = _c_abi_call("parser_component_availability", name, system, machine, digest)
+        if not isinstance(status, dict) or "reason" not in status:
+            raise PluginLoadError(str(path), "malformed Rust component availability response")
+        reason = status["reason"]
+        if reason is not None and not isinstance(reason, str):
+            raise PluginLoadError(str(path), "invalid Rust component availability reason type")
+        return reason
+
+    if reason_for("") is None:
+        return
+    try:
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError as exc:
+        raise PluginLoadError(str(path), f"cannot hash staged Wasm component: {exc}") from exc
+    reason = reason_for(digest)
+    if reason is not None:
+        raise PluginLoadError(str(path), reason)
 
 
 def _check_wasmtime_version(
@@ -1034,6 +1067,7 @@ def load_plugin(
 
     if not path.exists():
         raise PluginLoadError(str(path), "file not found")
+    _check_rust_component_load_policy(path)
 
     try:
         cfg = Config()
