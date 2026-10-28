@@ -4,6 +4,8 @@ from __future__ import annotations
 import runpy
 from pathlib import Path
 
+import pytest
+
 
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "check_migration_parity.py"
 
@@ -60,3 +62,31 @@ def test_corpus_parity_ignores_only_nonsemantic_ids():
     right = _diff(_node("value"))
     right["changes"][0]["new_node"]["id"] = "another-id"
     assert _projection(left) == _projection(right)
+
+
+def test_vbnet_declaration_extent_requires_closing_source_line():
+    checker = runpy.run_path(str(SCRIPT))["check_vbnet_declaration_extent"]
+    source = (Path(__file__).resolve().parents[1] / "fixtures" / "corpus"
+              / "vbnet" / "playground.vb").read_text(encoding="utf-8")
+    case = {"id": "corpus-vbnet-addition", "new": source, "old": ""}
+    declaration = _node("Multiply", col=4)
+    declaration["node_type"] = "function_statement"
+    declaration["position"] = {
+        "start_line": 9, "start_col": 4, "end_line": 10, "end_col": 60,
+    }
+    with pytest.raises(AssertionError, match="VB.NET Multiply full declaration span"):
+        checker(case, _diff(declaration))
+
+    declaration["position"] = {
+        "start_line": 9, "start_col": 4, "end_line": 11, "end_col": 16,
+    }
+    checker(case, _diff(declaration))
+
+
+def test_vbnet_declaration_extent_rejects_silently_missing_declaration():
+    checker = runpy.run_path(str(SCRIPT))["check_vbnet_declaration_extent"]
+    source = (Path(__file__).resolve().parents[1] / "fixtures" / "corpus"
+              / "vbnet" / "playground.vb").read_text(encoding="utf-8")
+    case = {"id": "corpus-vbnet-addition", "new": source, "old": ""}
+    with pytest.raises(AssertionError, match="VB.NET Multiply full declaration span"):
+        checker(case, _diff(_node("unrelated")))
