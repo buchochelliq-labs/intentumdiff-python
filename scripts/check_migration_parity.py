@@ -64,6 +64,10 @@ def check_expectations(case, diff):
                 assert node['label'] == wanted[side + '_label'], diff
                 assert [node['position']['start_line'], node['position']['start_col']] == wanted[side + '_start'], diff
         assert not any(c['change_type'] in expected['forbidden_change_types'] for c in changes), diff
+    if 'corpus_language' in case:
+        # Even a real, loaded language handler can decline into text fallback.
+        # Two routes agreeing on that fallback is not semantic certification.
+        assert diff['is_fallback'] is False, (case['id'], 'semantic parser fell back', diff)
     assert diff['has_semantic_changes'] and not diff['is_style_only'], (case['id'], diff)
 
 
