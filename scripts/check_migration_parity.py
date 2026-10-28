@@ -8,11 +8,13 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import platform
 from pathlib import Path
 import subprocess
 import tempfile
 from contextlib import closing
 from intentumdiff import SemanticDiffer, review_text
+from intentumdiff.core.models import DiffConfig
 
 
 def projection(diff):
@@ -188,6 +190,27 @@ def check_visible_corpus_tokens(case: dict, diff: dict) -> None:
     )
 
 
+def check_available_corpus_parser(case: dict, *, system: str | None = None, machine: str | None = None) -> None:
+    """Fail closed for deliberately unavailable native components, never accept generic.
+
+    The Rust C ABI owns platform exclusions. The Windows/ARM64 PowerShell Wasm
+    crashes Cranelift during compilation; this remains an explicit RC blocker,
+    not a silently skipped language or a successful generic fallback.
+    """
+    from intentumdiff.rust_core import _c_abi_call
+
+    system = system if system is not None else platform.system()
+    machine = machine if machine is not None else platform.machine()
+    status = _c_abi_call("parser_availability", case["corpus_language"], case["filename"], system, machine)
+    assert isinstance(status, dict) and "reason" in status and "unavailable" in status, (
+        case["id"], "malformed Rust parser availability contract", status,
+    )
+    assert status["reason"] is None and status["unavailable"] is None, (
+        case["id"], f"semantic parser unavailable on {system}/{machine}", status,
+        "0.0.2 release blocker: https://github.com/buchochelliq-labs/intentumdiff-python/issues/42",
+    )
+
+
 def check_source_spans(case: dict, diff: dict) -> None:
     """Check every exposed changed-tree span against actual UTF-8 source bytes.
 
@@ -284,16 +307,17 @@ def main():
         (schemas / 'acme.json').write_text(json.dumps(schema['descriptor']), encoding='utf-8')
         os.chdir(root)
         try:
-            with closing(SemanticDiffer()) as differ:
+            with closing(SemanticDiffer(DiffConfig(strict_plugins=True))) as differ:
                 for case in cases:
                     request = dict(case, repo=str(root), wasm=str(wasm))
                     if 'corpus_language' in case:
+                        check_available_corpus_parser(case)
                         # Extensions such as .yml and .json are intentionally shared by
                         # multiple parsers (e.g. Databricks Workflow/YAML and ADF/JSON).
                         # Pin the corpus language in BOTH native and Python requests:
                         # filename-only selection can silently exercise the wrong parser.
                         request['handler'] = 'native_selection_diff'
-                        request['config'] = {'language_hint': case['corpus_language']}
+                        request['config'] = {'language_hint': case['corpus_language'], 'strict_plugins': True}
                     result = subprocess.run([str(native)], input=json.dumps(request), text=True, encoding='utf-8', capture_output=True, check=True)
                     native_result = json.loads(result.stdout)
                     if 'corpus_language' in case:
