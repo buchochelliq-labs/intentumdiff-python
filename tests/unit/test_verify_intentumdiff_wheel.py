@@ -35,7 +35,7 @@ def _write_wheel(path: Path, names: list[str]) -> Path:
         artifacts = _artifacts({Path(name).name: b"" for name in names if name.endswith(".wasm")})
         zf.writestr(
             "intentumdiff/wasm/wasm_provenance.json",
-            _json.dumps({"schema_version": 1, "artifacts": artifacts}),
+            _json.dumps({"schema_version": 1, "registry_commit": "c" * 40, "artifacts": artifacts}),
         )
     return path
 
@@ -201,7 +201,8 @@ def test_verify_wheel_rejects_metadata_identity_mismatch(tmp_path: Path) -> None
     with zipfile.ZipFile(wheel, "a") as zf:
         zf.writestr(
             "intentumdiff/wasm/wasm_provenance.json",
-            _json.dumps({"schema_version": 1, "artifacts": _artifacts({"python_parser.wasm": b""})}),
+            _json.dumps({"schema_version": 1, "registry_commit": "c" * 40,
+                         "artifacts": _artifacts({"python_parser.wasm": b""})}),
         )
 
     with pytest.raises(ValueError, match="METADATA Name"):
@@ -274,7 +275,8 @@ def _write_wheel_with_provenance(
         if manifest_artifacts is not None:
             zf.writestr(
                 "intentumdiff/wasm/wasm_provenance.json",
-                _json.dumps({"schema_version": 1, "artifacts": manifest_artifacts}),
+                _json.dumps({"schema_version": 1, "registry_commit": "c" * 40,
+                             "artifacts": manifest_artifacts}),
             )
         zf.writestr(
             "intentumdiff_python-0.0.1.dist-info/METADATA",
@@ -290,7 +292,22 @@ def _write_wheel_with_provenance(
 
 def _artifacts(wasm: dict[str, bytes]) -> dict[str, dict]:
     return {
-        name: {"sha256": _hashlib.sha256(data).hexdigest(), "size_bytes": len(data)}
+        name: {
+            "sha256": _hashlib.sha256(data).hexdigest(),
+            "size_bytes": len(data),
+            "source": {
+                "repository": (
+                    "https://github.com/buchochelliq-labs/intentumdiff-core"
+                    if name.endswith("_renderer.wasm")
+                    else "https://github.com/buchochelliq-labs/intentumdiff-python-parser"
+                ),
+                "commit": "a" * 40,
+                "artifact": "renderer-components" if name.endswith("_renderer.wasm") else "parser-wasm",
+                "artifact_id": 123,
+                "artifact_archive_sha256": "b" * 64,
+                "abi_target": None if name.endswith("_renderer.wasm") else "1.0.0",
+            },
+        }
         for name, data in wasm.items()
     }
 
@@ -334,4 +351,22 @@ def test_provenance_missing_wasm_is_rejected(tmp_path: Path) -> None:
     manifest = _artifacts({"python_parser.wasm": b"\x00asm py", "gone_parser.wasm": b"gone"})
     wheel = _write_wheel_with_provenance(_prov_wheel_name(tmp_path), wasm, manifest)
     with pytest.raises(ValueError, match="missing"):
+        verify_wheel(wheel)
+
+
+def test_provenance_without_component_source_is_rejected(tmp_path: Path) -> None:
+    wasm = {"python_parser.wasm": b"\\x00asm py"}
+    entries = _artifacts(wasm)
+    del entries["python_parser.wasm"]["source"]
+    wheel = _write_wheel_with_provenance(_prov_wheel_name(tmp_path), wasm, entries)
+    with pytest.raises(ValueError, match="lacks exact source"):
+        verify_wheel(wheel)
+
+
+def test_provenance_with_moving_commit_is_rejected(tmp_path: Path) -> None:
+    wasm = {"python_parser.wasm": b"\\x00asm py"}
+    entries = _artifacts(wasm)
+    entries["python_parser.wasm"]["source"]["commit"] = "main"
+    wheel = _write_wheel_with_provenance(_prov_wheel_name(tmp_path), wasm, entries)
+    with pytest.raises(ValueError, match="invalid immutable CI source"):
         verify_wheel(wheel)
