@@ -159,3 +159,16 @@ def test_corpus_gate_rejects_known_platform_parser_exclusion():
         check(case, system="Windows", machine="ARM64")
     # A platform where the component is supported must not be exempted.
     check(case, system="Linux", machine="x86_64")
+
+
+def test_corpus_fallback_is_rejected_even_when_both_routes_have_changes():
+    """Parser availability and route equality cannot certify a generic fallback."""
+    checker = runpy.run_path(str(SCRIPT))["check_expectations"]
+    case = {"id": "corpus-python-bump_numeric_literal", "corpus_language": "python"}
+    real_semantic_diff = _diff(_node("updated_number"))
+    checker(case, real_semantic_diff)
+
+    fabricated_fallback = _diff(_node("updated_number"))
+    fabricated_fallback["is_fallback"] = True
+    with pytest.raises(AssertionError, match="semantic parser fell back"):
+        checker(case, fabricated_fallback)
