@@ -39,7 +39,7 @@ def test_parity_harness_uses_utf8_for_files_and_native_transport(tmp_path, monke
         return SimpleNamespace(stdout=diff.model_dump_json())
 
     class Differ:
-        def diff_strings(self, old, new, filename):
+        def diff_strings(self, old, new, filename, language_hint=None):
             return review_text(old, new, filename=filename)
 
         def close(self):
