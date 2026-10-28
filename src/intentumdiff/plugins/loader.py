@@ -23,6 +23,7 @@ import json
 import logging
 import os
 import platform
+import re
 import ssl
 import threading
 import time as _time
@@ -164,6 +165,35 @@ def _check_rust_component_load_policy(path: Path) -> bytes | None:
     return approved_bytes
 
 
+
+def _is_known_vulnerable_wasmtime(version: str) -> bool:
+    """Reject vulnerable Wasmtime release *ranges*, not just sampled versions.
+
+    GHSA-mghf-wjfp-p5xm affects every release below 36.0.19,
+    37.0.0 through 48.0.6, and 49.0.0 through 49.0.3.
+    GHSA-9pvw-hwfg-92h5 also affects 46.0.0 through 48.0.6 and
+    49.0.0 through 49.0.3. An unparseable/prerelease version cannot
+    establish the patched runtime identity and must fail closed.
+    """
+    if version in _VULNERABLE_WASMTIME_VERSIONS:
+        return True
+    match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", version)
+    if match is None:
+        return True
+    major, _minor, patch = (int(part) for part in match.groups())
+    if major < 36:
+        return True
+    if major == 36:
+        return patch < 19
+    if 37 <= major < 48:
+        return True
+    if major == 48:
+        return patch < 7
+    if major == 49:
+        return patch < 4
+    return False
+
+
 def _check_wasmtime_version(
     wasm_path: str | Path | None = None,
     *,
@@ -184,11 +214,13 @@ def _check_wasmtime_version(
     """
     try:
         version = _importlib_metadata.version("wasmtime")
-    except _importlib_metadata.PackageNotFoundError:
-        # wasmtime not installed as a proper package — skip version gate.
-        return
+    except _importlib_metadata.PackageNotFoundError as exc:
+        raise PluginSecurityError(
+            "<wasmtime-version-check>",
+            "wasmtime distribution metadata is absent; cannot verify a patched native runtime",
+        ) from exc
 
-    if version not in _VULNERABLE_WASMTIME_VERSIONS:
+    if not _is_known_vulnerable_wasmtime(version):
         return
 
     override = os.environ.get("INTENTUMDIFF_ALLOW_VULNERABLE_WASMTIME", "").strip()
@@ -205,7 +237,8 @@ def _check_wasmtime_version(
 
     raise PluginSecurityError(
         "<wasmtime-version-check>",
-        f"wasmtime=={version} is in the known-vulnerable blocklist "
+        f"wasmtime=={version} is in the known-vulnerable blocklist or its " 
+        f"version cannot be verified as patched "
         f"({_WASMTIME_ADVISORY} — unsafe host behaviour including aarch64 "
         f"sandbox escape or process panic). Upgrade wasmtime or set INTENTUMDIFF_ALLOW_VULNERABLE_WASMTIME=1 "
         f"to override (not recommended). Run 'intentumdiff security-check' for a live "

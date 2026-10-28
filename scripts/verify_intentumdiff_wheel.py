@@ -237,7 +237,15 @@ def verify_wheel(
         raise ValueError("IntentumDiff release wheel must be native, not py3-none-any")
 
     with zipfile.ZipFile(wheel) as zf:
-        names = set(zf.namelist())
+        entries = zf.namelist()
+        # A set would silently discard repeated ZIP members. Different wheel
+        # installers can select different bytes for the same pathname, so even
+        # byte-identical duplicates are invalid release inputs.
+        names = set(entries)
+        if len(entries) != len(names):
+            from collections import Counter
+            duplicates = sorted(name for name, count in Counter(entries).items() if count > 1)
+            raise ValueError("wheel contains duplicate archive entries: " + ", ".join(duplicates))
     _validate_wheel_entries(
         names,
         expected_name=expected_name,

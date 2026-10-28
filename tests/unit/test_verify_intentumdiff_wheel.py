@@ -65,6 +65,30 @@ def test_verify_wheel_accepts_native_intentumdiff_wheel(tmp_path: Path) -> None:
     assert int(summary["size_bytes"]) > 0
 
 
+
+@pytest.mark.parametrize("duplicate", [
+    "intentumdiff/wasm/python_parser.wasm",
+    "intentumdiff/wasm/wasm_provenance.json",
+    "intentumdiff/intentumdiff_rust_core.cp312-win_amd64.pyd",
+])
+def test_verify_wheel_rejects_duplicate_zip_members_even_when_bytes_match(
+    tmp_path: Path, duplicate: str,
+) -> None:
+    wheel = _write_wheel(
+        tmp_path / "intentumdiff_python-0.0.1-cp312-cp312-win_amd64.whl",
+        _valid_names(),
+    )
+    with zipfile.ZipFile(wheel, "a") as zf:
+        original = zf.read(duplicate)
+        with pytest.warns(UserWarning, match="Duplicate name"):
+            zf.writestr(duplicate, original)
+
+    # Set(namelist()) hides this ambiguity, and zf.read returns only one
+    # member. Release provenance must reject all repeated ZIP entries.
+    with pytest.raises(ValueError, match="duplicate archive entries"):
+        verify_wheel(wheel)
+
+
 def test_verify_wheel_accepts_windows_arm64_wheel(tmp_path: Path) -> None:
     names = [
         name.replace("win_amd64", "win_arm64")
