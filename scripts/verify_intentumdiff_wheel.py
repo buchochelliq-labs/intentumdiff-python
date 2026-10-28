@@ -148,6 +148,12 @@ def _verify_wasm_provenance(zf: zipfile.ZipFile, names: set[str], wasm_files: li
         manifest = json.loads(zf.read(PROVENANCE_ENTRY).decode("utf-8"))
     except (ValueError, KeyError) as exc:
         raise ValueError(f"wheel provenance manifest is not valid JSON: {exc}") from exc
+    if not isinstance(manifest, dict) or manifest.get("schema_version") != 1:
+        raise ValueError("wheel provenance manifest has an invalid schema")
+    registry_commit = manifest.get("registry_commit")
+    if (not isinstance(registry_commit, str) or len(registry_commit) != 40
+            or any(c not in "0123456789abcdef" for c in registry_commit)):
+        raise ValueError("wheel provenance has no immutable registry commit")
     artifacts = manifest.get("artifacts")
     if not isinstance(artifacts, dict):
         raise ValueError("wheel provenance manifest has no 'artifacts' map")
@@ -168,9 +174,34 @@ def _verify_wasm_provenance(zf: zipfile.ZipFile, names: set[str], wasm_files: li
         )
     for name in wasm_files:
         basename = PurePosixPath(name).name
-        digest = hashlib.sha256(zf.read(name)).hexdigest()
-        if digest != artifacts[basename].get("sha256"):
-            raise ValueError(f"wheel wasm {basename} does not match its provenance SHA-256")
+        entry = artifacts[basename]
+        if not isinstance(entry, dict):
+            raise ValueError(f"wheel wasm {basename} has malformed provenance")
+        blob = zf.read(name)
+        digest = hashlib.sha256(blob).hexdigest()
+        if digest != entry.get("sha256") or len(blob) != entry.get("size_bytes"):
+            raise ValueError(f"wheel wasm {basename} does not match its provenance SHA-256/size")
+        source = entry.get("source")
+        required = {"repository", "commit", "artifact", "artifact_id",
+                    "artifact_archive_sha256", "abi_target"}
+        if not isinstance(source, dict) or set(source) != required:
+            raise ValueError(f"wheel wasm {basename} lacks exact source and artifact provenance")
+        commit, archive_sha = source["commit"], source["artifact_archive_sha256"]
+        repository, artifact = source["repository"], source["artifact"]
+        if (not isinstance(repository, str)
+                or not repository.startswith("https://github.com/buchochelliq-labs/intentumdiff-")
+                or not isinstance(commit, str) or len(commit) != 40
+                or any(c not in "0123456789abcdef" for c in commit)
+                or not isinstance(archive_sha, str) or len(archive_sha) != 64
+                or any(c not in "0123456789abcdef" for c in archive_sha)
+                or not isinstance(source["artifact_id"], int)
+                or isinstance(source["artifact_id"], bool)
+                or source["artifact_id"] < 1
+                or artifact not in ("parser-wasm", "renderer-components")
+                or (artifact == "renderer-components") != basename.endswith("_renderer.wasm")
+                or (source["abi_target"] is not None
+                    and not isinstance(source["abi_target"], str))):
+            raise ValueError(f"wheel wasm {basename} has invalid immutable CI source attribution")
     return len(expected)
 
 
