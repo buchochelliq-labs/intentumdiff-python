@@ -27,9 +27,10 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CORE_REPO = "https://github.com/buchochelliq-labs/intentumdiff-core"
-# Immutable reviewed engine candidate for this binding. Override for an explicit
-# integration build; never let a moving branch silently change the engine under CI.
-CORE_REF = os.environ.get("INTENTUMDIFF_CORE_REF", "32bc104180f03e433525483ed0e9945a65aef6a0")
+# Immutable candidate from Core #187: metered 48.0.7 with verified PowerShell
+# SHA-256 policy. Exact-head four-platform CI must pass before release approval.
+# Override only for deliberate integration builds, not a moving branch.
+CORE_REF = os.environ.get("INTENTUMDIFF_CORE_REF", "da194143a256091c03d60735b8d57184efc458e1")
 # Reviewed registry RC candidate: includes verified VB.NET multiline-span Wasm fix.
 # Registry PR #13 must be vetted before this becomes the final integration pin.
 REGISTRY_REF = "9ab6d84546e704e38661f2d4c9eeeaa5059a661c"
