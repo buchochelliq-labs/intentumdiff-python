@@ -126,3 +126,13 @@ def test_manifest_visible_tokens_are_carried_into_every_addition_case():
                     / case["corpus_language"] / "playground.expect.json")
         expected = json.loads(manifest.read_text(encoding="utf-8"))
         assert case["required_visible_tokens"] == expected["visible_tokens"], case["id"]
+
+
+def test_corpus_gate_rejects_known_platform_parser_exclusion():
+    """The 74-language gate cannot certify generic text in lieu of PowerShell."""
+    check = runpy.run_path(str(SCRIPT))["check_available_corpus_parser"]
+    case = {"id": "corpus-powershell-addition", "corpus_language": "powershell", "filename": "code.ps1"}
+    with pytest.raises(AssertionError, match="semantic parser unavailable on Windows/ARM64"):
+        check(case, system="Windows", machine="ARM64")
+    # A platform where the component is supported must not be exempted.
+    check(case, system="Linux", machine="x86_64")
