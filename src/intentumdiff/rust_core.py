@@ -644,7 +644,9 @@ def try_rust_generic_text_review(
             raise ValueError("Rust generic-text review missing explicit used=true")
         if not isinstance(data.get("changes"), list):
             raise ValueError("Rust generic-text review missing changes list")
-        group = data.get("group")
+        if "group" not in data:
+            raise ValueError("Rust generic-text review missing group field")
+        group = data["group"]
         if group is not None and not isinstance(group, dict):
             raise ValueError("Rust generic-text review group must be an object or null")
         changes = [Change.model_validate(item) for item in data["changes"]]
