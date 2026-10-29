@@ -217,8 +217,9 @@ def test_corpus_fallback_is_rejected_even_when_both_routes_have_changes():
     [],
     "not JSON",
     "{}",
-    '{"fallback": "missing parser"}',
-    '{"diff": []}',
+    {"fallback": "missing parser"},
+    {"diff": []},
+    {},
 ])
 def test_direct_c_abi_source_review_fails_closed_on_bad_envelopes(
     monkeypatch, response
@@ -244,7 +245,7 @@ def test_direct_c_abi_source_review_preserves_exact_request_and_result(monkeypat
     expected = _diff(_node("value"))
     def fake_abi(*args):
         calls.append(args)
-        return json.dumps({"diff": expected})
+        return {"diff": expected}
     monkeypatch.setattr(rust_core, "_c_abi_call", fake_abi)
     check = runpy.run_path(str(SCRIPT))["run_direct_c_abi_source_review"]
     case = {
