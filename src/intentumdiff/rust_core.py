@@ -650,7 +650,7 @@ def try_rust_generic_text_review(
         if group is not None and not isinstance(group, dict):
             raise ValueError("Rust generic-text review group must be an object or null")
         changes = [Change.model_validate(item) for item in data["changes"]]
-        groups = [ChangeGroup.model_validate(group)] if group else []
+        groups = [ChangeGroup.model_validate(group)] if group is not None else []
         return changes, groups
     except Exception as exc:  # noqa: BLE001 - fail closed on native/DTO failures.
         raise RuntimeError(f"Rust generic-text review failed: {exc}") from exc
