@@ -34,7 +34,7 @@ CORE_REPO = "https://github.com/buchochelliq-labs/intentumdiff-core"
 CORE_REF = os.environ.get("INTENTUMDIFF_CORE_REF", "28d69009123e80b3a884c206dbc5b13b761cceb0")
 # Reviewed registry RC candidate: includes verified VB.NET multiline-span Wasm fix.
 # Registry PR #13 must be vetted before this becomes the final integration pin.
-REGISTRY_REF = "cabcb9e78bd888d08d5c2250d7e8bd3065f2c7b9"
+REGISTRY_REF = "d566f7c0b96f94ce5be9e16cb1b96e8018bcc039"
 
 
 def load_reviewed_registry(get, api: str, org: str):
