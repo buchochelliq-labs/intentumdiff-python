@@ -324,8 +324,14 @@ class CommitDiffer:
         if old_file_contents:
             old_index = self._build_index(old_file_contents)
             new_index = self._build_index(new_file_contents)
-            if old_index is not None and new_index is not None:
-                cross_file_changes = self._detect_cross_file(old_index, new_index)
+            # Both source sets are nonempty. An absent index means incomplete
+            # cross-file semantics, not an honest "no cross-file changes" result.
+            if old_index is None or new_index is None:
+                raise RuntimeError(
+                    "Commit semantic index incomplete: missing old or new index "
+                    "for changed text files"
+                )
+            cross_file_changes = self._detect_cross_file(old_index, new_index)
 
         return CommitDiff(
             old_ref=old_ref,
@@ -409,17 +415,27 @@ class CommitDiffer:
         triples.
 
         The symbol/reference tables are built by the Rust core
-        (index-engine-lib) inside ``SemanticIndex.build()``. Returns ``None`` if
-        no files could be parsed.
+        (index-engine-lib) inside ``SemanticIndex.build()``. Every changed text
+        file must contribute a tree; skipping one would silently remove its
+        cross-file evidence. Only an intentionally empty input list has no index.
         """
+        if not file_contents:
+            return None
+
         index = SemanticIndex()
         for filename, language, content in file_contents:
-            tree = self._parse_to_tree(filename, language, content)
-            if tree is not None:
-                index.add_tree(filename, language, tree)
-
-        if not index._files:  # type: ignore[attr-defined]  # pylint: disable=protected-access
-            return None
+            try:
+                tree = self._parse_to_tree(filename, language, content)
+            except (PluginNotFoundError, PluginError, ValueError, RuntimeError) as exc:
+                raise RuntimeError(
+                    f"Commit semantic index incomplete for {filename!r}: {exc}"
+                ) from exc
+            if tree is None:
+                raise RuntimeError(
+                    f"Commit semantic index incomplete for {filename!r}: "
+                    "parser returned no semantic tree"
+                )
+            index.add_tree(filename, language, tree)
 
         index.build()
         return index
@@ -436,20 +452,18 @@ class CommitDiffer:
         """
         Parse *content* to a SemanticNode tree.
 
-        Re-uses the ``SemanticDiffer`` parser pipeline so both FullParse and
-        host-CST parser plugins can participate in commit-wide symbol indexing.
+        Re-uses the ``SemanticDiffer`` FullParse parser pipeline for
+        commit-wide symbol indexing. Missing parsers must propagate to the
+        caller so a complete commit review cannot silently omit a text file.
         """
         # Match the existing source-diff and native Rust empty-side contract. Some
         # parsers reject empty input; that is not a missing symbol-table failure.
         if not content:
             from intentumdiff._differ_presentation import _empty_semantic_tree
             return _empty_semantic_tree(language)
-        try:
-            tree, _language = self._differ.parse(
-                content,
-                filename,
-                language_hint=language,
-            )
-            return tree
-        except PluginNotFoundError:
-            return None
+        tree, _language = self._differ.parse(
+            content,
+            filename,
+            language_hint=language,
+        )
+        return tree
