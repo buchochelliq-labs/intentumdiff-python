@@ -327,6 +327,58 @@ def check_vbnet_declaration_extent(case: dict, diff: dict) -> None:
     )
 
 
+def check_tsx_literal_exact(case: dict, diff: dict) -> None:
+    """Independently pin the source-judged TSX Alice -> AliceX leaf span.
+
+    Bounds and cross-API agreement do not establish the right start or end.
+    """
+    if case["id"] != 'corpus-tsx-edit_"_string':
+        return
+    changes = diff["changes"]
+    assert len(changes) == 1 and changes[0]["change_type"] == "MODIFICATION", (
+        case["id"], "expected one semantic literal edit", diff
+    )
+    for side, label, end_col in (("old_node", "Alice", 27), ("new_node", "AliceX", 28)):
+        node = changes[0][side]
+        assert node["label"] == label, (case["id"], side, "incorrect literal", diff)
+        assert node["position"] == {
+            "start_line": 6, "start_col": 22, "end_line": 6, "end_col": end_col
+        }, (case["id"], side, "incorrect exact UTF-8 source span", diff)
+    assert not diff.get("metadata", {}).get("ignored_style_changes"), (
+        case["id"], "literal modification falsely classified as formatting", diff
+    )
+    assert all(group["kind"] != "IGNORED_STYLE" for group in diff["change_groups"]), (
+        case["id"], "false formatting group", diff
+    )
+
+
+def run_direct_c_abi_source_review(case: dict, repo: Path, wasm: Path) -> dict:
+    """Exercise the six-argument exported Rust C ABI independently of the public Python API.
+
+    The returned C ABI result is a JSON-encoded native review response.
+    This is a transport conformance gate, not a Python semantic evaluator.
+    """
+    from intentumdiff.rust_core import _c_abi_call
+
+    config = json.dumps({"language_hint": case["corpus_language"], "strict_plugins": True})
+    raw = _c_abi_call(
+        "live_diff_contents", str(repo), case["filename"],
+        case["old"], case["new"], config, str(wasm),
+    )
+    assert isinstance(raw, str), (case["id"], "C ABI source review is not a JSON string", raw)
+    try:
+        result = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise AssertionError((case["id"], "C ABI produced invalid JSON", raw[:2000])) from exc
+    assert isinstance(result, dict) and "fallback" not in result, (
+        case["id"], "C ABI parser declined", result
+    )
+    assert isinstance(result.get("diff"), dict), (
+        case["id"], "C ABI source review missing diff", result
+    )
+    return result["diff"]
+
+
 def run_native_probe(native: Path, request: dict, case_id: str) -> dict:
     """Run native parity with a bounded, attributable Rust failure diagnostic."""
     result = subprocess.run(
@@ -408,8 +460,32 @@ def main():
                             check_source_spans(case, output)
                             check_visible_corpus_tokens(case, output)
                             check_vbnet_declaration_extent(case, output)
+                            check_tsx_literal_exact(case, output)
                     assert projection(rust) == projection(python), (case['id'], projection(rust), projection(python))
-                    records.append(dict(case, rust=rust, python=python))
+                    record = dict(case, rust=rust, python=python)
+                    # All 74 language additions and the curated TSX edit also pass
+                    # through the exported C ABI directly. Public Python's use of
+                    # the C ABI is not itself an independent transport assertion.
+                    if 'corpus_language' in case and (
+                        case['id'].endswith('-addition')
+                        or case['id'] == 'corpus-tsx-edit_"_string'
+                    ):
+                        abi = run_direct_c_abi_source_review(case, root, wasm)
+                        check_expectations(case, abi)
+                        assert abi['language'] == case['corpus_language'], (
+                            case['id'], 'c_abi', 'selected wrong language', abi['language']
+                        )
+                        assert abi['changes'], (case['id'], 'c_abi', 'zero semantic changes')
+                        check_source_spans(case, abi)
+                        check_visible_corpus_tokens(case, abi)
+                        check_vbnet_declaration_extent(case, abi)
+                        check_tsx_literal_exact(case, abi)
+                        assert projection(abi) == projection(rust) == projection(python), (
+                            case['id'], 'direct C ABI / native / Python disagreement',
+                            projection(abi), projection(rust), projection(python)
+                        )
+                        record['c_abi'] = abi
+                    records.append(record)
         finally:
             os.chdir(original)
     from intentumdiff.rust_core import _c_abi_call
