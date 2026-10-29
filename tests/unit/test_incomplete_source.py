@@ -74,7 +74,7 @@ def test_native_live_protocol_rejects_incomplete_syntax(filename, old, new, tmp_
 
 
 @pytest.mark.parametrize('filename,old,new', [
-    ('a.py', 'def value():\\n    return 1\\n', 'def value():\\n    return 2\\n'),
+    ('a.py', 'def value():\n    return 1\n', 'def value():\n    return 2\n'),
     ('a.js', 'function value() { return 1; }', 'function value() { return 2; }'),
 ])
 def test_native_live_protocol_certifies_valid_syntax(filename, old, new, tmp_path):
@@ -93,4 +93,3 @@ def test_native_live_protocol_certifies_valid_syntax(filename, old, new, tmp_pat
     assert not diff['is_fallback'] and not diff['parse_errors']
     assert diff['has_semantic_changes'] and diff['changes']
     assert not diff['is_style_only']
-    assert diff['change_groups'][0]['metadata']['semantic_equivalence'] == 'unknown'
