@@ -40,7 +40,7 @@ def test_typed_rust_direct_diff_decline_never_falls_back_to_python(
         op="diff", seq=17, path=name, content=content, ref="HEAD",
         edit_deltas=None, stream=False,
     )
-    source = LiveBufferSource(tmp_path, name, content, "HEAD")
+    source = LiveBufferSource(tmp_path, name, content, ref="HEAD")
     sent = []
     rust_decline = {
         "fallback_code": "native_parse_incomplete",
@@ -62,7 +62,7 @@ def test_valid_rust_diff_remains_successful_without_python_recomputation(tmp_pat
         op="diff", seq=18, path="edit.py", content="def g():\n    return 2\n",
         ref="HEAD", edit_deltas=None, stream=False,
     )
-    source = LiveBufferSource(tmp_path, "edit.py", request.content, "HEAD")
+    source = LiveBufferSource(tmp_path, "edit.py", request.content, ref="HEAD")
     valid = SemanticDiff(
         old_filename="edit.py", new_filename="edit.py", language="python",
         is_fallback=False, parse_errors=[],
