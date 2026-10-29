@@ -30,17 +30,11 @@ Pass a no-op lambda to suppress events for a specific call::
 
 Caching
 -------
-When the :class:`~intentumdiff.differ.SemanticDiffer` was created with a
-``DiffConfig.cache_path``, two levels of caching apply automatically:
-
-* **Parse-tree cache** — each file's :class:`~intentumdiff.core.models.SemanticNode`
-  is cached keyed by content hash.  Re-indexing the same file content skips
-  the Wasm call entirely.
-
-* **Symbol-index cache** — after :meth:`Indexer.index_repo` finishes, the
-  resulting symbol and reference tables are stored in SQLite keyed by
-  ``(repo_root, commit_sha)``.  A subsequent call for the *same* commit returns
-  the cached index immediately (unless *force=True*).
+When ``DiffConfig.cache_path`` is set, the verified parser-level cache remains
+available through ``SemanticDiffer``. The historical repository symbol-index
+cache and LSP hover-map cache are bypassed in 0.0.2: their keys do not capture
+Rust/parser identity, indexing completeness, or LSP workspace/server state.
+Returning a stale index is worse than recomputing it. See Python #189-192.
 """
 
 from __future__ import annotations
@@ -340,8 +334,8 @@ class Indexer:
             Progress callback for this call.  Falls back to the callback
             passed to ``__init__`` when ``None``.
         force:
-            Re-index even if a cached symbol index already exists for this
-            commit.  Useful after a plugin or wasm binary update.
+            Retained for API compatibility. Indexing always recomputes the
+            symbol index in 0.0.2 (the unproven cache is disabled).
 
         Returns
         -------
@@ -349,41 +343,13 @@ class Indexer:
             Fully built index.  Check :attr:`IndexResult.from_cache` to
             determine whether the symbol table was loaded from cache.
         """
-        from intentumdiff.vcs.git_cli import (  # noqa: PLC0415
-            resolve_repo_root,
-            run_git_bytes,
-        )
+        from intentumdiff.vcs.git_cli import resolve_repo_root  # noqa: PLC0415
 
         repo_root = resolve_repo_root(repo_path)
-        commit_sha = (
-            run_git_bytes(repo_root, ["rev-parse", "--verify", ref]).decode().strip()
-        )
         callback = on_progress or self._on_progress
 
-        # ── Fast path: cached symbol index ────────────────────────────────
-        if not force and self._differ._cache is not None:
-            index_key = _make_index_key(repo_root, commit_sha)
-            cached = self._differ._cache.get_symbol_index(index_key)
-            if cached is not None:
-                logger.debug(
-                    "Symbol index cache hit for %s @ %s",
-                    repo_root,
-                    commit_sha[:8],
-                )
-                from intentumdiff.core.index import SemanticIndex  # noqa: PLC0415
-
-                sem_index = SemanticIndex()
-                symbols_json, refs_json = cached
-                sem_index.load_symbol_table_json(symbols_json)
-                sem_index.load_reference_table_json(refs_json)
-                return IndexResult(
-                    files_indexed=0,
-                    files_skipped=0,
-                    errors=[],
-                    semantic_index=sem_index,
-                    from_cache=True,
-                )
-
+        # Always re-index: historical symbol-cache entries lack Rust/parser
+        # identity and failed-file provenance (#189, #190).
         # ── Collect all text files in commit tree ─────────────────────────
         diffignore = load_diffignore(repo_root)
         files, ignored_files = _collect_blob_files(repo_root, ref, diffignore)
@@ -392,13 +358,7 @@ class Indexer:
         result.files_ignored = len(ignored_files)
         result.ignored_files = ignored_files
 
-        # ── Persist symbol index ───────────────────────────────────────────
-        if self._differ._cache is not None:
-            index_key = _make_index_key(repo_root, commit_sha)
-            self._store_symbol_index(
-                result.semantic_index, index_key, result.files_indexed
-            )
-
+        # Do not persist an index whose provenance/completeness cannot be verified.
         return result
 
     def index_directory(
@@ -566,44 +526,13 @@ class Indexer:
             for fast local servers, lower for shared or rate-limited servers.
         """
         import asyncio
-        from intentumdiff.vcs.git_cli import (  # noqa: PLC0415
-            resolve_repo_root,
-            run_git_bytes,
-        )
+        from intentumdiff.vcs.git_cli import resolve_repo_root  # noqa: PLC0415
 
         repo_root = resolve_repo_root(repo_path)
-        commit_sha = (
-            run_git_bytes(repo_root, ["rev-parse", "--verify", ref]).decode().strip()
-        )
         callback = on_progress or self._on_progress
 
-        # LSP-enriched indexes are stored under a separate key so they don't
-        # collide with plain (non-enriched) index_repo cache entries.
-        lsp_index_key = _make_index_key(repo_root, "lsp:" + commit_sha)
-
-        # ── Fast path: cached LSP symbol index ────────────────────────────
-        if not force and self._differ._cache is not None:
-            cached = self._differ._cache.get_symbol_index(lsp_index_key)
-            if cached is not None:
-                logger.debug(
-                    "LSP symbol index cache hit for %s @ %s",
-                    repo_root,
-                    commit_sha[:8],
-                )
-                from intentumdiff.core.index import SemanticIndex  # noqa: PLC0415
-
-                sem_index = SemanticIndex()
-                symbols_json, refs_json = cached
-                sem_index.load_symbol_table_json(symbols_json)
-                sem_index.load_reference_table_json(refs_json)
-                return IndexResult(
-                    files_indexed=0,
-                    files_skipped=0,
-                    errors=[],
-                    semantic_index=sem_index,
-                    from_cache=True,
-                )
-
+        # Always re-index: LSP type state, parser identity and failed-file
+        # provenance are missing from historical cache keys (#189, #190).
         # Collect files (parallel blob reads; same filtering as index_repo)
         diffignore = load_diffignore(repo_root)
         files, ignored_files = await asyncio.to_thread(
@@ -619,9 +548,7 @@ class Indexer:
         result.files_ignored = len(ignored_files)
         result.ignored_files = ignored_files
 
-        if self._differ._cache is not None:
-            self._store_symbol_index(result.semantic_index, lsp_index_key, result.files_indexed)
-
+        # An LSP-enriched index is not reusable without server/workspace identity.
         return result
 
     async def _index_files_lsp(
@@ -661,7 +588,6 @@ class Indexer:
         # Error:   any other exception
 
         sem = asyncio.Semaphore(max(1, file_concurrency))
-        cache = self._differ._cache
         differ = self._differ  # captured for executor
 
         # Use a single-worker executor so Wasm parse calls are serialised.
@@ -702,22 +628,20 @@ class Indexer:
                 enricher = enrichers.get(language)
                 enriched_count = 0
                 if enricher is not None:
-                    # Check hover-map cache first.
-                    type_map: dict[str, str] | None = None
-                    hm_key: str | None = None
-                    if cache is not None:
-                        hm_key = cache.hover_map_key(content, language)
-                        type_map = cache.get_hover_map(hm_key)
-                    if type_map is None:
-                        try:
-                            type_map = await enricher.enrich(filename, content, node)
-                        except Exception:
-                            type_map = None
-                        if type_map and hm_key is not None and cache is not None:
-                            cache.put_hover_map(hm_key, type_map)
-                    if type_map:
-                        enriched_count = len(type_map)
-                        node = attach_lsp_type_map(node, type_map)
+                    # Hover-map caching lacks file/workspace/server provenance
+                    # and cannot certify a type result (#191).
+                    try:
+                        type_map = await enricher.enrich(filename, content, node)
+                        if not isinstance(type_map, dict):
+                            raise TypeError("LSP enricher returned an invalid type-map DTO")
+                        if type_map:
+                            # Rust owns semantic-tree mutation and validation.
+                            node = attach_lsp_type_map(node, type_map)
+                            enriched_count = len(type_map)
+                    except Exception as exc:  # noqa: BLE001
+                        # Do not turn a requested enrichment failure into an
+                        # apparently successful bare semantic index (#192).
+                        return filename, "ERROR", exc, 0
                 return filename, language, node, enriched_count
 
         tasks = [asyncio.create_task(_process_one(f, c)) for f, c in files]
