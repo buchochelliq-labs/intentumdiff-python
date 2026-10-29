@@ -739,8 +739,19 @@ def source_fallback_diff(old: str, new: str, old_filename: str, new_filename: st
         old, new, old_filename, new_filename, language, reason))
 
 
+def _decode_rust_boolean(payload: str, handler: str) -> bool:
+    """Validate Rust's boolean DTO without Python truthiness reinterpretation."""
+    decoded = json.loads(payload)
+    if type(decoded) is not bool:
+        raise ValueError(f"Rust {handler} must return a JSON boolean, got {type(decoded).__name__}")
+    return decoded
+
+
 def parse_errors_present(source: str, tree_json: str, language: str) -> bool:
-    return bool(json.loads(_load_backend().parse_errors_present_json(source, tree_json, language)))
+    return _decode_rust_boolean(
+        _load_backend().parse_errors_present_json(source, tree_json, language),
+        "parse_errors_present",
+    )
 
 
 def enrich_literal_labels(tree: SemanticNode, source: str) -> SemanticNode:
@@ -752,9 +763,12 @@ def enrich_literal_labels(tree: SemanticNode, source: str) -> SemanticNode:
 
 def review_trees_equivalent(old_tree: SemanticNode, new_tree: SemanticNode) -> bool:
     """Ask core for conservative review equivalence, including literal whitespace."""
-    return bool(json.loads(_load_backend().review_trees_equivalent_json(
-        old_tree.model_dump_json(), new_tree.model_dump_json()
-    )))
+    return _decode_rust_boolean(
+        _load_backend().review_trees_equivalent_json(
+            old_tree.model_dump_json(), new_tree.model_dump_json()
+        ),
+        "review_trees_equivalent",
+    )
 
 
 def try_rust_profile_label_enrichment(
@@ -1661,6 +1675,20 @@ def try_rust_core_batch_diffs(
         )
 
 
+class _InvalidNativeCommitDto(RuntimeError):
+    """Native claimed complete output but sent an invalid public commit DTO."""
+
+
+def _require_native_commit_diff_json(payload: bytes, operation: str) -> None:
+    """Validate Rust-authored commit bytes before exposing a successful adapter attempt."""
+    from intentumdiff.core.models import CommitDiff
+
+    try:
+        CommitDiff.model_validate_json(payload)
+    except (ValidationError, ValueError, TypeError) as exc:
+        raise _InvalidNativeCommitDto(f"Rust {operation} returned malformed CommitDiff JSON: {exc}") from exc
+
+
 def try_rust_core_commit_json(
     *,
     files: list[dict[str, Any]],
@@ -1799,23 +1827,20 @@ def try_rust_core_commit_json(
                 ),
             )
         _record_adapter_phase("rust_core_commit_control_validation", phase_started)
-        if os.getenv("INTENTUMDIFF_RUST_CORE_VALIDATE_JSON", "").strip().lower() in {
-            "1",
-            "true",
-            "yes",
-            "on",
-        }:
-            phase_started = time.perf_counter()
-            from intentumdiff.core.models import CommitDiff
-
-            CommitDiff.model_validate_json(commit_json)
-            _record_adapter_phase("rust_core_commit_debug_pydantic_validation", phase_started)
+        # The C ABI control status and matching byte count are not proof that
+        # the bytes constitute a valid CommitDiff. Validate every successful
+        # native response, even when the legacy debug env flag is unset.
+        phase_started = time.perf_counter()
+        _require_native_commit_diff_json(commit_json, "certified commit")
+        _record_adapter_phase("rust_core_commit_pydantic_validation", phase_started)
         return RustCoreCommitJsonAttempt(
             control=control,
             commit_diff_json=commit_json,
             adapter_phase_timings=adapter_phase_timings,
             backend_version=backend_version,
         )
+    except _InvalidNativeCommitDto:
+        raise
     except (ValidationError, ValueError, TypeError) as exc:
         logger.debug("Rust core certified commit JSON rejected: %s", exc)
         return RustCoreCommitJsonAttempt(
@@ -1947,12 +1972,17 @@ def try_rust_core_working_tree_commit_json(
                 ),
             )
         _record_adapter_phase("rust_core_working_tree_control_validation", phase_started)
+        phase_started = time.perf_counter()
+        _require_native_commit_diff_json(commit_json, "working-tree commit")
+        _record_adapter_phase("rust_core_working_tree_pydantic_validation", phase_started)
         return RustCoreCommitJsonAttempt(
             control=control,
             commit_diff_json=commit_json,
             adapter_phase_timings=adapter_phase_timings,
             backend_version=backend_version,
         )
+    except _InvalidNativeCommitDto:
+        raise
     except (ValidationError, ValueError, TypeError) as exc:
         logger.debug("Rust core working-tree commit JSON rejected: %s", exc)
         return RustCoreCommitJsonAttempt(
