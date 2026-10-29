@@ -64,9 +64,6 @@ from intentumdiff._differ_gate import (
     _validate_git_ref as _validate_git_ref,
 )
 from intentumdiff._differ_presentation import (
-    _compute_structural_hash_for_tree as _compute_structural_hash_for_tree,
-)
-from intentumdiff._differ_presentation import (
     _count_cst_nodes as _count_cst_nodes,
 )
 from intentumdiff._differ_presentation import (
@@ -186,7 +183,6 @@ from intentumdiff.plugins.loader import _strip_trivia_impl
 from intentumdiff.plugins.registry import PluginRegistry
 from intentumdiff.rust_core import (
     RustCoreCommitJsonAttempt,
-    build_style_only_evidence,
     enrich_node_facts,
     try_register_user_xml_dialects,
     try_rust_core_batch_diff,
@@ -1376,59 +1372,6 @@ class SemanticDiffer:
             with profiler.phase("trivia_stripping"):
                 old_filtered = _strip_trivia_impl(old_cst_json, trivia_types)
                 new_filtered = _strip_trivia_impl(new_cst_json, trivia_types)
-
-            # ── 6. Style-only shortcut ────────────────────────────────────────
-            with profiler.phase("style_hashing"):
-                old_hash = _compute_structural_hash_for_tree(old_filtered)
-                new_hash = _compute_structural_hash_for_tree(new_filtered)
-
-            if old_hash == new_hash:
-                logger.debug("Style-only diff for %r", filename)
-                diagnostics.record(
-                    stage="style",
-                    action="style_only_shortcut",
-                    rule_id="pipeline.style_only_shortcut",
-                    reason="filtered CST structural hashes are equal",
-                    metadata={"old_hash": old_hash, "new_hash": new_hash},
-                )
-                style_evidence = build_style_only_evidence(
-                    old_source=old_content,
-                    new_source=new_content,
-                    language=language,
-                    old_cst_json=old_cst_json,
-                    new_cst_json=new_cst_json,
-                )
-                metadata: dict[str, Any] = {}
-                if style_evidence.ignored_style_changes:
-                    metadata["ignored_style_changes"] = style_evidence.ignored_style_changes
-                for group in style_evidence.change_groups:
-                    diagnostics.record_group(stage="invariance", group=group)
-                if diagnostics.enabled:
-                    diagnostics.summary.update(
-                        {
-                            "early_exit": "style_only",
-                            "final_change_count": 0,
-                            "final_group_count": len(style_evidence.change_groups),
-                        }
-                    )
-                    metadata["diagnostics"] = diagnostics.snapshot()
-                style_diff = SemanticDiff.style_only(
-                    filename,
-                    new_filename if new_filename is not None else filename,
-                    language,
-                    change_groups=style_evidence.change_groups,
-                    metadata=metadata,
-                )
-                style_diff = _apply_file_lifecycle_to_diff(style_diff, file_lifecycle)
-                return apply_guardrails_to_diff(
-                    style_diff,
-                    old_tree=None,
-                    new_tree=None,
-                    old_source=old_raw,
-                    new_source=new_raw,
-                    config=self._config,
-                    diagnostics=diagnostics,
-                )
 
             # ── 6.5. Adaptive fuel budget ─────────────────────────────────────
             old_cst_nodes = _count_cst_nodes(old_filtered)
