@@ -32,13 +32,14 @@ def _error(seq, code, message, op):
     ("edit.py", "def g("),
     ("edit.js", "function g("),
 ])
+@pytest.mark.parametrize("stream", [False, True])
 def test_typed_rust_direct_diff_decline_never_falls_back_to_python(
-    tmp_path, name, content,
+    tmp_path, name, content, stream,
 ):
     server, differ = _server(tmp_path)
     request = _ParsedRequest(
         op="diff", seq=17, path=name, content=content, ref="HEAD",
-        edit_deltas=None, stream=False,
+        edit_deltas=None, stream=stream,
     )
     source = LiveBufferSource(tmp_path, name, content, ref="HEAD")
     sent = []
@@ -75,6 +76,53 @@ def test_valid_rust_diff_remains_successful_without_python_recomputation(tmp_pat
     assert sent[0]["diff"]["is_fallback"] is False
     assert sent[0]["diff"]["parse_errors"] == []
     differ.diff.assert_not_called()
+
+
+def test_valid_streaming_emits_only_rust_certified_final_changes(tmp_path):
+    from intentumdiff.core.models import Change, ChangeType
+
+    server, differ = _server(tmp_path)
+    request = _ParsedRequest(
+        op="diff", seq=20, path="edit.py", content="def g():\n    return 2\n",
+        ref="HEAD", edit_deltas=None, stream=True,
+    )
+    source = LiveBufferSource(tmp_path, "edit.py", request.content, ref="HEAD")
+    valid = SemanticDiff(
+        old_filename="edit.py", new_filename="edit.py", language="python",
+        is_fallback=False, parse_errors=[], has_semantic_changes=True,
+        changes=[Change(change_type=ChangeType.MODIFICATION, description="real edit")],
+    ).model_dump(mode="json")
+    sent = []
+    with patch("intentumdiff.rust_core.live_handle_diff", return_value={"diff": valid}):
+        server._process_request_with_source(source, request, sent.append)
+
+    assert len(sent) == 2
+    assert sent[0]["op"] == "diff" and sent[0]["ok"] is True
+    assert sent[0]["event"]["phase"] == 3  # FINAL, not a Python synthetic stage
+    assert sent[0]["event"]["change"]["change_type"] == "MODIFICATION"
+    assert sent[1] == {"op": "diff", "seq": 20, "ok": True, "done": True}
+    differ.diff.assert_not_called()
+    differ.diff_stream_progressive.assert_not_called()
+
+
+def test_valid_unchanged_stream_has_only_successful_done(tmp_path):
+    server, differ = _server(tmp_path)
+    request = _ParsedRequest(
+        op="diff", seq=21, path="edit.py", content="x = 1\n",
+        ref="HEAD", edit_deltas=None, stream=True,
+    )
+    source = LiveBufferSource(tmp_path, "edit.py", request.content, ref="HEAD")
+    valid = SemanticDiff(
+        old_filename="edit.py", new_filename="edit.py", language="python",
+        is_fallback=False, parse_errors=[],
+    ).model_dump(mode="json")
+    sent = []
+    with patch("intentumdiff.rust_core.live_handle_diff", return_value={"diff": valid}):
+        server._process_request_with_source(source, request, sent.append)
+
+    assert sent == [{"op": "diff", "seq": 21, "ok": True, "done": True}]
+    differ.diff.assert_not_called()
+    differ.diff_stream_progressive.assert_not_called()
 
 
 def test_typed_rust_commit_decline_propagates_without_python_commit_fallback(tmp_path):
