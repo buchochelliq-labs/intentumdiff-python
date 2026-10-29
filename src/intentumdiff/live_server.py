@@ -124,6 +124,14 @@ class _ParsedRequest:
     stream: bool | None = None
 
 
+class _RustLiveDecline(RuntimeError):
+    """Transport the Rust Core's typed incomplete-result response unchanged."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
 def _make_socket_dir() -> str:
     """Return (and create) a private directory for the server's socket file."""
     runtime_dir = os.environ.get("XDG_RUNTIME_DIR", "")
@@ -962,6 +970,8 @@ class LiveServer:
                         "guardrail_violation_count": len(diff.guardrail_violations),
                     },
                 })
+        except _RustLiveDecline as exc:
+            send_fn(self._error_response(request.seq, exc.code, str(exc), op="diff"))
         except FileNotFoundError as exc:
             send_fn(
                 self._error_response(
@@ -1007,6 +1017,13 @@ class LiveServer:
                 self._differ._config.model_dump_json(),
                 _wasm_dir(),
             )
+            if "fallback_code" in native:
+                # Rust owns completeness: a typed decline is an error, never
+                # permission to recover a purportedly successful Python diff.
+                raise _RustLiveDecline(
+                    str(native["fallback_code"]),
+                    str(native.get("fallback") or "Rust Core declined an incomplete diff"),
+                )
             if "diff" in native:
                 return SemanticDiff.model_validate(native["diff"])
         return self._differ.diff(source)
@@ -1036,6 +1053,11 @@ class LiveServer:
                 review_config.model_dump_json(),
                 _wasm_dir(),
             )
+            if "fallback_code" in native:
+                raise _RustLiveDecline(
+                    str(native["fallback_code"]),
+                    str(native.get("fallback") or "Rust Core declined an incomplete commit review"),
+                )
             if "commit_diff" in native:
                 return CommitDiff.model_validate(native["commit_diff"])
         return commit_differ.diff_commit(
@@ -1181,6 +1203,8 @@ class LiveServer:
             })
         except _ReviewCancelled:
             return
+        except _RustLiveDecline as exc:
+            send_fn(self._error_response(seq, exc.code, str(exc), op="review"))
         except Exception as exc:
             logger.warning(
                 "LiveServer review error for seq=%d: %s",
