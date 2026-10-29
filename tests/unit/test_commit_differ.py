@@ -55,6 +55,17 @@ def _fn(id: str, label: str) -> SemanticNode:
     )
 
 
+def _empty_module(filename: str) -> SemanticNode:
+    """A successfully parsed file with no symbol definitions, not a missing parse."""
+    return SemanticNode(
+        id=f"empty-{filename}",
+        node_type="module",
+        label="",
+        position=_pos(),
+        structural_hash="h-empty",
+    )
+
+
 def _style_only_diff(old: str = "a.py", new: str = "a.py") -> SemanticDiff:
     return SemanticDiff.style_only(old, new, "python")
 
@@ -701,6 +712,12 @@ class TestSemanticDifferParallelCommit:
 class TestDiffCommit:
     def _make_differ(self) -> CommitDiffer:
         cd = CommitDiffer()
+        # Mocked per-file diffs below are intentionally not valid Python source.
+        # A successful second parse must still produce a real (empty) tree;
+        # returning None must never stand for "no relevant symbols".
+        cd._parse_to_tree = MagicMock(
+            side_effect=lambda filename, language, content: _empty_module(filename)
+        )
         return cd
 
     def _patch_pipeline(self, cd: CommitDiffer, diffs: list[SemanticDiff]):
@@ -778,6 +795,37 @@ class TestDiffCommit:
                 cd._parse_to_tree = MagicMock(return_value=None)
                 with pytest.raises(RuntimeError, match="fuel.py.*FUEL_EXCEEDED"):
                     cd.diff_commit(".")
+
+    def test_second_parse_missing_parser_aborts_after_per_file_success(self):
+        """A complete per-file diff does not certify the later cross-file index."""
+        from intentumdiff.plugins.exceptions import PluginNotFoundError
+
+        cd = self._make_differ()
+        cd._differ._run_pipeline = MagicMock(return_value=_semantic_diff("good.py", "good.py"))
+        cd._parse_to_tree = MagicMock(side_effect=PluginNotFoundError("missing indexing parser"))
+        with self._patch_iter_changed_sources(
+            [("old", "new", "good.py", "good.py", None)]
+        ):
+            with pytest.raises(RuntimeError, match="good.py.*missing indexing parser") as exc:
+                cd.diff_commit(".")
+        assert isinstance(exc.value.__cause__, PluginNotFoundError)
+
+    def test_missing_required_index_rejects_successful_commit(self):
+        from intentumdiff.core.commit_differ import FileDiffResult
+
+        cd = self._make_differ()
+        cd._build_index = MagicMock(return_value=None)
+        record = FileDiffResult(
+            file_diff=_semantic_diff("good.py", "good.py"),
+            old_path="good.py",
+            new_path="good.py",
+            old_content="before",
+            new_content="after",
+        )
+        with pytest.raises(RuntimeError, match="missing old or new index"):
+            cd.finalize_commit_diff(
+                [record], [], old_ref="HEAD~1", new_ref="HEAD"
+            )
 
     def test_plugin_not_found_fails_closed(self):
         cd = self._make_differ()
@@ -897,7 +945,7 @@ class TestDiffCommit:
                         return fn_old
                     if content == "new_helpers":
                         return fn_new
-                    return None  # all other file versions have no relevant symbols
+                    return _empty_module(filename)  # parsed, but has no symbols
 
                 cd._parse_to_tree = _fake_parse_to_tree
 
@@ -1038,13 +1086,23 @@ class TestDiffCommit:
 
 
 class TestParseToTree:
-    def test_returns_none_for_unknown_extension(self):
+    def test_missing_parser_propagates_instead_of_fabricating_empty_index(self):
         cd = CommitDiffer()
         from intentumdiff.plugins.exceptions import PluginNotFoundError
 
         cd._differ._registry.detect_parser = MagicMock(side_effect=PluginNotFoundError("no parser"))
-        result = cd._parse_to_tree("file.unknown", "unknown", "content")
-        assert result is None
+        with pytest.raises(PluginNotFoundError, match="no parser"):
+            cd._parse_to_tree("file.unknown", "unknown", "content")
+
+    def test_missing_index_tree_fails_with_filename(self):
+        cd = CommitDiffer()
+        cd._parse_to_tree = MagicMock(return_value=None)
+        with pytest.raises(RuntimeError, match="missing.py.*parser returned no semantic tree"):
+            cd._build_index([("missing.py", "python", "def f(): pass")])
+
+    def test_empty_file_list_is_the_only_absent_index(self):
+        cd = CommitDiffer()
+        assert cd._build_index([]) is None
 
     def test_propagates_engine_parse_exception(self):
         cd = CommitDiffer()
