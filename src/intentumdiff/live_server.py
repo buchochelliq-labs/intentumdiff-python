@@ -1032,8 +1032,28 @@ class LiveServer:
                     str(native.get("fallback") or "Rust Core declined an incomplete diff"),
                 )
             if "diff" in native:
-                return SemanticDiff.model_validate(native["diff"])
-        return self._differ.diff(source)
+                diff = SemanticDiff.model_validate(native["diff"])
+                if diff.is_fallback or diff.parse_errors:
+                    raise _RustLiveDecline(
+                        "native_parse_incomplete",
+                        f"{request.path}: Rust Core returned an incomplete diff "
+                        f"({'; '.join(diff.parse_errors) or 'source fallback'})",
+                    )
+                return diff
+            # A legacy untyped decline is NOT permission to turn an uncertified
+            # native result into a successful Python-path semantic review.
+            raise _RustLiveDecline(
+                "native_diff_uncertified",
+                f"{request.path}: {native.get('fallback') or 'Rust Core returned no certified diff'}",
+            )
+        diff = self._differ.diff(source)
+        if diff.is_fallback or diff.parse_errors:
+            raise _RustLiveDecline(
+                "native_parse_incomplete",
+                f"{request.path}: diagnostic diff is incomplete "
+                f"({'; '.join(diff.parse_errors) or 'source fallback'})",
+            )
+        return diff
 
     def _compute_review(
         self,
@@ -1067,6 +1087,13 @@ class LiveServer:
                 )
             if "commit_diff" in native:
                 return CommitDiff.model_validate(native["commit_diff"])
+            # A native refusal must not become a fabricated successful review
+            # through a second, routed Python orchestration path.
+            raise _RustLiveDecline(
+                "native_review_uncertified",
+                f"{new_ref or 'working tree'}: "
+                f"{native.get('fallback') or 'Rust Core returned no certified commit review'}",
+            )
         return commit_differ.diff_commit(
             repo_path=self._repo_path, old_ref=old_ref, new_ref=new_ref
         )
@@ -1186,6 +1213,20 @@ class LiveServer:
             else:
                 commit_diff = self._compute_review(
                     review_config, commit_differ, old_ref, new_ref
+                )
+            # Streamed file events are provisional. Rust's completeness flags
+            # must be checked before publishing an ok:true whole-commit result.
+            incomplete_files = [
+                f"{item.new_filename or item.old_filename}: "
+                f"{'; '.join(item.parse_errors) or 'source fallback'}"
+                for item in commit_diff.file_diffs
+                if item.is_fallback or item.parse_errors
+            ]
+            if commit_diff.parse_errors or incomplete_files:
+                raise _RustLiveDecline(
+                    "native_parse_incomplete",
+                    "Incomplete commit review: "
+                    + "; ".join([*commit_diff.parse_errors, *incomplete_files]),
                 )
             with self._lock:
                 if seq < self._latest_review_seq:
