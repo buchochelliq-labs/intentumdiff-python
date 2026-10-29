@@ -287,12 +287,17 @@ def test_direct_c_abi_source_review_preserves_exact_request_and_result(monkeypat
         "id": "corpus-tsx-addition", "corpus_language": "tsx",
         "filename": "component.tsx", "old": "", "new": "const value = 1;\\n",
     }
-    assert check(case, Path("/candidate"), Path("/candidate/wasm")) == expected
+    # The transport must pass through the exact path values supplied by the
+    # host. Windows Path("/candidate") uses backslashes, so a POSIX literal
+    # would reject a correct, unchanged C ABI request on both Windows runners.
+    repo_path = Path("/candidate")
+    wasm_path = repo_path / "wasm"
+    assert check(case, repo_path, wasm_path) == expected
     assert len(calls) == 1
     handler, repo, filename, old, new, config, wasm = calls[0]
     assert handler == "live_diff_contents"
     assert (repo, filename, old, new, wasm) == (
-        "/candidate", "component.tsx", "", "const value = 1;\\n", "/candidate/wasm",
+        str(repo_path), "component.tsx", "", "const value = 1;\\n", str(wasm_path),
     )
     assert json.loads(config) == {"language_hint": "tsx", "strict_plugins": True}
 
