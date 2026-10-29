@@ -33,8 +33,19 @@ def projection(diff):
         'changes': [{'change_type': c['change_type'], 'old_node': node(c.get('old_node')),
                      'new_node': node(c.get('new_node')), 'refactoring_kind': c.get('refactoring_kind')}
                     for c in diff['changes']],
-        'groups': [{'kind': g['kind'], 'raw_change_indices': g.get('raw_change_indices', [])}
-                   for g in diff['change_groups'] if g['kind'] != 'NOISE_SUPPRESSED'],
+        # Compare Rust-owned review semantics, not only a group's category.
+        # IDs, hashes and runtime metadata are deliberately excluded because
+        # they are transport-specific; rule identity and source labels are not.
+        'groups': [
+            {
+                'kind': g['kind'],
+                'rule_id': g.get('rule_id'),
+                'raw_change_indices': g.get('raw_change_indices') or [],
+                'old_labels': g.get('old_labels') or [],
+                'new_labels': g.get('new_labels') or [],
+            }
+            for g in diff['change_groups'] if g['kind'] != 'NOISE_SUPPRESSED'
+        ],
         'has_semantic_changes': diff['has_semantic_changes'],
         'is_style_only': diff['is_style_only'], 'is_fallback': diff['is_fallback'],
     }

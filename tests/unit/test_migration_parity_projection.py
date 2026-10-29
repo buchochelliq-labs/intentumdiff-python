@@ -65,6 +65,41 @@ def test_corpus_parity_ignores_only_nonsemantic_ids():
     assert _projection(left) == _projection(right)
 
 
+def test_parity_projection_rejects_different_rust_group_rules_and_labels():
+    left = _diff(_node("value"))
+    left["change_groups"] = [{
+        "kind": "IGNORED_STYLE",
+        "rule_id": "javascript.formatting.call_argument_wrapping_equivalence",
+        "raw_change_indices": [],
+        "old_labels": ["old wrapping"],
+        "new_labels": ["new wrapping"],
+        "old_node_ids": ["route-dependent-id"],
+        "metadata": {"reason": "wrapping"},
+    }]
+    different_rule = json.loads(json.dumps(left))
+    different_rule["change_groups"][0]["rule_id"] = "unsupported.semantic_claim"
+    assert _projection(left) != _projection(different_rule)
+
+    different_labels = json.loads(json.dumps(left))
+    different_labels["change_groups"][0]["new_labels"] = ["fabricated changed text"]
+    assert _projection(left) != _projection(different_labels)
+
+
+def test_parity_projection_excludes_only_nonsemantic_group_metadata():
+    left = _diff(_node("value"))
+    left["change_groups"] = [{
+        "kind": "MEANINGFUL_CHANGE", "rule_id": "rust.named_entity_edit",
+        "raw_change_indices": [0], "old_labels": ["before"], "new_labels": ["after"],
+        "old_node_ids": ["native-1"], "new_node_ids": ["native-2"],
+        "metadata": {"backend": "native"},
+    }]
+    alternate = json.loads(json.dumps(left))
+    alternate["change_groups"][0]["old_node_ids"] = ["python-1"]
+    alternate["change_groups"][0]["new_node_ids"] = ["python-2"]
+    alternate["change_groups"][0]["metadata"] = {"backend": "python"}
+    assert _projection(left) == _projection(alternate)
+
+
 def test_vbnet_declaration_extent_requires_closing_source_line():
     checker = runpy.run_path(str(SCRIPT))["check_vbnet_declaration_extent"]
     source = (Path(__file__).resolve().parents[1] / "fixtures" / "corpus"
