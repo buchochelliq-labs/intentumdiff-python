@@ -31,7 +31,7 @@ CORE_REPO = "https://github.com/buchochelliq-labs/intentumdiff-core"
 # parser availability, Rust-owned semantic promotions and fail-closed live
 # diff/commit-review completeness and Rust-owned live provenance. Four-platform CI must independently pass.
 # Override only for deliberate integration builds, not a moving branch.
-CORE_REF = os.environ.get("INTENTUMDIFF_CORE_REF", "4be45b51fda495974c0f91186e9ba4ed96e368d4")
+CORE_REF = os.environ.get("INTENTUMDIFF_CORE_REF", "d275e3311e7bbf8cac181064559cae8eb6d8f665")
 # Reviewed registry RC candidate: includes verified VB.NET multiline-span Wasm fix.
 # Registry PR #13 must be vetted before this becomes the final integration pin.
 REGISTRY_REF = "d566f7c0b96f94ce5be9e16cb1b96e8018bcc039"
