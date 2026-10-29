@@ -29,9 +29,9 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 CORE_REPO = "https://github.com/buchochelliq-labs/intentumdiff-core"
 # Immutable candidate from Core #187: metered Wasmtime 48.0.7, verified
 # parser availability, Rust-owned semantic promotions and fail-closed live
-# diff/commit-review completeness. Four-platform CI must independently pass.
+# diff/commit-review completeness and Rust-owned live provenance. Four-platform CI must independently pass.
 # Override only for deliberate integration builds, not a moving branch.
-CORE_REF = os.environ.get("INTENTUMDIFF_CORE_REF", "28d69009123e80b3a884c206dbc5b13b761cceb0")
+CORE_REF = os.environ.get("INTENTUMDIFF_CORE_REF", "4be45b51fda495974c0f91186e9ba4ed96e368d4")
 # Reviewed registry RC candidate: includes verified VB.NET multiline-span Wasm fix.
 # Registry PR #13 must be vetted before this becomes the final integration pin.
 REGISTRY_REF = "d566f7c0b96f94ce5be9e16cb1b96e8018bcc039"
