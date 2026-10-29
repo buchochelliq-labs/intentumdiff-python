@@ -322,16 +322,27 @@ class TestProtocolV2:
         differ._registry = object()
         sent: list[dict] = []
 
-        with patch("intentumdiff.core.commit_differ.CommitDiffer") as commit_differ:
-            commit_differ.return_value.diff_commit.return_value = CommitDiff(
-                old_ref="HEAD",
-                new_ref="",
-            )
+        # Non-diagnostic reviews are certified by Rust directly. Mock that
+        # boundary, not CommitDiffer.diff_commit, which is no longer invoked.
+        with (
+            patch("intentumdiff.core.commit_differ.CommitDiffer") as commit_differ,
+            patch(
+                "intentumdiff.rust_core.live_handle_review",
+                return_value={
+                    "commit_diff": CommitDiff(
+                        old_ref="HEAD", new_ref=""
+                    ).model_dump(mode="json")
+                },
+            ) as rust_review,
+        ):
             server._process_request({"op": "review", "seq": 8}, lambda obj: sent.append(obj))
 
         _, kwargs = commit_differ.call_args
         assert kwargs["config"].plugin_fuel == 100_000_000
         assert kwargs["registry"] is None
+        assert rust_review.call_count == 1
+        assert json.loads(rust_review.call_args.args[3])["plugin_fuel"] == 100_000_000
+        assert sent[0]["ok"] is True
         assert sent[0]["metadata"]["review_fuel_capped"] is True
         assert sent[0]["metadata"]["review_plugin_fuel"] == 100_000_000
 
