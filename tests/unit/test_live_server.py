@@ -476,13 +476,25 @@ class TestProcessRequest:
         assert sent[0]["metadata"]["language"] == "python"
 
     def test_streaming_returns_events_then_done(self) -> None:
-        from intentumdiff.core.models import ChangeStreamEvent, ChangeStreamPhase
+        """Only the completed diff may supply streamed FINAL events."""
+        from intentumdiff.core.models import Change, ChangeStreamPhase, ChangeType, SemanticDiff
 
-        event = ChangeStreamEvent(
-            phase=ChangeStreamPhase.STRUCTURAL, action="add", change=None
-        )
         differ = _make_differ()
-        differ.diff_stream_progressive.return_value = iter([event])
+        differ.diff.return_value = SemanticDiff(
+            old_filename="foo.py",
+            new_filename="foo.py",
+            language="python",
+            has_semantic_changes=True,
+            changes=[
+                Change(
+                    change_type=ChangeType.MODIFICATION,
+                    description="certified semantic edit",
+                )
+            ],
+        )
+        differ.diff_stream_progressive.side_effect = AssertionError(
+            "retired Python progressive stream must never run"
+        )
 
         from intentumdiff.live_server import LiveServer
 
@@ -498,8 +510,15 @@ class TestProcessRequest:
                 lambda obj: sent.append(obj),
             )
 
-        assert any("event" in m for m in sent), "Expected at least one event message"
+        assert len(sent) == 2
+        assert sent[0]["op"] == "diff" and sent[0]["ok"] is True
+        assert sent[0]["seq"] == 2
+        assert sent[0]["event"]["phase"] == ChangeStreamPhase.FINAL
+        assert sent[0]["event"]["action"] == "add"
+        assert sent[0]["event"]["change"]["change_type"] == "MODIFICATION"
         assert sent[-1] == {"op": "diff", "seq": 2, "ok": True, "done": True}
+        differ.diff.assert_called_once()
+        differ.diff_stream_progressive.assert_not_called()
 
     def test_file_not_found_returns_error(self) -> None:
         differ = _make_differ()
