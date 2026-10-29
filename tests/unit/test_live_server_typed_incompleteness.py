@@ -147,14 +147,14 @@ def test_typed_rust_commit_decline_reports_typed_review_error(tmp_path):
         "fallback": "broken.js: Invalid syntax in commit",
     }
     sent = []
-    with patch("intentumdiff.rust_core.live_parse_review_request",
-               return_value={"parsed": {"old_ref": "HEAD~1", "new_ref": "HEAD",
-                                         "stream": False}}), (
-        patch("intentumdiff.core.commit_differ.CommitDiffer") as differ_cls
-    ), (
-        patch("intentumdiff.rust_core.live_handle_review", return_value=decline)
-    ), (
-        patch("intentumdiff.rust_core.live_error_response", side_effect=_error)
+    with (
+        patch(
+            "intentumdiff.rust_core.live_parse_review_request",
+            return_value={"parsed": {"old_ref": "HEAD~1", "new_ref": "HEAD", "stream": False}},
+        ),
+        patch("intentumdiff.core.commit_differ.CommitDiffer") as differ_cls,
+        patch("intentumdiff.rust_core.live_handle_review", return_value=decline),
+        patch("intentumdiff.rust_core.live_error_response", side_effect=_error),
     ):
         server._process_review_request({"op": "review"}, 19, sent.append)
 
