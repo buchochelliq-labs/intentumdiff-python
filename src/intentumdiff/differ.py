@@ -64,22 +64,7 @@ from intentumdiff._differ_gate import (
     _validate_git_ref as _validate_git_ref,
 )
 from intentumdiff._differ_presentation import (
-    _GENERIC_STRING_LABELS as _GENERIC_STRING_LABELS,
-)
-from intentumdiff._differ_presentation import (
-    _NAMED_ENTITY_NODE_TYPES as _NAMED_ENTITY_NODE_TYPES,
-)
-from intentumdiff._differ_presentation import (
-    _all_semantic_nodes as _all_semantic_nodes,
-)
-from intentumdiff._differ_presentation import (
-    _annotate_text_diffs as _annotate_text_diffs,
-)
-from intentumdiff._differ_presentation import (
     _changes_to_stream_events as _changes_to_stream_events,
-)
-from intentumdiff._differ_presentation import (
-    _clean_string_literal_label as _clean_string_literal_label,
 )
 from intentumdiff._differ_presentation import (
     _compute_structural_hash_for_tree as _compute_structural_hash_for_tree,
@@ -100,9 +85,6 @@ from intentumdiff._differ_presentation import (
     _has_error_node as _has_error_node,
 )
 from intentumdiff._differ_presentation import (
-    _is_named_entity_node as _is_named_entity_node,
-)
-from intentumdiff._differ_presentation import (
     _markdown_section_heading_rename_presentation as _markdown_section_heading_rename_presentation,
 )
 from intentumdiff._differ_presentation import (
@@ -113,15 +95,6 @@ from intentumdiff._differ_presentation import (
 )
 from intentumdiff._differ_presentation import (
     _root_structural_hash as _root_structural_hash,
-)
-from intentumdiff._differ_presentation import (
-    _semantic_parent_map as _semantic_parent_map,
-)
-from intentumdiff._differ_presentation import (
-    _slice_source_text as _slice_source_text,
-)
-from intentumdiff._differ_presentation import (
-    _surface_changed_in_place_entities as _surface_changed_in_place_entities,
 )
 from intentumdiff._differ_presentation import (
     _token_fallback_diff as _token_fallback_diff,

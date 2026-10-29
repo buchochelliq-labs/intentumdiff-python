@@ -622,27 +622,37 @@ def try_rust_generic_text_review(
     new_source: str,
     raw_change_count: int,
 ) -> tuple[list[Change], list[ChangeGroup]] | None:
-    """Run the Rust generic-text review stage; None means fall back to Python.
+    """Decode Rust-owned generic text review or an explicit Rust size-cap decline.
 
-    Engine-side port of the generic text presentation (issue #35): line diff,
-    relocated-line netting, blank symmetry, inline char detail, and the
-    presentation.generic_text_diff suppression audit group.
+    Only Rust may decline this stage. Missing handlers, invalid envelopes and
+    engine failures cannot silently become successful Python pass-throughs.
     """
     try:
         backend = _load_backend()
         review_fn = getattr(backend, "generic_text_review_json", None)
         if not callable(review_fn):
-            return None
+            raise RuntimeError("required Rust generic-text review handler is unavailable")
         data = json.loads(review_fn(old_source, new_source, raw_change_count))
-        if not isinstance(data, dict) or not data.get("used"):
+        if not isinstance(data, dict):
+            raise ValueError("Rust generic-text review must return a JSON object")
+        used = data.get("used")
+        if used is False:
+            if data.get("reason") != "input too large for LCS table":
+                raise ValueError("uncertified Rust generic-text review decline")
             return None
-        changes = [Change.model_validate(item) for item in data.get("changes") or []]
-        groups: list[ChangeGroup] = []
-        group = data.get("group")
-        if group:
-            groups.append(ChangeGroup.model_validate(group))
+        if used is not True:
+            raise ValueError("Rust generic-text review missing explicit used=true")
+        if not isinstance(data.get("changes"), list):
+            raise ValueError("Rust generic-text review missing changes list")
+        if "group" not in data:
+            raise ValueError("Rust generic-text review missing group field")
+        group = data["group"]
+        if group is not None and not isinstance(group, dict):
+            raise ValueError("Rust generic-text review group must be an object or null")
+        changes = [Change.model_validate(item) for item in data["changes"]]
+        groups = [ChangeGroup.model_validate(group)] if group else []
         return changes, groups
-    except Exception as exc:  # noqa: BLE001 - an engine failure is not an unsupported decline.
+    except Exception as exc:  # noqa: BLE001 - fail closed on native/DTO failures.
         raise RuntimeError(f"Rust generic-text review failed: {exc}") from exc
 
 
@@ -650,7 +660,7 @@ def try_rust_markdown_section_review(
     old_source: str,
     new_source: str,
 ) -> dict[str, object] | None:
-    """Run the Rust markdown section review (moves + heading renames); None -> Python.
+    """Run required Rust Markdown section review; malformed native data must fail closed.
 
     Engine-side port of the markdown post-presentation rules (issue #36): section
     identity by content hash, LIS insertion-shift discrimination for moves, and
@@ -660,23 +670,37 @@ def try_rust_markdown_section_review(
         backend = _load_backend()
         review_fn = getattr(backend, "markdown_section_review_json", None)
         if not callable(review_fn):
-            return None
+            raise RuntimeError("required Rust markdown section review handler is unavailable")
         data = json.loads(review_fn(old_source, new_source))
-        if not isinstance(data, dict) or not data.get("used"):
-            return None
+        # The Rust markdown_section_review_impl always emits used=true and the
+        # complete DTO envelope, including real empty arrays for no-op reviews.
+        # Missing fields are engine-contract failures, never a Python decline.
+        if not isinstance(data, dict) or data.get("used") is not True:
+            raise ValueError("Rust markdown section review requires used=true")
+        for key in ("moves", "renames", "moved_labels", "old_heading_lines", "new_heading_lines"):
+            if not isinstance(data.get(key), list):
+                raise ValueError(f"Rust markdown section review requires {key} array")
+        if any(not isinstance(label, str) for label in data["moved_labels"]):
+            raise ValueError("Rust markdown section review has invalid moved_labels")
+        for key in ("old_heading_lines", "new_heading_lines"):
+            if any(type(line) is not int or line < 0 for line in data[key]):
+                raise ValueError(f"Rust markdown section review has invalid {key}")
+        for key in ("move_group", "rename_group"):
+            if key not in data or (data[key] is not None and not isinstance(data[key], dict)):
+                raise ValueError(f"Rust markdown section review requires {key} object or null")
         return {
-            "moves": [Change.model_validate(item) for item in data.get("moves") or []],
-            "moved_labels": set(data.get("moved_labels") or []),
+            "moves": [Change.model_validate(item) for item in data["moves"]],
+            "moved_labels": set(data["moved_labels"]),
             "move_group": (
-                ChangeGroup.model_validate(data["move_group"]) if data.get("move_group") else None
+                ChangeGroup.model_validate(data["move_group"])
+                if data["move_group"] is not None else None
             ),
-            "renames": [Change.model_validate(item) for item in data.get("renames") or []],
-            "old_heading_lines": set(data.get("old_heading_lines") or []),
-            "new_heading_lines": set(data.get("new_heading_lines") or []),
+            "renames": [Change.model_validate(item) for item in data["renames"]],
+            "old_heading_lines": set(data["old_heading_lines"]),
+            "new_heading_lines": set(data["new_heading_lines"]),
             "rename_group": (
                 ChangeGroup.model_validate(data["rename_group"])
-                if data.get("rename_group")
-                else None
+                if data["rename_group"] is not None else None
             ),
         }
     except Exception as exc:  # noqa: BLE001 - an engine failure is not an unsupported decline.
@@ -726,13 +750,13 @@ def try_rust_finalize_review(
     """Route the per-stage draft finalization through the Rust core (issue #57).
 
     Runs the SAME refine+finalize pipeline as the certified batch from the provided
-    semantic trees. None -> caller stays on the Python transitional path.
+    semantic trees. Only an explicit Rust tree-size guard may decline.
     """
     try:
         backend = _load_backend()
         finalize_fn = getattr(backend, "finalize_review_json", None)
         if not callable(finalize_fn):
-            return None
+            raise RuntimeError("required Rust finalize_review_json handler is unavailable")
         config_json = json.dumps(
             {
                 "min_height": config.min_height,
