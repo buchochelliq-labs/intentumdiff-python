@@ -260,7 +260,7 @@ def test_diff_cache_hit_skips_wasm(tmp_path: Path):
     mock_parser.grammar_id = "python"
     mock_parser.parser_mode = "full-parse"
     mock_parser.wasm_path = str(tmp_path / "python_parser.wasm")
-    Path(mock_parser.wasm_path).write_bytes(b"\\x00asm\\x01\\x00\\x00\\x00")
+    Path(mock_parser.wasm_path).write_bytes(b"\x00asm\x01\x00\x00\x00")
     mock_parser.trivia_node_types = []
     mock_parser.preprocess_source.side_effect = lambda s: s
 
@@ -310,8 +310,8 @@ def test_wasm_digest_cache_tracks_artifact_path_replacement_and_deletion(tmp_pat
     differ = SemanticDiffer()
     first = tmp_path / "parser-1.wasm"
     second = tmp_path / "parser-2.wasm"
-    first.write_bytes(b"\\x00asm\\x01\\x00\\x00\\x00parser-one")
-    second.write_bytes(b"\\x00asm\\x01\\x00\\x00\\x00parser-two")
+    first.write_bytes(b"\x00asm\x01\x00\x00\x00parser-one")
+    second.write_bytes(b"\x00asm\x01\x00\x00\x00parser-two")
     parser = MagicMock()
     parser.grammar_id = "shared"
 
@@ -322,7 +322,7 @@ def test_wasm_digest_cache_tracks_artifact_path_replacement_and_deletion(tmp_pat
     assert differ._wasm_hash_for(parser) != first_digest
 
     parser.wasm_path = str(first)
-    first.write_bytes(b"\\x00asm\\x01\\x00\\x00\\x00replaced-with-new-bytes")
+    first.write_bytes(b"\x00asm\x01\x00\x00\x00replaced-with-new-bytes")
     assert differ._wasm_hash_for(parser) != first_digest
     first.unlink()
     with pytest.raises(RuntimeError, match="cannot fingerprint parser Wasm"):
