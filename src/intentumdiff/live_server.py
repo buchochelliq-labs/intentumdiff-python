@@ -80,7 +80,7 @@ if TYPE_CHECKING:
     from intentumdiff.differ import SemanticDiffer
     from rich.console import Console as RichConsole
 
-from intentumdiff.core.models import ChangeStreamEvent, EditDelta
+from intentumdiff.core.models import ChangeStreamEvent, ChangeStreamPhase, EditDelta
 from intentumdiff.sources.live_buffer_source import LiveBufferSource
 
 logger = logging.getLogger(__name__)
@@ -940,9 +940,16 @@ class LiveServer:
         use_stream = self._stream_analysis if request.stream is None else request.stream
         try:
             if use_stream:
-                for event in self._differ.diff_stream_progressive(source):
+                # Stream transport shares the SAME Rust-certified complete diff
+                # and typed decline contract as non-streaming. Emit only FINAL
+                # events from that result; never finalize a fallback as success.
+                diff = self._compute_diff(source, request)
+                for change in diff.changes:
                     if self._is_stale(request):
                         return
+                    event = ChangeStreamEvent(
+                        phase=ChangeStreamPhase.FINAL, action="add", change=change
+                    )
                     send_fn({
                         "op": "diff",
                         "seq": request.seq,
