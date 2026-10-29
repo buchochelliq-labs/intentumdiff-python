@@ -1105,13 +1105,13 @@ class SemanticDiffer:
                 )
                 routed = SemanticDiff.model_validate_json(updated_json)
             except Exception as exc:
-                logger.warning(
-                    "Diff analyzer %r failed for %r: %s - skipping",
-                    getattr(analyzer, "provenance", "?"),
-                    filename,
-                    exc,
-                )
-                continue
+                # Semantic analyzers are configured diff-to-diff processing.
+                # Omitting a failed one would return an incomplete review as
+                # successful, including on fuel exhaustion or malformed DTOs.
+                provenance = getattr(analyzer, "provenance", "?")
+                raise RuntimeError(
+                    f"Diff analyzer {provenance!r} failed for {filename!r}: {exc}"
+                ) from exc
         return routed
 
     def _run_stages_1_to_11(
