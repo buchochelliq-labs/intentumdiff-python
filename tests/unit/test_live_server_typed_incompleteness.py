@@ -160,3 +160,112 @@ def test_typed_rust_commit_decline_reports_typed_review_error(tmp_path):
 
     assert sent == [_error(19, decline["fallback_code"], decline["fallback"], "review")]
     differ_cls.return_value.diff_commit.assert_not_called()
+
+
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("native_response", [
+    {"fallback": "Rust Core cannot certify this file"},
+    {},
+], ids=["legacy-untyped-decline", "missing-native-result"])
+def test_untyped_native_diff_decline_cannot_fall_through_to_python(
+    tmp_path, stream, native_response,
+):
+    server, differ = _server(tmp_path)
+    request = _ParsedRequest(
+        op="diff", seq=31, path="edit.py", content="def broken(",
+        ref="HEAD", edit_deltas=None, stream=stream,
+    )
+    source = LiveBufferSource(tmp_path, "edit.py", request.content, ref="HEAD")
+    sent = []
+    with (
+        patch("intentumdiff.rust_core.live_handle_diff", return_value=native_response),
+        patch("intentumdiff.rust_core.live_error_response", side_effect=_error),
+    ):
+        server._process_request_with_source(source, request, sent.append)
+
+    assert len(sent) == 1
+    assert sent[0]["op"] == "diff" and sent[0]["seq"] == 31
+    assert sent[0]["ok"] is False
+    assert sent[0]["error"]["code"] == "native_diff_uncertified"
+    assert sent[0]["error"]["message"].startswith("edit.py: ")
+    differ.diff.assert_not_called()
+    differ.diff_stream_progressive.assert_not_called()
+
+
+@pytest.mark.parametrize("fallback,parse_errors", [
+    (True, []),
+    (False, ["Invalid syntax near '('"]),
+], ids=["rust-source-fallback", "rust-parse-errors"])
+@pytest.mark.parametrize("stream", [False, True])
+def test_native_diff_with_incomplete_dto_is_not_advertised_as_success(
+    tmp_path, fallback, parse_errors, stream,
+):
+    server, differ = _server(tmp_path)
+    request = _ParsedRequest(
+        op="diff", seq=32, path="edit.py", content="def broken(",
+        ref="HEAD", edit_deltas=None, stream=stream,
+    )
+    source = LiveBufferSource(tmp_path, "edit.py", request.content, ref="HEAD")
+    invalid = SemanticDiff(
+        old_filename="edit.py", new_filename="edit.py", language="python",
+        is_fallback=fallback, parse_errors=parse_errors,
+    ).model_dump(mode="json")
+    sent = []
+    with (
+        patch("intentumdiff.rust_core.live_handle_diff", return_value={"diff": invalid}),
+        patch("intentumdiff.rust_core.live_error_response", side_effect=_error),
+    ):
+        server._process_request_with_source(source, request, sent.append)
+
+    assert len(sent) == 1 and sent[0]["ok"] is False
+    assert sent[0]["error"]["code"] == "native_parse_incomplete"
+    assert sent[0]["error"]["message"].startswith("edit.py: ")
+    differ.diff.assert_not_called()
+    differ.diff_stream_progressive.assert_not_called()
+
+
+def test_untyped_native_commit_decline_does_not_invoke_python_commit_path(tmp_path):
+    server, _ = _server(tmp_path)
+    commit_differ = MagicMock()
+    with patch(
+        "intentumdiff.rust_core.live_handle_review",
+        return_value={"fallback": "Rust Core cannot certify mixed-language review"},
+    ):
+        with pytest.raises(_RustLiveDecline) as exc:
+            server._compute_review(server._differ._config, commit_differ, "HEAD", "")
+    assert exc.value.code == "native_review_uncertified"
+    assert "Rust Core cannot certify" in str(exc.value)
+    commit_differ.diff_commit.assert_not_called()
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_incomplete_commit_dto_fails_closed_in_both_review_transports(tmp_path, stream):
+    from intentumdiff.core.models import CommitDiff
+
+    server, _ = _server(tmp_path)
+    bad_file = SemanticDiff(
+        old_filename="broken.js", new_filename="broken.js", language="javascript",
+        is_fallback=True, parse_errors=["Syntax error in broken.js"],
+    )
+    invalid_review = CommitDiff(
+        old_ref="HEAD", new_ref="", file_diffs=[bad_file],
+    )
+    sent = []
+    with (
+        patch(
+            "intentumdiff.rust_core.live_parse_review_request",
+            return_value={"parsed": {"old_ref": "HEAD", "new_ref": "", "stream": stream}},
+        ),
+        patch("intentumdiff.core.commit_differ.CommitDiffer") as differ_cls,
+        patch("intentumdiff.rust_core.live_error_response", side_effect=_error),
+        patch.object(server, "_run_streaming_review", return_value=invalid_review),
+        patch("intentumdiff.rust_core.live_handle_review",
+              return_value={"commit_diff": invalid_review.model_dump(mode="json")}),
+    ):
+        server._process_review_request({"op": "review"}, 33, sent.append)
+
+    assert len(sent) == 1 and sent[0]["ok"] is False
+    assert sent[0]["error"]["code"] == "native_parse_incomplete"
+    assert "broken.js" in sent[0]["error"]["message"]
+    assert "Syntax error" in sent[0]["error"]["message"]
+    differ_cls.return_value.diff_commit.assert_not_called()
