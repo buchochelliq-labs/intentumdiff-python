@@ -1024,7 +1024,7 @@ def test_semantic_differ_uses_rust_batch_for_changed_complete_output(
     assert "matching" not in phases
 
 
-def test_rust_core_commit_json_adapter_keeps_commit_bytes_lazy(
+def test_rust_core_commit_json_adapter_validates_complete_bytes(
     monkeypatch: Any,
 ) -> None:
     monkeypatch.delenv("INTENTUMDIFF_RUST_CORE_VALIDATE_JSON", raising=False)
@@ -1045,15 +1045,6 @@ def test_rust_core_commit_json_adapter_keeps_commit_bytes_lazy(
         }
     ).encode("utf-8")
     captured: list[dict[str, Any]] = []
-
-    def fail_hot_path_validation(cls: type[CommitDiff], payload: bytes) -> CommitDiff:
-        raise AssertionError("CommitDiff validation should be lazy on the fast path")
-
-    monkeypatch.setattr(
-        CommitDiff,
-        "model_validate_json",
-        classmethod(fail_hot_path_validation),
-    )
 
     def diff_batch_commit_json(request_json: str) -> tuple[str, bytes]:
         captured.append(json.loads(request_json))
@@ -1116,7 +1107,7 @@ def test_rust_core_commit_json_adapter_keeps_commit_bytes_lazy(
         for phase in attempt.adapter_phase_timings
         if phase["name"] == "rust_core_commit_pyo3_call"
     )["summary_exclude"] is True
-    assert "rust_core_commit_debug_pydantic_validation" not in phase_names
+    assert "rust_core_commit_pydantic_validation" in phase_names
 
 
 def test_rust_core_commit_json_lazy_wrapper_validates_on_demand() -> None:
@@ -1373,3 +1364,81 @@ def test_semantic_differ_skips_rust_batch_when_python_diff_analyzer_is_registere
     rust_core_meta = diff.metadata.get("rust_core")
     if rust_core_meta is not None:
         assert rust_core_meta.get("stage") == "per_stage_finalize_routing"
+
+
+@pytest.mark.parametrize("payload", ["null", '"false"', '"true"', "0", "1", "[]", "{}"])
+def test_native_semantic_predicates_reject_nonboolean_success(monkeypatch: Any, payload: str) -> None:
+    """Rust semantic flags are bool DTOs, not Python truthiness conversions."""
+    backend = SimpleNamespace(
+        parse_errors_present_json=lambda *_args: payload,
+        review_trees_equivalent_json=lambda *_args: payload,
+    )
+    monkeypatch.setattr(rust_core, "_load_backend", lambda: backend)
+    root = _node("root", "module", "module", line=0)
+    with pytest.raises(ValueError, match="Rust parse_errors_present must return a JSON boolean"):
+        rust_core.parse_errors_present("source", "{}", "python")
+    with pytest.raises(ValueError, match="Rust review_trees_equivalent must return a JSON boolean"):
+        rust_core.review_trees_equivalent(root, root)
+
+
+@pytest.mark.parametrize("payload,expected", [("true", True), ("false", False)])
+def test_native_semantic_predicates_preserve_actual_booleans(
+    monkeypatch: Any, payload: str, expected: bool,
+) -> None:
+    backend = SimpleNamespace(
+        parse_errors_present_json=lambda *_args: payload,
+        review_trees_equivalent_json=lambda *_args: payload,
+    )
+    monkeypatch.setattr(rust_core, "_load_backend", lambda: backend)
+    root = _node("root", "module", "module", line=0)
+    assert rust_core.parse_errors_present("source", "{}", "python") is expected
+    assert rust_core.review_trees_equivalent(root, root) is expected
+
+
+@pytest.mark.parametrize("payload", [b"not-json", b"{}", b"null", b"[]"])
+def test_native_commit_adapter_rejects_malformed_complete_dto(
+    monkeypatch: Any, payload: bytes,
+) -> None:
+    control = json.dumps({
+        "schema_version": 1, "status": "complete",
+        "certification": "python_native_v4kb",
+        "commit_diff_byte_size": len(payload),
+    })
+    backend = SimpleNamespace(
+        version=lambda: "0.4.0",
+        supports_language=lambda _language: True,
+        diff_batch_commit_json=lambda _request: (control, payload),
+    )
+    monkeypatch.setattr(rust_core, "_load_backend", lambda: backend)
+    with pytest.raises(RuntimeError, match="malformed CommitDiff JSON"):
+        rust_core.try_rust_core_commit_json(
+            files=[{
+                "old_source": "x = 1\n", "new_source": "x = 2\n",
+                "old_filename": "example.py", "new_filename": "example.py",
+                "language": "python", "parser_plugin_id": "python",
+                "parser_wasm_path": "python_parser.wasm",
+            }],
+            old_ref="HEAD", new_ref="",
+            config=DiffConfig(experimental_rust_core=True),
+        )
+
+
+@pytest.mark.parametrize("payload", [b"not-json", b"{}", b"null", b"[]", b""])
+def test_native_working_tree_adapter_rejects_malformed_complete_dto(
+    monkeypatch: Any, payload: bytes,
+) -> None:
+    control = json.dumps({
+        "schema_version": 1, "status": "complete",
+        "certification": "python_native_v4kb",
+        "commit_diff_byte_size": len(payload),
+    })
+    backend = SimpleNamespace(
+        version=lambda: "0.4.0",
+        diff_working_tree_python_commit_json=lambda _request: (control, payload),
+    )
+    monkeypatch.setattr(rust_core, "_load_backend", lambda: backend)
+    monkeypatch.setattr(rust_core, "rust_core_enabled", lambda _config: True)
+    with pytest.raises(RuntimeError, match="malformed CommitDiff JSON"):
+        rust_core.try_rust_core_working_tree_commit_json(
+            repo_path=".", old_ref="HEAD", config=DiffConfig(experimental_rust_core=True),
+        )
