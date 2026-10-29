@@ -259,7 +259,8 @@ def test_diff_cache_hit_skips_wasm(tmp_path: Path):
     mock_parser = MagicMock()
     mock_parser.grammar_id = "python"
     mock_parser.parser_mode = "full-parse"
-    mock_parser.wasm_path = str(tmp_path / "python_parser.wasm")  # non-existent → "unknown" hash
+    mock_parser.wasm_path = str(tmp_path / "python_parser.wasm")
+    Path(mock_parser.wasm_path).write_bytes(b"\\x00asm\\x01\\x00\\x00\\x00")
     mock_parser.trivia_node_types = []
     mock_parser.preprocess_source.side_effect = lambda s: s
 
@@ -274,6 +275,58 @@ def test_diff_cache_hit_skips_wasm(tmp_path: Path):
     assert result.is_style_only is True
     assert cache.diff_hits == 1
     mock_parser.process.assert_not_called()
+
+
+def test_missing_wasm_rejects_legacy_unknown_diff_cache_hit(tmp_path: Path):
+    """A missing component must not resurrect a cached style-only success."""
+    from intentumdiff.core.models import SemanticDiff
+
+    cache = _InMemoryCache()
+    differ = SemanticDiffer(config=DiffConfig(experimental_rust_core=False), cache=cache)
+    old, new = "def f(): pass", "def g(): pass"
+    fake = SemanticDiff(
+        changes=[], old_filename="test.py", new_filename="test.py",
+        language="python", has_semantic_changes=False, is_style_only=True,
+        parse_errors=[],
+    )
+    cache.put_diff(cache.diff_key(old, new, "python", "unknown"), fake.model_dump_json())
+
+    parser = MagicMock()
+    parser.grammar_id = "python"
+    parser.parser_mode = "full-parse"
+    parser.wasm_path = str(tmp_path / "missing_parser.wasm")
+    parser.trivia_node_types = []
+    parser.preprocess_source.side_effect = lambda value: value
+
+    with patch.object(differ._registry, "detect_parser", return_value=(parser, "python")):
+        with pytest.raises(RuntimeError, match="cannot fingerprint parser Wasm"):
+            differ.diff_strings(old, new, "test.py")
+    assert cache.diff_hits == 0
+    parser.process.assert_not_called()
+
+
+def test_wasm_digest_cache_tracks_artifact_path_replacement_and_deletion(tmp_path: Path):
+    """Same grammar does not let distinct/replaced Wasm files share a digest."""
+    differ = SemanticDiffer()
+    first = tmp_path / "parser-1.wasm"
+    second = tmp_path / "parser-2.wasm"
+    first.write_bytes(b"\\x00asm\\x01\\x00\\x00\\x00parser-one")
+    second.write_bytes(b"\\x00asm\\x01\\x00\\x00\\x00parser-two")
+    parser = MagicMock()
+    parser.grammar_id = "shared"
+
+    parser.wasm_path = str(first)
+    first_digest = differ._wasm_hash_for(parser)
+    assert len(first_digest) == 64
+    parser.wasm_path = str(second)
+    assert differ._wasm_hash_for(parser) != first_digest
+
+    parser.wasm_path = str(first)
+    first.write_bytes(b"\\x00asm\\x01\\x00\\x00\\x00replaced-with-new-bytes")
+    assert differ._wasm_hash_for(parser) != first_digest
+    first.unlink()
+    with pytest.raises(RuntimeError, match="cannot fingerprint parser Wasm"):
+        differ._wasm_hash_for(parser)
 
 
 # ---------------------------------------------------------------------------
