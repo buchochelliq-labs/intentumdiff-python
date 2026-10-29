@@ -1108,7 +1108,7 @@ class SemanticDiffer:
     ) -> SemanticDiff:
         """Run pipeline stages 1–11 (parse → trivia-strip → Wasm → GumTree → moves).
 
-        Returns ``SemanticDiff`` for early exits (cache hit, style-only, fallback).
+        Returns Rust-owned results or explicitly marked source fallbacks.
         """
         # ── 1 + 2. Language detection ────────────────────────────────────────
         profiler = profiler or self._new_profiler()
@@ -1212,8 +1212,6 @@ class SemanticDiffer:
             "" if compile_metadata is None else f"|compile:{compile_metadata['fingerprint']}"
         )
 
-        # Cache state — resolved later once we have preprocessed content.
-        _diff_key: str | None = None
         _guardrail_cache_bypass = guardrails_may_apply(filename, new_filename, self._config)
         cache_grammar_id = parser.grammar_id
 
@@ -1304,23 +1302,10 @@ class SemanticDiffer:
         )
         logger.debug("full-parse mode for %r via %r", filename, parser.grammar_id)
 
-        # Diff-level cache check for full-parse mode.
-        if self._cache is not None and not diagnostics.enabled and not _guardrail_cache_bypass:
-            _wasm_hash = self._wasm_hash_for(parser)
-            _diff_key = self._cache.diff_key(
-                old_content,
-                new_content,
-                f"{parser.grammar_id}{cache_schema_suffix}{compile_cache_suffix}",
-                _wasm_hash,
-            )
-            _cached = self._cache.get_diff(_diff_key)
-            if _cached is not None:
-                logger.debug("Diff cache hit for %r (full-parse)", filename)
-                return _apply_file_lifecycle_to_diff(
-                    SemanticDiff.model_validate_json(_cached),
-                    file_lifecycle,
-                )
-
+        # Full-diff cache reads are disabled for this release candidate (#187).
+        # Historical entries omit the Rust engine/configuration identity and
+        # can silently replay stale style-only results after semantic fixes.
+        # Parser-tree caching remains available and is keyed by actual Wasm bytes.
         with profiler.phase("wasm_plugin_execution"):
             old_side_absent = file_lifecycle == "added" and old_content == ""
             new_side_absent = file_lifecycle == "deleted" and new_content == ""
