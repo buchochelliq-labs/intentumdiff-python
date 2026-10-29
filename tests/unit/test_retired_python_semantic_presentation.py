@@ -86,3 +86,23 @@ def test_obsolete_optional_rust_adapters_and_python_matching_mirrors_stay_absent
     assert not (definitions & forbidden), (
         f"Obsolete Rust adapters: {sorted(definitions & forbidden)}"
     )
+
+
+def test_python_style_shortcut_is_retired_even_from_unreachable_paths():
+    """Only Rust may decide formatting equivalence or discard source edits."""
+    package = Path(__file__).resolve().parents[2] / "src" / "intentumdiff"
+    differ = ast.parse((package / "differ.py").read_text(encoding="utf-8"))
+    assert not any(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "SemanticDiff"
+        and node.func.attr == "style_only"
+        for node in ast.walk(differ)
+    ), "Python must not fabricate SemanticDiff.style_only for filtered-CST equality"
+    assert not any(
+        isinstance(node, ast.Name) and node.id in {
+            "build_style_only_evidence", "_compute_structural_hash_for_tree",
+        }
+        for node in ast.walk(differ)
+    ), "Python pipeline must not reconstruct discarded style edits from CST hashes"
