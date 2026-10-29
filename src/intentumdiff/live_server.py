@@ -1004,10 +1004,10 @@ class LiveServer:
     ) -> Any:
         """Return the ``SemanticDiff`` for a non-streaming request.
 
-        The native handler in the Rust core serves Python files end-to-end (certified batch,
-        #100 A2.5 Phase A1); it returns the diff JSON, which is rebuilt through the DTO so
-        normalisation matches the Python path exactly. Any other language, or a non-certified
-        outcome, falls back to the Python differ pipeline unchanged.
+        The Rust handler returns a certified diff DTO or a typed/legacy decline.
+        Declines and fallback-marked/incomplete DTOs never become successful live
+        semantic reviews. Explicit diagnostics may use the routed Rust pipeline,
+        but its incomplete results are likewise rejected.
         """
         from intentumdiff import rust_core
         from intentumdiff.core.models import SemanticDiff
@@ -1064,10 +1064,10 @@ class LiveServer:
     ) -> Any:
         """Return the ``CommitDiff`` for a non-streaming review.
 
-        The native handler serves all-Python certified commits from the core (#100 A2.5 Phase A2),
-        returning the CommitDiff JSON (rebuilt through the DTO for parity); any other case (mixed
-        language, working-tree review, diagnostics, or a non-certified batch) falls back to the
-        Python ``CommitDiffer.diff_commit``.
+        The Rust Core certifies the non-streamed commit review and Python only
+        validates/transports its DTO. Native declines must not fall through to
+        another success path. Explicit diagnostics use routed Rust-backed review;
+        the final completeness check also applies to that result.
         """
         from intentumdiff import rust_core
         from intentumdiff.core.models import CommitDiff
