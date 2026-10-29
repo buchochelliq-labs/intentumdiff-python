@@ -792,9 +792,10 @@ class SemanticDiffer:
         """
         Diff every file that changed between two git refs.
 
-        Files that have no registered parser are silently skipped.
-        Runtime/parser failures instead abort the review: a list of successes
-        must not silently omit a changed file when its Rust engine call fails.
+        A changed text file with no registered parser is a failed review.
+        Missing-parser and native runtime failures abort the entire review with
+        the path and original cause. Binary/ignored files are excluded during
+        source collection, before the semantic engine is called.
 
         Parameters
         ----------
@@ -809,7 +810,7 @@ class SemanticDiffer:
         Returns
         -------
         list[SemanticDiff]
-            One entry per changed file that could be parsed.
+            One entry per reviewed changed text file; failures raise rather than disappear.
         """
         from intentumdiff.sources.git_source import iter_changed_sources
 
@@ -960,8 +961,8 @@ class SemanticDiffer:
                 result = result.model_copy(update={"staging_status": staging_status})
             return result
 
-        _skip_exc = (PluginNotFoundError,)
-        _warn_exc = (PluginFuelExhausted, ValueError, RuntimeError)
+        # Parser absence is not a certified decline: it must fail the whole commit.
+        _warn_exc = (PluginNotFoundError, PluginFuelExhausted, ValueError, RuntimeError)
 
         parallel = self._config.parallel
         if not parallel:
@@ -990,8 +991,6 @@ class SemanticDiffer:
                     # A genuine token-level fallback under the RUST_ONLY gate is fatal —
                     # propagate it rather than let ``_warn_exc`` silently drop the file.
                     raise
-                except _skip_exc:
-                    logger.debug("Skipping %r — no parser available", item[2])
                 except _warn_exc as exc:
                     # A runtime failure cannot be represented in list[SemanticDiff].
                     # Preserve the failed file identity; a partial review is unsafe.
@@ -1038,8 +1037,6 @@ class SemanticDiffer:
                     except RustOnlyGateError:
                         # Fatal under the RUST_ONLY gate — propagate, do not drop.
                         raise
-                    except _skip_exc:
-                        logger.debug("Skipping %r — no parser available", sources[idx][2])
                     except _warn_exc as exc:
                         # Match the sequential path: failures must not disappear
                         # when one parallel worker succeeds.

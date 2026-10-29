@@ -187,33 +187,35 @@ class TestSemanticDifferParallelCommit:
 
         assert [result.new_filename for result in results] == ["a.py", "b.py"]
 
-    def test_parallel_commit_skips_plugin_not_found_like_sequential(self):
+    @pytest.mark.parametrize("parallel", [False, 2], ids=["sequential", "parallel"])
+    @pytest.mark.parametrize("include_good", [False, True], ids=["all-missing", "mixed"])
+    def test_commit_missing_parser_fails_closed(self, parallel, include_good):
+        """Missing parsers cannot silently omit changed text, even alongside a success."""
         from intentumdiff.plugins.exceptions import PluginNotFoundError
 
-        differ = SemanticDiffer(DiffConfig(parallel=2, experimental_rust_core=False))
+        differ = SemanticDiffer(DiffConfig(parallel=parallel, experimental_rust_core=False))
 
         def fake_pipeline(self, old, new, filename, language_hint, **kwargs):
             if filename == "unknown.xyz":
                 raise PluginNotFoundError("no parser")
             return _semantic_diff(filename, kwargs.get("new_filename") or filename)
 
-        changed_files = [
-            ("old unknown", "new unknown", "unknown.xyz", "unknown.xyz", None),
-            ("old good", "new good", "good.py", "good.py", None),
-        ]
+        changed_files = []
+        if include_good:
+            changed_files.append(("old good", "new good", "good.py", "good.py", None))
+        changed_files.append(
+            ("old unknown", "new unknown", "unknown.xyz", "unknown.xyz", None)
+        )
         repo_patch, sources_patch = self._patch_git_inputs(changed_files)
         with (
             repo_patch,
             sources_patch,
-            patch.object(
-                SemanticDiffer,
-                "_run_pipeline",
-                fake_pipeline,
-            ),
+            patch.object(SemanticDiffer, "_run_pipeline", fake_pipeline),
         ):
-            results = differ.diff_commit(".")
+            with pytest.raises(RuntimeError, match=r"Commit diff failed for 'unknown\.xyz'") as caught:
+                differ.diff_commit(".")
 
-        assert [result.new_filename for result in results] == ["good.py"]
+        assert isinstance(caught.value.__cause__, PluginNotFoundError)
 
     @pytest.mark.parametrize("parallel", [False, 2], ids=["sequential", "parallel"])
     @pytest.mark.parametrize(
