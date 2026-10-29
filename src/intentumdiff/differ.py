@@ -1730,7 +1730,14 @@ class SemanticDiffer:
             raise RuntimeError("parse cache store is not configured")
         wasm_hash = self._wasm_hash_for(parser)
         grammar_id = cache_grammar_id or parser.grammar_id
-        key = cache.parse_key(input_, grammar_id, wasm_hash)
+        # Rust owns the canonical key hashing. The host must supply every
+        # argument that can affect the Wasm parser output, including language
+        # and filename for a multi-language/shared-grammar component (#188).
+        parser_context = json.dumps(
+            {"grammar_id": grammar_id, "language": language, "filename": filename},
+            sort_keys=True, separators=(",", ":"),
+        )
+        key = cache.parse_key(input_, parser_context, wasm_hash)
         cached = cache.get_parse(key)
         if cached is not None:
             logger.debug("Parse cache hit for grammar=%r", grammar_id)
