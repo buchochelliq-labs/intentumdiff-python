@@ -64,9 +64,6 @@ from intentumdiff._differ_gate import (
     _validate_git_ref as _validate_git_ref,
 )
 from intentumdiff._differ_presentation import (
-    _changes_to_stream_events as _changes_to_stream_events,
-)
-from intentumdiff._differ_presentation import (
     _compute_structural_hash_for_tree as _compute_structural_hash_for_tree,
 )
 from intentumdiff._differ_presentation import (
@@ -1895,29 +1892,12 @@ class SemanticDiffer:
         self,
         source: Source,
     ) -> Iterator[ChangeStreamEvent]:
-        """Yield ``ChangeStreamEvent`` objects as each pipeline phase completes.
+        """Stream finalized Rust-backed changes as FINAL add events.
 
-        Three phases are emitted in order:
-
-        1. **STRUCTURAL** — one ``action="add"`` event per change after the
-           GumTree edit script and move-promotion pass (stage 11).  These are
-           available immediately, before the (potentially expensive) refactoring
-           detection runs.
-
-        2. **REFINED** — events emitted once refactoring detection (stage 12) has
-           run.  Consumed raw changes are replaced by ``action="revise"`` events
-           carrying a ``REFACTORING`` change and ``replaced_ids`` listing the
-           node IDs of the Phase-1 changes they supersede.  Removed-but-not-
-           replaced changes are emitted as ``action="remove"``.
-
-        3. **FINAL** — events emitted after classification (stage 13) and any
-           diff-analyzer plugins (stage 13.5) have run.  Emitted only when these
-           passes modify the change list.
-
-        Consumers that only care about the final result can wait until all events
-        are consumed; consumers that want to display partial results can render
-        STRUCTURAL changes immediately and update/remove them as REFINED and
-        FINAL events arrive.
+        The Python pipeline was retired in 0.0.2. Rust returns a complete diff,
+        not intermediate structural/refinement snapshots. This API preserves its
+        event-shaped transport contract, but it does not manufacture progressive
+        semantic phases or reconcile changes using Python object identity.
         """
         old_content, new_content, filename, language_hint = source.get_content()
         yield from self._run_pipeline_streaming(old_content, new_content, filename, language_hint)
@@ -1931,7 +1911,7 @@ class SemanticDiffer:
         *,
         new_filename: str | None = None,
     ) -> Iterator[ChangeStreamEvent]:
-        """Internal generator — see ``diff_stream_progressive`` for the public API."""
+        """Emit Rust-finalized changes through the event-shaped API."""
         result = self._run_stages_1_to_11(
             old_content, new_content, filename, language_hint, new_filename=new_filename
         )

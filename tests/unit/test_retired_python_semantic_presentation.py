@@ -6,6 +6,7 @@ from pathlib import Path
 
 _REMOVED = {
     "_all_semantic_nodes",
+    "_changes_to_stream_events",
     "_semantic_parent_map",
     "_annotate_text_diffs",
     "_is_named_entity_node",

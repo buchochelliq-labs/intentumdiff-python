@@ -420,14 +420,12 @@ class ChangeGroup(BaseModel, frozen=True):
 class ChangeStreamEvent(BaseModel, frozen=True):
     """A single event emitted by ``SemanticDiffer.diff_stream_progressive``.
 
-    Events are ordered: STRUCTURAL (phase 1) events arrive first, followed by
-    REFINED (phase 2) events that may revise or supersede them, and finally
-    FINAL (phase 3) events from the classification and diff-analyzer passes.
+    The 0.0.2 Python adapter emits FINAL add events only, after Rust has
+    produced a complete diff. STRUCTURAL, REFINED, revise and remove remain in
+    the DTO schema for compatibility but are not synthesized by Python.
 
-    ``replaced_ids`` contains the ``old_node.id`` / ``new_node.id`` values of
-    Phase-1 changes that this event supersedes.  When ``action="revise"`` the
-    consumer should look up prior events by these IDs and replace them.  When
-    ``action="remove"`` there is no replacement — the change was absorbed.
+    ``replaced_ids`` carries identifiers supplied by a backend for revising or
+    removing earlier events; the 0.0.2 adapter leaves it empty.
     """
 
     phase: ChangeStreamPhase
@@ -716,11 +714,10 @@ class DiffConfig(BaseModel):
     ``SemanticDiff`` will have ``is_fallback=True``."""
 
     stream_analysis: bool = False
-    """Enable progressive per-phase streaming via ``diff_stream_progressive``.
+    """Legacy stream-analysis configuration flag.
 
-    When ``True``, callers may iterate ``SemanticDiffer.diff_stream_progressive``
-    to receive ``ChangeStreamEvent`` objects as each pipeline phase completes,
-    rather than waiting for the entire pipeline to finish."""
+    In 0.0.2, ``diff_stream_progressive`` only adapts a completed Rust diff to
+    FINAL add events. This flag does not enable partial Rust phase snapshots."""
 
 
 # ---------------------------------------------------------------------------

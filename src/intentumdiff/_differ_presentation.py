@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from collections.abc import Iterator
 from typing import Any
 
 from intentumdiff.analysis.text_review import (
@@ -15,8 +14,6 @@ from intentumdiff.core.models import (
     Change,
     ChangeGroup,
     ChangeGroupKind,
-    ChangeStreamEvent,
-    ChangeStreamPhase,
     ChangeType,
     NodePosition,
     SemanticDiff,
@@ -139,70 +136,3 @@ def _enrich_literal_labels(root: SemanticNode, source: str) -> SemanticNode:
     from intentumdiff.rust_core import enrich_literal_labels
 
     return enrich_literal_labels(root, source)
-
-
-def _changes_to_stream_events(
-    before: list[Change],
-    after: list[Change],
-    phase: ChangeStreamPhase,
-) -> Iterator[ChangeStreamEvent]:
-    """Diff two successive change lists and emit ``ChangeStreamEvent`` objects.
-
-    Uses Python object identity to detect which changes were consumed
-    (present in *before* but not *after*) and which were added (present in
-    *after* but not *before*).  ``Change`` is a frozen Pydantic model, so
-    every logical change is a distinct Python object even when its content is
-    the same as another change.
-
-    For each new change in *after*:
-
-    * If the new change's ``old_node.id`` or ``new_node.id`` matches a node ID
-      from a consumed *before* change, the event is emitted as ``action="revise"``
-      with ``replaced_ids`` listing the consumed node IDs.
-    * Otherwise, ``action="add"`` is emitted (a brand-new change with no
-      predecessor in *before*).
-
-    Any change that was consumed but not referenced by a new change is emitted
-    as ``action="remove"`` with ``replaced_ids=[node_id]``.
-    """
-    before_by_pyid = {id(c): c for c in before}
-    after_by_pyid = {id(c): c for c in after}
-
-    consumed = [c for pyid, c in before_by_pyid.items() if pyid not in after_by_pyid]
-    added = [c for pyid, c in after_by_pyid.items() if pyid not in before_by_pyid]
-
-    # Build node-id → consumed-change lookup.
-    consumed_node_ids: dict[str, Change] = {}
-    for c in consumed:
-        if c.old_node:
-            consumed_node_ids[c.old_node.id] = c
-        if c.new_node:
-            consumed_node_ids[c.new_node.id] = c
-
-    mentioned: set[str] = set()
-
-    for new_change in added:
-        replaced_ids: list[str] = []
-        if new_change.old_node and new_change.old_node.id in consumed_node_ids:
-            replaced_ids.append(new_change.old_node.id)
-            mentioned.add(new_change.old_node.id)
-        if new_change.new_node and new_change.new_node.id in consumed_node_ids:
-            replaced_ids.append(new_change.new_node.id)
-            mentioned.add(new_change.new_node.id)
-        yield ChangeStreamEvent(
-            phase=phase,
-            action="revise" if replaced_ids else "add",
-            replaced_ids=replaced_ids,
-            change=new_change,
-        )
-
-    # Emit "remove" for consumed changes not referenced by any new change.
-    for c in consumed:
-        node_id = c.old_node.id if c.old_node else c.new_node.id if c.new_node else None
-        if node_id and node_id not in mentioned:
-            yield ChangeStreamEvent(
-                phase=phase,
-                action="remove",
-                replaced_ids=[node_id],
-            )
-
