@@ -310,6 +310,48 @@ def test_wasm_digest_cache_tracks_artifact_path_replacement_and_deletion(tmp_pat
         differ._wasm_hash_for(parser)
 
 
+def test_parse_cache_distinguishes_language_and_filename_for_shared_grammar(
+    tmp_path: Path,
+):
+    """Wasm parser inputs with identical source/grammar must not alias."""
+    from intentumdiff.core.models import NodePosition, SemanticNode
+
+    cache = _InMemoryCache()
+    differ = SemanticDiffer(cache=cache)
+    wasm = tmp_path / "shared-parser.wasm"
+    wasm.write_bytes(b"\x00asm\x01\x00\x00\x00")
+    parser = MagicMock()
+    parser.grammar_id = "js-ts"
+    parser.wasm_path = str(wasm)
+
+    def process(_source: str, language: str, filename: str, *, fuel: int):
+        assert fuel == 100
+        return SemanticNode(
+            id=f"{language}@{filename}",
+            node_type="module", label="", structural_hash="h",
+            position=NodePosition(
+                start_line=0, start_col=0, end_line=0, end_col=0,
+            ),
+            children=[],
+        )
+
+    parser.process.side_effect = process
+    js = differ._cached_process(parser, "same source", "javascript", "same.js", 100)
+    ts = differ._cached_process(parser, "same source", "typescript", "same.js", 100)
+    renamed = differ._cached_process(
+        parser, "same source", "typescript", "renamed.ts", 100,
+    )
+    again = differ._cached_process(
+        parser, "same source", "typescript", "renamed.ts", 100,
+    )
+    assert [js.id, ts.id, renamed.id] == [
+        "javascript@same.js", "typescript@same.js", "typescript@renamed.ts",
+    ]
+    assert again == renamed
+    assert parser.process.call_count == 3
+    assert cache.parse_hits == 1
+
+
 # ---------------------------------------------------------------------------
 # Cache limit input validation (B6-10)
 # ---------------------------------------------------------------------------
