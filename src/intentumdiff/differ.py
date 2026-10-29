@@ -220,8 +220,8 @@ class SemanticDiffer:
         self._parallel_executor_workers: int | None = None
         self._parallel_executor_lock = threading.Lock()
         self._parallel_worker_local = threading.local()
-        # Per-grammar wasm binary hash, computed once and memoised.
-        self._wasm_hash_cache: dict[str, str] = {}
+        # Parser digest identity includes the actual on-disk artifact, never grammar alone.
+        self._wasm_hash_cache: dict[tuple[str, int, int, int, int, int], str] = {}
 
         # ── Cache / analytics setup ───────────────────────────────────────
         if cache is not None:
@@ -1756,22 +1756,40 @@ class SemanticDiffer:
         return node
 
     def _wasm_hash_for(self, parser: Any) -> str:
-        """
-        Return a short (16-hex-char) sha256 hash of the parser's Wasm binary.
+        """Fingerprint the actual parser Wasm bytes before permitting any cache hit.
 
-        Computed once per grammar_id per process and memoised.  Falls back to
-        ``"unknown"`` if the path cannot be read (e.g. in-memory test stubs).
+        A missing/unreadable component cannot share an ``"unknown"`` cache key:
+        doing so could replay a stale style-only diff without invoking Rust.
+        File identity (not grammar ID) scopes the memoized digest, so different
+        component revisions cannot share previously certified parse/diff results.
         """
-        grammar_id: str = parser.grammar_id
-        if grammar_id in self._wasm_hash_cache:
-            return self._wasm_hash_cache[grammar_id]
         try:
-            wasm_bytes = Path(parser.wasm_path).read_bytes()
-            h = hashlib.sha256(wasm_bytes).hexdigest()[:16]
-        except (AttributeError, OSError):
-            h = "unknown"
-        self._wasm_hash_cache[grammar_id] = h
-        return h
+            path = Path(parser.wasm_path).resolve(strict=True)
+            stat_before = path.stat()
+        except (AttributeError, TypeError, OSError) as exc:
+            raise RuntimeError(
+                f"cannot fingerprint parser Wasm at {getattr(parser, 'wasm_path', None)!r}"
+            ) from exc
+
+        def _identity(stat: Any) -> tuple[int, int, int, int, int]:
+            return (stat.st_dev, stat.st_ino, stat.st_size,
+                    stat.st_mtime_ns, stat.st_ctime_ns)
+
+        identity = (str(path), *_identity(stat_before))
+        digest = self._wasm_hash_cache.get(identity)
+        if digest is not None:
+            return digest
+
+        try:
+            wasm_bytes = path.read_bytes()
+            stat_after = path.stat()
+        except OSError as exc:
+            raise RuntimeError(f"cannot fingerprint parser Wasm at {str(path)!r}") from exc
+        if _identity(stat_before) != _identity(stat_after):
+            raise RuntimeError(f"parser Wasm changed while hashing: {path}")
+        digest = hashlib.sha256(wasm_bytes).hexdigest()
+        self._wasm_hash_cache[identity] = digest
+        return digest
 
     def _parse(
         self,
