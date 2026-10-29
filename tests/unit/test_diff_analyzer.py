@@ -287,8 +287,8 @@ class TestPipelineDiffAnalyzerStage:
         ]
         assert len(custom_types) > 0
 
-    def test_stage_13_5_skips_failing_analyzer(self):
-        """A crashing analyzer is skipped; the diff is still returned."""
+    def test_stage_13_5_propagates_failing_analyzer(self):
+        """A failed configured semantic pass cannot report a partial successful diff."""
         pytest.importorskip("tree_sitter_javascript")
 
         from intentumdiff import SemanticDiffer
@@ -303,7 +303,34 @@ class TestPipelineDiffAnalyzerStage:
 
         differ = SemanticDiffer(registry=registry)
         src = StringSource("SELECT 1;\n", "SELECT 2;\n", "test.sql")
-        diff = differ.diff(src)  # must not raise
+        with pytest.raises(RuntimeError, match="fake-plugin 0.0.1.*test.sql.*analyzer exploded"):
+            differ.diff(src)
 
-        for c in diff.changes:
-            assert isinstance(c.change_type, (ChangeType, str))
+
+@pytest.mark.parametrize("failure", ["runtime", "bad_json", "invalid_dto"])
+def test_configured_routed_analyzer_failures_never_return_partial_success(failure):
+    """Pure adapter test avoids optional parser availability and exercises exact routing."""
+    from intentumdiff import SemanticDiffer
+
+    def transform(diff_json, language, filename):
+        if failure == "runtime":
+            raise RuntimeError("fuel exhausted")
+        return "not-json" if failure == "bad_json" else "{}"
+
+    registry = PluginRegistry()
+    registry._diff_analyzers = [_make_adapter(lang_ids=["python"], transform=transform)]
+    differ = SemanticDiffer(registry=registry)
+    original = _simple_diff()
+    with pytest.raises(RuntimeError, match=r"fake-plugin 0\.0\.1.*test\.py"):
+        differ._run_diff_analyzers_on_routed(original, "python", "test.py", 1000)
+
+
+def test_configured_routed_analyzer_preserves_valid_rust_diff():
+    """A valid diff-to-diff analyzer remains a transport extension."""
+    from intentumdiff import SemanticDiffer
+
+    registry = PluginRegistry()
+    registry._diff_analyzers = [_make_adapter(lang_ids=["python"])]
+    differ = SemanticDiffer(registry=registry)
+    original = _simple_diff()
+    assert differ._run_diff_analyzers_on_routed(original, "python", "test.py", 1000) == original
