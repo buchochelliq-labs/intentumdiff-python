@@ -210,3 +210,86 @@ def test_corpus_fallback_is_rejected_even_when_both_routes_have_changes():
     fabricated_fallback["is_fallback"] = True
     with pytest.raises(AssertionError, match="semantic parser fell back"):
         checker(case, fabricated_fallback)
+
+
+@pytest.mark.parametrize("response", [
+    None,
+    [],
+    "not JSON",
+    "{}",
+    '{"fallback": "missing parser"}',
+    '{"diff": []}',
+])
+def test_direct_c_abi_source_review_fails_closed_on_bad_envelopes(
+    monkeypatch, response
+):
+    """A missing/invalid native source result cannot become Python success."""
+    from intentumdiff import rust_core
+
+    monkeypatch.setattr(rust_core, "_c_abi_call", lambda *_args: response)
+    check = runpy.run_path(str(SCRIPT))["run_direct_c_abi_source_review"]
+    case = {
+        "id": "corpus-tsx-addition", "corpus_language": "tsx",
+        "filename": "component.tsx", "old": "", "new": "const value = 1;\\n",
+    }
+    with pytest.raises(AssertionError):
+        check(case, Path("/candidate"), Path("/candidate/wasm"))
+
+
+def test_direct_c_abi_source_review_preserves_exact_request_and_result(monkeypatch):
+    """Use pinned staging paths and the same explicit parser hint as native."""
+    from intentumdiff import rust_core
+
+    calls = []
+    expected = _diff(_node("value"))
+    def fake_abi(*args):
+        calls.append(args)
+        return json.dumps({"diff": expected})
+    monkeypatch.setattr(rust_core, "_c_abi_call", fake_abi)
+    check = runpy.run_path(str(SCRIPT))["run_direct_c_abi_source_review"]
+    case = {
+        "id": "corpus-tsx-addition", "corpus_language": "tsx",
+        "filename": "component.tsx", "old": "", "new": "const value = 1;\\n",
+    }
+    assert check(case, Path("/candidate"), Path("/candidate/wasm")) == expected
+    assert len(calls) == 1
+    handler, repo, filename, old, new, config, wasm = calls[0]
+    assert handler == "live_diff_contents"
+    assert (repo, filename, old, new, wasm) == (
+        "/candidate", "component.tsx", "", "const value = 1;\\n", "/candidate/wasm",
+    )
+    assert json.loads(config) == {"language_hint": "tsx", "strict_plugins": True}
+
+
+def test_tsx_literal_exact_span_rejects_false_style_and_off_by_one():
+    """Source-judge the retained TSX literal across native, direct ABI and Python."""
+    import copy
+
+    check = runpy.run_path(str(SCRIPT))["check_tsx_literal_exact"]
+    case = {"id": 'corpus-tsx-edit_"_string'}
+    old = _node("Alice", col=22)
+    new = _node("AliceX", col=22)
+    for node in (old, new):
+        node["position"]["start_line"] = 6
+        node["position"]["end_line"] = 6
+    valid = _diff(new)
+    valid["changes"][0].update({
+        "change_type": "MODIFICATION",
+        "old_node": old,
+    })
+    check(case, valid)
+
+    corrupt = copy.deepcopy(valid)
+    corrupt["changes"][0]["new_node"]["position"]["end_col"] += 1
+    with pytest.raises(AssertionError, match="incorrect exact UTF-8 source span"):
+        check(case, corrupt)
+
+    false_style = copy.deepcopy(valid)
+    false_style["change_groups"] = [{"kind": "IGNORED_STYLE"}]
+    with pytest.raises(AssertionError, match="false formatting group"):
+        check(case, false_style)
+
+    suppressed = copy.deepcopy(valid)
+    suppressed["metadata"] = {"ignored_style_changes": [{"rule_id": "unjustified"}]}
+    with pytest.raises(AssertionError, match="falsely classified as formatting"):
+        check(case, suppressed)
