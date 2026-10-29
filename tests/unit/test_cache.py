@@ -5,7 +5,6 @@ tests/unit/test_cache.py — unit tests for the caching layer.
 from __future__ import annotations
 
 import json
-import os
 import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -229,52 +228,34 @@ def test_differ_creates_sqlite_cache_from_config(tmp_path: Path):
     differ._cache.close()
 
 
-@pytest.mark.skipif(
-    os.getenv("INTENTUMDIFF_ENFORCE_RUST_ONLY_ENGINE") == "1",
-    reason=(
-        "Uses a fully MagicMock'd parser to control the cache key; the mock cannot satisfy "
-        "the native Rust path the RUST_ONLY gate requires. Cache-hit behaviour with the real "
-        "engine is covered by the other cache tests."
-    ),
-)
-def test_diff_cache_hit_skips_wasm(tmp_path: Path):
-    """A diff-cache hit should return without calling parser.process()."""
-    cache = _InMemoryCache()
-    differ = SemanticDiffer(cache=cache)
-
-    # Build a minimal valid SemanticDiff JSON and prime the diff cache
+def test_legacy_diff_cache_cannot_replay_a_false_style_only_result(tmp_path: Path):
+    """An old semantic cache entry cannot bypass the current Rust/parser pipeline."""
     from intentumdiff.core.models import SemanticDiff
-    fake_diff = SemanticDiff(
-        changes=[],
-        old_filename="a.py",
-        new_filename="a.py",
-        language="python",
-        has_semantic_changes=False,
-        is_style_only=True,
+
+    cache = _InMemoryCache()
+    differ = SemanticDiffer(config=DiffConfig(experimental_rust_core=False), cache=cache)
+    old, new = "def f(): pass", "def g(): pass"
+    fake = SemanticDiff(
+        changes=[], old_filename="test.py", new_filename="test.py",
+        language="python", has_semantic_changes=False, is_style_only=True,
         parse_errors=[],
     )
-    fake_json = fake_diff.model_dump_json()
+    parser = MagicMock()
+    parser.grammar_id = "python"
+    parser.parser_mode = "full-parse"
+    parser.wasm_path = str(tmp_path / "python_parser.wasm")
+    Path(parser.wasm_path).write_bytes(b"\x00asm\x01\x00\x00\x00")
+    parser.trivia_node_types = []
+    parser.preprocess_source.side_effect = lambda value: value
+    parser.process.side_effect = RuntimeError("parser execution required")
 
-    # We need to know what key will be computed; use a mock parser to control it.
-    mock_parser = MagicMock()
-    mock_parser.grammar_id = "python"
-    mock_parser.parser_mode = "full-parse"
-    mock_parser.wasm_path = str(tmp_path / "python_parser.wasm")
-    Path(mock_parser.wasm_path).write_bytes(b"\x00asm\x01\x00\x00\x00")
-    mock_parser.trivia_node_types = []
-    mock_parser.preprocess_source.side_effect = lambda s: s
-
-    with patch.object(differ._registry, "detect_parser", return_value=(mock_parser, "python")):
-        # Compute the key ourselves
-        wasm_hash = differ._wasm_hash_for(mock_parser)
-        diff_key = cache.diff_key("def f(): pass", "def g(): pass", "python", wasm_hash)
-        cache._diff[diff_key] = fake_json
-
-        result = differ.diff_strings("def f(): pass", "def g(): pass", "test.py")
-
-    assert result.is_style_only is True
-    assert cache.diff_hits == 1
-    mock_parser.process.assert_not_called()
+    digest = differ._wasm_hash_for(parser)
+    cache.put_diff(cache.diff_key(old, new, "python", digest), fake.model_dump_json())
+    with patch.object(differ._registry, "detect_parser", return_value=(parser, "python")):
+        with pytest.raises(RuntimeError, match="parser execution required"):
+            differ.diff_strings(old, new, "test.py")
+    assert cache.diff_hits == 0
+    parser.process.assert_called_once()
 
 
 def test_missing_wasm_rejects_legacy_unknown_diff_cache_hit(tmp_path: Path):
