@@ -1305,11 +1305,12 @@ def live_handle_diff(
     config_json: str,
     wasm_dir: str = "",
 ) -> dict[str, Any]:
-    """Native single-file diff (Phase A1/R): `{diff}` (certified) or `{fallback: reason}`.
+    """Native single-file diff (Phase A1/R): certified DTO or decline.
 
-    Serves any file the bundled-parser manifest in *wasm_dir* resolves (Python via the native
-    tree-sitter path, other languages via their wasm parser); unresolved extensions and
-    non-certified outcomes return a fallback marker for the Python differ path.
+    The Rust handler uses bundled-parser manifests (native Python parser and
+    other languages' Wasm parsers). A fallback marker is NOT a certified
+    semantic diff: live transports must return a typed error, not recover via
+    a second success path.
     """
     return json.loads(
         _load_backend().live_handle_diff_json(
@@ -1321,13 +1322,12 @@ def live_handle_diff(
 def live_handle_review(
     repo_path: str, old_ref: str, new_ref: str, config_json: str, wasm_dir: str = ""
 ) -> dict[str, Any]:
-    """Native commit review (Phase A2 + d2-review): `{commit_diff}` or `{fallback: reason}`.
+    """Native commit review (Phase A2 + d2-review): certified DTO or decline.
 
-    Each changed file resolves via the bundled-parser manifest in *wasm_dir*: an all-Python commit
-    runs the certified batch commit; a commit with resolvable non-Python files is served per-file
-    (Python via the certified batch item, other languages via the native single-file chain).
-    Unresolvable extensions and non-served outcomes return a fallback marker for the Python
-    CommitDiffer path. Older cores without the wasm_dir parameter degrade to the Python-only form.
+    Rust resolves changed files via the bundled-parser manifest in *wasm_dir*.
+    Missing or non-certified results are declines, not permission for a live
+    transport to manufacture a successful Python-path review. Older ABI
+    signature compatibility does not relax result certification.
     """
     backend = _load_backend()
     try:
