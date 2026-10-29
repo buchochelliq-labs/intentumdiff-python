@@ -30,7 +30,7 @@ CORE_REPO = "https://github.com/buchochelliq-labs/intentumdiff-core"
 # Immutable candidate from Core #187: metered 48.0.7 with verified PowerShell
 # SHA-256 policy. Exact-head four-platform CI must pass before release approval.
 # Override only for deliberate integration builds, not a moving branch.
-CORE_REF = os.environ.get("INTENTUMDIFF_CORE_REF", "22e84237c927280b6a5c1414b21f3d1bf6a99275")
+CORE_REF = os.environ.get("INTENTUMDIFF_CORE_REF", "a7a954bb875d73c132b8d2df6ddb5e3cedddd7a2")
 # Reviewed registry RC candidate: includes verified VB.NET multiline-span Wasm fix.
 # Registry PR #13 must be vetted before this becomes the final integration pin.
 REGISTRY_REF = "0e22cc6f481c07fc0349670e6546bbb189f309c0"
