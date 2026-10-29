@@ -547,9 +547,9 @@ class SemanticDiffer:
         """
         Parse *content* as *filename* and return ``(SemanticNode, language)``.
 
-        This runs pipeline stages 1–7 (language detection, preprocessing,
-        tree-sitter parsing, trivia stripping, and Wasm plugin dispatch) and
-        respects the parse-tree cache if one is configured.
+        A FullParse Rust/Wasm plugin owns parsing; Python handles plugin dispatch
+        and the optional parse-tree cache. Legacy Python-hosted CST processing is
+        deliberately rejected.
 
         Raises :class:`~intentumdiff.plugins.exceptions.PluginNotFoundError`
         when no registered parser supports *filename*.
@@ -572,22 +572,7 @@ class SemanticDiffer:
         parser, language = self._registry.detect_parser(filename, content, language_hint)
         adaptive_fuel = self._config.plugin_fuel
 
-        if parser.parser_mode == "interpret-cst":
-            content = parser.preprocess_source(content)
-            cst_json = self._parse(content, parser, language, filename)
-            if len(cst_json) > self._config.max_cst_bytes:
-                raise ValueError(
-                    f"CST JSON for {filename!r} is {len(cst_json):,} characters, "
-                    f"exceeding the limit of {self._config.max_cst_bytes:,} "
-                    "(DiffConfig.max_cst_bytes)."
-                )
-            trivia_types = list(parser.trivia_node_types) + self._config.extra_trivia_types
-            filtered = _strip_trivia_impl(cst_json, trivia_types)
-            cst_nodes = _count_cst_nodes(filtered)
-            adaptive_fuel = _fuel_budget(self._config.plugin_fuel, 20_000_000 + cst_nodes * 200_000)
-            input_ = filtered
-        else:
-            input_ = content
+        input_ = self._parse(content, parser, language, filename)
 
         if self._cache is not None:
             node = self._cached_process(parser, input_, language, filename, adaptive_fuel)
@@ -1144,6 +1129,10 @@ class SemanticDiffer:
         )
         engine_telemetry: list[dict[str, Any]] = []
         parse_mode = parser.parser_mode
+        # Retired InterpretCst execution cannot survive in a thin Python binding.
+        # `_parse` checks the capability and raises with an actionable upgrade path.
+        if parse_mode != "full-parse":
+            self._parse(new_content, parser, language, filename)
         cache_grammar_id = parser.grammar_id
         diagnostics.summary.update(
             {
@@ -1169,8 +1158,7 @@ class SemanticDiffer:
             },
         )
 
-        # Adaptive fuel starts at the configured floor; the interpret-cst branch
-        # raises it based on CST node count before calling the plugin.
+        # The configured plugin fuel is adapted for full-parse source size below.
         adaptive_fuel: int = self._config.plugin_fuel
 
         # Save originals for the enricher pass (enrichers see un-preprocessed source)
@@ -1302,210 +1290,73 @@ class SemanticDiffer:
                     rust_core_skip_reason,
                 )
 
-        if parse_mode == "interpret-cst":
-            trivia_types = list(parser.trivia_node_types) + self._config.extra_trivia_types
+        # ── 7 (full-parse). Plugin owns parsing — send raw source ─────────
+        # Stages 3-6 are skipped: the plugin handles its own CST construction
+        # and trivia filtering. The style-only shortcut is not available here
+        # because there is no host-side CST to hash.
+        max_source_bytes = max(
+            len(old_content.encode("utf-8")),
+            len(new_content.encode("utf-8")),
+        )
+        adaptive_fuel = _fuel_budget(
+            self._config.plugin_fuel,
+            50_000_000 + max_source_bytes * 150_000,
+        )
+        logger.debug("full-parse mode for %r via %r", filename, parser.grammar_id)
 
-            # ── 2.5. Source preprocessing ────────────────────────────────────
-            with profiler.phase("source_preprocessing"):
-                old_content = parser.preprocess_source(old_content)
-                new_content = parser.preprocess_source(new_content)
-
-            # ── 2.6. Diff-level cache check ───────────────────────────────────
-            if self._cache is not None and not diagnostics.enabled and not _guardrail_cache_bypass:
-                _wasm_hash = self._wasm_hash_for(parser)
-                _diff_key = self._cache.diff_key(
-                    old_content,
-                    new_content,
-                    f"{cache_grammar_id}{cache_schema_suffix}{compile_cache_suffix}",
-                    _wasm_hash,
-                )
-                _cached = self._cache.get_diff(_diff_key)
-                if _cached is not None:
-                    logger.debug("Diff cache hit for %r", filename)
-                    return _apply_file_lifecycle_to_diff(
-                        SemanticDiff.model_validate_json(_cached),
-                        file_lifecycle,
-                    )
-
-            old_cst_json = self._parse(
+        # Diff-level cache check for full-parse mode.
+        if self._cache is not None and not diagnostics.enabled and not _guardrail_cache_bypass:
+            _wasm_hash = self._wasm_hash_for(parser)
+            _diff_key = self._cache.diff_key(
                 old_content,
-                parser,
-                language,
-                filename,
-                profiler=profiler,
-            )
-            new_cst_json = self._parse(
                 new_content,
-                parser,
-                language,
-                filename,
-                profiler=profiler,
+                f"{parser.grammar_id}{cache_schema_suffix}{compile_cache_suffix}",
+                _wasm_hash,
             )
-
-            # ── CST size guard ────────────────────────────────────────────────
-            for _label, _cst in (("old", old_cst_json), ("new", new_cst_json)):
-                if len(_cst) > self._config.max_cst_bytes:
-                    raise ValueError(
-                        f"CST JSON for the {_label!r} version of {filename!r} is "
-                        f"{len(_cst):,} characters, exceeding the limit of "
-                        f"{self._config.max_cst_bytes:,} "
-                        "(DiffConfig.max_cst_bytes). Increase the limit or switch "
-                        "to a full-parse plugin."
-                    )
-
-            # Inspect raw CST before trivia equivalence can hide incomplete edits.
-            from intentumdiff.rust_core import parse_errors_present
-            if self._config.fallback_to_token_diff and (
-                parse_errors_present(old_raw, old_cst_json, language)
-                or parse_errors_present(new_raw, new_cst_json, language)
-            ):
-                diagnostics.record(stage="fallback", action="source_fallback",
-                    rule_id="pipeline.source_fallback", reason="incomplete or invalid syntax")
-                fallback_diff = _token_fallback_diff(old_raw, new_raw, filename,
-                    new_filename if new_filename is not None else filename, language,
-                    metadata={"diagnostics": diagnostics.snapshot()} if diagnostics.enabled else None)
-                fallback_diff = _apply_file_lifecycle_to_diff(fallback_diff, file_lifecycle)
-                return apply_guardrails_to_diff(fallback_diff, old_tree=None, new_tree=None,
-                    old_source=old_raw, new_source=new_raw, config=self._config, diagnostics=diagnostics)
-
-            # ── 5. Trivia stripping ───────────────────────────────────────────
-            with profiler.phase("trivia_stripping"):
-                old_filtered = _strip_trivia_impl(old_cst_json, trivia_types)
-                new_filtered = _strip_trivia_impl(new_cst_json, trivia_types)
-
-            # ── 6.5. Adaptive fuel budget ─────────────────────────────────────
-            old_cst_nodes = _count_cst_nodes(old_filtered)
-            new_cst_nodes = _count_cst_nodes(new_filtered)
-            max_cst_nodes = max(old_cst_nodes, new_cst_nodes)
-            adaptive_fuel = _fuel_budget(
-                self._config.plugin_fuel,
-                20_000_000 + max_cst_nodes * 200_000,
-            )
-            logger.debug(
-                "[%s] CST: old=%d bytes/%d nodes, new=%d bytes/%d nodes — fuel=%d",
-                filename,
-                len(old_filtered),
-                old_cst_nodes,
-                len(new_filtered),
-                new_cst_nodes,
-                adaptive_fuel,
-            )
-            diagnostics.record(
-                stage="parse",
-                action="interpret_cst",
-                rule_id="pipeline.interpret_cst_parse",
-                reason="host CST parsed, stripped, and sized",
-                metadata={
-                    "old_cst_bytes": len(old_filtered),
-                    "new_cst_bytes": len(new_filtered),
-                    "old_cst_nodes": old_cst_nodes,
-                    "new_cst_nodes": new_cst_nodes,
-                    "adaptive_fuel": adaptive_fuel,
-                },
-            )
-
-            # ── 7. Plugin dispatch (with parse-tree cache) ───────────────────
-            try:
-                with profiler.phase("wasm_plugin_execution"):
-                    if self._cache is not None:
-                        old_tree = self._cached_process(
-                            parser,
-                            old_filtered,
-                            language,
-                            filename,
-                            adaptive_fuel,
-                            cache_grammar_id=cache_grammar_id,
-                        )
-                        new_tree = self._cached_process(
-                            parser,
-                            new_filtered,
-                            language,
-                            filename,
-                            adaptive_fuel,
-                            cache_grammar_id=cache_grammar_id,
-                        )
-                    else:
-                        old_tree = parser.process(
-                            old_filtered, language, filename, fuel=adaptive_fuel
-                        )
-                        new_tree = parser.process(
-                            new_filtered, language, filename, fuel=adaptive_fuel
-                        )
-            except PluginFuelExhausted as exc:
-                raise PluginFuelExhausted(
-                    exc.plugin_id,
-                    exc.fuel,
-                    f"file={filename!r}, CST nodes up to {max_cst_nodes:,}",
-                ) from exc
-
-        else:
-            # ── 7 (full-parse). Plugin owns parsing — send raw source ─────────
-            # Stages 3-6 are skipped: the plugin handles its own CST construction
-            # and trivia filtering. The style-only shortcut is not available here
-            # because there is no host-side CST to hash.
-            max_source_bytes = max(
-                len(old_content.encode("utf-8")),
-                len(new_content.encode("utf-8")),
-            )
-            adaptive_fuel = _fuel_budget(
-                self._config.plugin_fuel,
-                50_000_000 + max_source_bytes * 150_000,
-            )
-            logger.debug("full-parse mode for %r via %r", filename, parser.grammar_id)
-
-            # Diff-level cache check for full-parse mode.
-            if self._cache is not None and not diagnostics.enabled and not _guardrail_cache_bypass:
-                _wasm_hash = self._wasm_hash_for(parser)
-                _diff_key = self._cache.diff_key(
-                    old_content,
-                    new_content,
-                    f"{parser.grammar_id}{cache_schema_suffix}{compile_cache_suffix}",
-                    _wasm_hash,
+            _cached = self._cache.get_diff(_diff_key)
+            if _cached is not None:
+                logger.debug("Diff cache hit for %r (full-parse)", filename)
+                return _apply_file_lifecycle_to_diff(
+                    SemanticDiff.model_validate_json(_cached),
+                    file_lifecycle,
                 )
-                _cached = self._cache.get_diff(_diff_key)
-                if _cached is not None:
-                    logger.debug("Diff cache hit for %r (full-parse)", filename)
-                    return _apply_file_lifecycle_to_diff(
-                        SemanticDiff.model_validate_json(_cached),
-                        file_lifecycle,
-                    )
 
-            with profiler.phase("wasm_plugin_execution"):
-                old_side_absent = file_lifecycle == "added" and old_content == ""
-                new_side_absent = file_lifecycle == "deleted" and new_content == ""
-                if self._cache is not None:
-                    old_tree = (
-                        _empty_semantic_tree(language)
-                        if old_side_absent
-                        else self._cached_process(
-                            parser, old_content, language, filename, adaptive_fuel
-                        )
+        with profiler.phase("wasm_plugin_execution"):
+            old_side_absent = file_lifecycle == "added" and old_content == ""
+            new_side_absent = file_lifecycle == "deleted" and new_content == ""
+            if self._cache is not None:
+                old_tree = (
+                    _empty_semantic_tree(language)
+                    if old_side_absent
+                    else self._cached_process(
+                        parser, old_content, language, filename, adaptive_fuel
                     )
-                    new_tree = (
-                        _empty_semantic_tree(language)
-                        if new_side_absent
-                        else self._cached_process(
-                            parser, new_content, language, filename, adaptive_fuel
-                        )
+                )
+                new_tree = (
+                    _empty_semantic_tree(language)
+                    if new_side_absent
+                    else self._cached_process(
+                        parser, new_content, language, filename, adaptive_fuel
                     )
-                else:
-                    old_tree = (
-                        _empty_semantic_tree(language)
-                        if old_side_absent
-                        else parser.process(old_content, language, filename, fuel=adaptive_fuel)
-                    )
-                    new_tree = (
-                        _empty_semantic_tree(language)
-                        if new_side_absent
-                        else parser.process(new_content, language, filename, fuel=adaptive_fuel)
-                    )
-            diagnostics.record(
-                stage="parse",
-                action="full_parse",
-                rule_id="pipeline.full_parse",
-                reason="plugin parsed raw source",
-                metadata={"adaptive_fuel": adaptive_fuel},
-            )
+                )
+            else:
+                old_tree = (
+                    _empty_semantic_tree(language)
+                    if old_side_absent
+                    else parser.process(old_content, language, filename, fuel=adaptive_fuel)
+                )
+                new_tree = (
+                    _empty_semantic_tree(language)
+                    if new_side_absent
+                    else parser.process(new_content, language, filename, fuel=adaptive_fuel)
+                )
+        diagnostics.record(
+            stage="parse",
+            action="full_parse",
+            rule_id="pipeline.full_parse",
+            reason="plugin parsed raw source",
+            metadata={"adaptive_fuel": adaptive_fuel},
+        )
 
         engine_telemetry.extend(_drain_plugin_telemetry(parser))
         _record_engine_telemetry(diagnostics, engine_telemetry)
