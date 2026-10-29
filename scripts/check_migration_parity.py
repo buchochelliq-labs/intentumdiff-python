@@ -355,23 +355,19 @@ def check_tsx_literal_exact(case: dict, diff: dict) -> None:
 def run_direct_c_abi_source_review(case: dict, repo: Path, wasm: Path) -> dict:
     """Exercise the six-argument exported Rust C ABI independently of the public Python API.
 
-    The returned C ABI result is a JSON-encoded native review response.
+    The C ABI success envelope embeds parseable engine JSON as structured
+    data; _c_abi_call already decodes that envelope. Never decode it twice.
     This is a transport conformance gate, not a Python semantic evaluator.
     """
     from intentumdiff.rust_core import _c_abi_call
 
     config = json.dumps({"language_hint": case["corpus_language"], "strict_plugins": True})
-    raw = _c_abi_call(
+    result = _c_abi_call(
         "live_diff_contents", str(repo), case["filename"],
         case["old"], case["new"], config, str(wasm),
     )
-    assert isinstance(raw, str), (case["id"], "C ABI source review is not a JSON string", raw)
-    try:
-        result = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise AssertionError((case["id"], "C ABI produced invalid JSON", raw[:2000])) from exc
     assert isinstance(result, dict) and "fallback" not in result, (
-        case["id"], "C ABI parser declined", result
+        case["id"], "C ABI source review missing/declined", result
     )
     assert isinstance(result.get("diff"), dict), (
         case["id"], "C ABI source review missing diff", result
