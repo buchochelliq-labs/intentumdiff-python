@@ -165,12 +165,9 @@ def _make_index_key(repo_root: str, commit_sha: str) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def _parse_catfile_output(
-    buf: bytes,
-    sha_to_path: "dict[str, str]",
-) -> "list[tuple[str, str]]":
-    """Parse ``git cat-file --batch`` stdout into ``(path, content)`` pairs."""
-    files: list[tuple[str, str]] = []
+def _parse_catfile_output(buf: bytes) -> dict[str, str]:
+    """Decode each unique Git blob once; file paths are expanded in tree order."""
+    blobs: dict[str, str] = {}
     i = 0
     n = len(buf)
     while i < n:
@@ -180,7 +177,7 @@ def _parse_catfile_output(
         header = buf[i:nl].decode("ascii", errors="replace")
         i = nl + 1
         parts = header.split()
-        # Expected: "<sha> blob <size>"; skip "missing" / non-blob entries.
+        # Expected: "<sha> blob <size>"; ignore missing and non-blob entries.
         if len(parts) < 3 or parts[1] != "blob":
             continue
         try:
@@ -188,18 +185,14 @@ def _parse_catfile_output(
         except ValueError:
             continue
         content_bytes = buf[i : i + size]
-        i += size + 1  # skip trailing \n
+        i += size + 1  # skip trailing newline
         if b"\x00" in content_bytes[:8192]:  # binary heuristic
             continue
-        path = sha_to_path.get(parts[0], "")
-        if not path:
-            continue
         try:
-            content = content_bytes.decode("utf-8", errors="strict")
+            blobs[parts[0]] = content_bytes.decode("utf-8", errors="strict")
         except UnicodeDecodeError:
-            content = content_bytes.decode("utf-8", errors="replace")
-        files.append((path, content))
-    return files
+            blobs[parts[0]] = content_bytes.decode("utf-8", errors="replace")
+    return blobs
 
 
 def _collect_blob_files(
@@ -207,21 +200,19 @@ def _collect_blob_files(
     ref: str,
     diffignore: Any,
 ) -> "tuple[list[tuple[str, str]], list[str]]":
-    """Return all text files at *ref* as ``(relative_path, decoded_content)``.
+    """Return every non-ignored text path at *ref*, including shared-content blobs.
 
-    Shells to the git CLI (#98, A2.4.3): ``git ls-tree -r`` lists every blob and a
-    single ``git cat-file --batch`` reads them through git's optimised pack reader.
-    Binary blobs (NUL-byte heuristic in :func:`_parse_catfile_output`) are skipped.
-
-    Returns ``(files, ignored_files)`` where *ignored_files* are the paths excluded
-    by *diffignore*.
+    Git stores identical file contents under one blob SHA. Batch-read each unique
+    SHA once, then expand that content against the original ls-tree path list;
+    collapsing SHA -> one path silently drops files from semantic indexing.
     """
     from intentumdiff.vcs.git_cli import run_git_bytes  # noqa: PLC0415
 
     ignored_files: list[str] = []
-    sha_to_path: dict[str, str] = {}
+    paths_in_tree_order: list[tuple[str, str]] = []
+    unique_shas: set[str] = set()
     # ls-tree -r -z: "<mode> <type> <sha>\t<path>\0" per entry.
-    for entry in run_git_bytes(repo_root, ["ls-tree", "-r", "-z", ref]).split(b"\0"):
+    for entry in run_git_bytes(repo_root, ["ls-tree", "-r", "-z", ref]).split(b"\x00"):
         if not entry:
             continue
         meta, _tab, raw_path = entry.partition(b"\t")
@@ -232,14 +223,23 @@ def _collect_blob_files(
         if diffignore and diffignore.is_ignored(path):
             ignored_files.append(path)
             continue
-        sha_to_path[parts[2].decode("ascii", errors="replace")] = path
+        sha = parts[2].decode("ascii", errors="replace")
+        paths_in_tree_order.append((path, sha))
+        unique_shas.add(sha)
 
-    if not sha_to_path:
+    if not paths_in_tree_order:
         return [], ignored_files
 
-    shas_input = "\n".join(sha_to_path).encode()
+    # The caller needs all paths, but cat-file needs only one request per blob.
+    shas_input = "\n".join(dict.fromkeys(sha for _, sha in paths_in_tree_order)).encode()
     out = run_git_bytes(repo_root, ["cat-file", "--batch"], input_bytes=shas_input)
-    return _parse_catfile_output(out, sha_to_path), ignored_files
+    decoded_by_sha = _parse_catfile_output(out)
+    files = [
+        (path, decoded_by_sha[sha])
+        for path, sha in paths_in_tree_order
+        if sha in decoded_by_sha  # binary or missing blob stays excluded as before
+    ]
+    return files, ignored_files
 
 
 # ---------------------------------------------------------------------------
