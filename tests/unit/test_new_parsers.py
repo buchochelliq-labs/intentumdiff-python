@@ -91,6 +91,37 @@ class TestFullParseBoundary:
         with pytest.raises(PluginNotFoundError, match="FullParse Rust/Wasm plugin"):
             differ._parse("let x = 1", Parser(), "javascript", "x.js")
 
+    def test_public_parse_refuses_hosted_cst_plugin(self):
+        from intentumdiff.differ import SemanticDiffer
+        from intentumdiff.plugins.exceptions import PluginNotFoundError
+
+        class Parser:
+            grammar_id = "legacy"
+            parser_mode = "interpret-cst"
+
+        class Registry:
+            def detect_parser(self, *args, **kwargs):
+                return Parser(), "javascript"
+
+        differ = SemanticDiffer()
+        differ._registry = Registry()
+        with pytest.raises(PluginNotFoundError, match="FullParse Rust/Wasm plugin"):
+            differ.parse("let x = 1", "x.js")
+
+    def test_retired_host_cst_or_python_style_shortcut_cannot_return(self):
+        import inspect
+        from intentumdiff.differ import SemanticDiffer
+
+        pipeline = inspect.getsource(SemanticDiffer._run_stages_1_to_11)
+        public_parse = inspect.getsource(SemanticDiffer.parse)
+        for source in (pipeline, public_parse):
+            assert 'if parse_mode == "interpret-cst":' not in source
+            assert 'if parser.parser_mode == "interpret-cst":' not in source
+            assert "SemanticDiff.style_only(" not in source
+        assert 'self._parse(new_content, parser, language, filename)' in pipeline
+        assert 'self._parse(content, parser, language, filename)' in public_parse
+
+
 
 class TestExtensionMapping:
     """
