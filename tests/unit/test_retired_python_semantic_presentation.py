@@ -49,3 +49,40 @@ def test_presentation_import_contract():
         for alias in node.names
     }
     assert imported <= available, f"Missing presentation exports: {sorted(imported - available)}"
+
+
+_RETIRED_RUST_OPTIONAL_ADAPTERS = {
+    "try_rust_core_diff",
+    "try_rust_core_cst_diff",
+    "try_rust_core_tree_diff",
+    "try_rust_core_sources_stage11",
+}
+_RETIRED_RUST_OPTIONAL_DTOS = {
+    "RustCoreAttempt",
+    "RustCoreTreeAttempt",
+    "RustCoreSourceAttempt",
+}
+_RETIRED_PYTHON_MATCHING_RECONSTRUCTION = {
+    "_semantic_node_lookup",
+    "_matching_from_payload",
+    "_changes_from_payload",
+}
+
+
+def test_obsolete_optional_rust_adapters_and_python_matching_mirrors_stay_absent():
+    """The binding must never revive retired fail-open Python stage adapters."""
+    package = Path(__file__).resolve().parents[2] / "src" / "intentumdiff"
+    module = ast.parse((package / "rust_core.py").read_text(encoding="utf-8"))
+    definitions = {
+        node.name
+        for node in module.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+    }
+    forbidden = (
+        _RETIRED_RUST_OPTIONAL_ADAPTERS
+        | _RETIRED_RUST_OPTIONAL_DTOS
+        | _RETIRED_PYTHON_MATCHING_RECONSTRUCTION
+    )
+    assert not (definitions & forbidden), (
+        f"Obsolete Rust adapters: {sorted(definitions & forbidden)}"
+    )
