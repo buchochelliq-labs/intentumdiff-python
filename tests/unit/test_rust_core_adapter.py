@@ -796,6 +796,7 @@ def test_generic_text_review_missing_handler_fails_closed(monkeypatch: Any) -> N
         {"used": True},
         {"used": True, "changes": None},
         {"used": True, "changes": []},  # Rust must include the group field, even if null.
+        {"used": True, "changes": [], "group": {}},  # Malformed object must not bypass DTO validation.
         {"used": True, "changes": [], "group": []},
         [],
     ],
