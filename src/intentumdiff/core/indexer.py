@@ -210,7 +210,6 @@ def _collect_blob_files(
 
     ignored_files: list[str] = []
     paths_in_tree_order: list[tuple[str, str]] = []
-    unique_shas: set[str] = set()
     # ls-tree -r -z: "<mode> <type> <sha>\t<path>\0" per entry.
     for entry in run_git_bytes(repo_root, ["ls-tree", "-r", "-z", ref]).split(b"\x00"):
         if not entry:
@@ -225,7 +224,6 @@ def _collect_blob_files(
             continue
         sha = parts[2].decode("ascii", errors="replace")
         paths_in_tree_order.append((path, sha))
-        unique_shas.add(sha)
 
     if not paths_in_tree_order:
         return [], ignored_files
