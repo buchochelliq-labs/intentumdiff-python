@@ -1062,20 +1062,10 @@ async def _two_pass_index(
 
     if not launchable:
         langs_str = ", ".join(sorted(detected)) or "none"
-        _console.print(
-            f"[dim]No LSP servers configured for detected languages "
-            f"({langs_str}).  Running plain index.[/dim]"
+        raise RuntimeError(
+            "--lsp was requested, but no LSP servers are configured for "
+            f"detected languages ({langs_str}); cannot certify type enrichment"
         )
-        result = await _index_with_progress(
-            indexer,
-            repo_path=repo_path,
-            ref=ref,
-            force=args.force,
-            lsp_clients={},
-            initial_total=_file_count,
-        )
-        _print_index_result(result)
-        return
 
     _console.print(
         f"[bold]Pass 1 complete[/bold] — "
@@ -1177,19 +1167,10 @@ async def _two_pass_index(
                     await launchers.pop(lang).stop()
 
     if not clients:
-        _console.print(
-            "[dim]No LSP servers connected; running plain index.[/dim]"
+        raise RuntimeError(
+            "--lsp was requested, but no configured LSP server connected; "
+            "cannot certify type enrichment"
         )
-        result = await _index_with_progress(
-            indexer,
-            repo_path=repo_path,
-            ref=ref,
-            force=args.force,
-            lsp_clients={},
-            initial_total=_file_count,
-        )
-        _print_index_result(result)
-        return
 
     # ── Pass 2: enrich with LSP ───────────────────────────────────────────────
     n = len(clients)
@@ -1329,6 +1310,10 @@ def _print_index_result(result: Any) -> None:
             f"[dim]Ignored {len(ignored_files)} file(s) via .diffignore[/dim]"
         )
 
+    # A partial index must not be presented to CI as successful (#193).
+    # Keep the per-file diagnostics above, but fail the process.
+    if result.errors:
+        raise SystemExit(1)
 
 
 
