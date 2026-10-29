@@ -27,10 +27,11 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CORE_REPO = "https://github.com/buchochelliq-labs/intentumdiff-core"
-# Immutable candidate from Core #187: metered 48.0.7 with verified PowerShell
-# SHA-256 policy. Exact-head four-platform CI must pass before release approval.
+# Immutable candidate from Core #187: metered Wasmtime 48.0.7, verified
+# parser availability, Rust-owned semantic promotions and fail-closed live
+# diff/commit-review completeness. Four-platform CI must independently pass.
 # Override only for deliberate integration builds, not a moving branch.
-CORE_REF = os.environ.get("INTENTUMDIFF_CORE_REF", "877474959a03c4f93fa4e1f424b7fdaf35e7aa1c")
+CORE_REF = os.environ.get("INTENTUMDIFF_CORE_REF", "635f819abe7e39ed3a71b1e5a95721da5dd60ce8")
 # Reviewed registry RC candidate: includes verified VB.NET multiline-span Wasm fix.
 # Registry PR #13 must be vetted before this becomes the final integration pin.
 REGISTRY_REF = "cabcb9e78bd888d08d5c2250d7e8bd3065f2c7b9"
