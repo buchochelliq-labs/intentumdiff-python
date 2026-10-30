@@ -1716,7 +1716,7 @@ def test_native_commit_dto_rejects_coerced_semantic_flags(payload: bytes) -> Non
 
 
 @pytest.mark.parametrize("payload", [
-    b"not-json", b"{}", b"null", b"[]",
+    b"not-json", b"{}", b"null", b"[]", b"",
     *_malformed_native_semantic_flag_payloads(),
     b'{"old_ref":"HEAD","new_ref":""}',
     b'{"old_ref":"HEAD","new_ref":"","cross_file_changes":[],"parse_errors":[],"guardrail_violations":[]}',
@@ -1736,7 +1736,7 @@ def test_native_commit_adapter_rejects_malformed_complete_dto(
         diff_batch_commit_json=lambda _request: (control, payload),
     )
     monkeypatch.setattr(rust_core, "_load_backend", lambda: backend)
-    with pytest.raises(RuntimeError, match="malformed CommitDiff JSON"):
+    with pytest.raises(RuntimeError, match="empty commit JSON" if not payload else "malformed CommitDiff JSON"):
         rust_core.try_rust_core_commit_json(
             files=[{
                 "old_source": "x = 1\n", "new_source": "x = 2\n",
@@ -1770,10 +1770,116 @@ def test_native_working_tree_adapter_rejects_malformed_complete_dto(
     )
     monkeypatch.setattr(rust_core, "_load_backend", lambda: backend)
     monkeypatch.setattr(rust_core, "rust_core_enabled", lambda _config: True)
-    with pytest.raises(RuntimeError, match="malformed CommitDiff JSON"):
+    with pytest.raises(RuntimeError, match="empty commit JSON" if not payload else "malformed CommitDiff JSON"):
         rust_core.try_rust_core_working_tree_commit_json(
             repo_path=".", old_ref="HEAD", config=DiffConfig(experimental_rust_core=True),
         )
+
+
+
+def _invoke_certified_commit_through_ctypes(
+    monkeypatch: Any, entrypoint: str, result: Any,
+) -> rust_core.RustCoreCommitJsonAttempt:
+    """Exercise the actual CtypesBackend, not the tuple-returning test double (#207)."""
+    handler = (
+        "diff_batch_commit_json" if entrypoint == "batch"
+        else "diff_working_tree_python_commit_json"
+    )
+
+    def fake_c_abi_call(name: str, *_args: Any) -> Any:
+        if name == "version":
+            return "0.4.0"
+        if name == "supports_language":
+            return True
+        if name == handler:
+            return result
+        raise AssertionError(f"unexpected C ABI operation: {name}")
+
+    monkeypatch.setattr(rust_core, "_c_abi_call", fake_c_abi_call)
+    monkeypatch.setattr(rust_core, "_load_backend", rust_core._CtypesBackend)
+    monkeypatch.setattr(rust_core, "rust_core_enabled", lambda _config: True)
+    config = DiffConfig(experimental_rust_core=True)
+    if entrypoint == "batch":
+        return rust_core.try_rust_core_commit_json(
+            files=[{
+                "old_source": "value = 1\\n", "new_source": "value = 2\\n",
+                "old_filename": "example.py", "new_filename": "example.py",
+                "language": "python", "parser_plugin_id": "python",
+                "parser_wasm_path": "python_parser.wasm",
+            }],
+            old_ref="HEAD", new_ref="", config=config,
+        )
+    return rust_core.try_rust_core_working_tree_commit_json(
+        repo_path=".", old_ref="HEAD", config=config,
+    )
+
+
+@pytest.mark.parametrize("entrypoint", ["batch", "working_tree"])
+@pytest.mark.parametrize("invalid_payload", [0, [], {}, True])
+def test_ctypes_certified_commit_rejects_non_string_payload_without_fallback(
+    monkeypatch: Any, entrypoint: str, invalid_payload: Any,
+) -> None:
+    control = {
+        "schema_version": 1, "status": "complete",
+        "certification": "python_native_v4kb",
+        "commit_diff_byte_size": 0,
+    }
+    with pytest.raises(RuntimeError, match="non-string commit_diff_json"):
+        _invoke_certified_commit_through_ctypes(
+            monkeypatch, entrypoint,
+            {"control": control, "commit_diff_json": invalid_payload},
+        )
+
+
+@pytest.mark.parametrize("entrypoint", ["batch", "working_tree"])
+@pytest.mark.parametrize("malformed_envelope", [
+    None, [], {}, {"control": [], "commit_diff_json": "{}"},
+    {"control": None, "commit_diff_json": "{}"},
+])
+def test_ctypes_certified_commit_rejects_bad_envelope_without_fallback(
+    monkeypatch: Any, entrypoint: str, malformed_envelope: Any,
+) -> None:
+    with pytest.raises(RuntimeError, match="malformed C ABI commit envelope"):
+        _invoke_certified_commit_through_ctypes(
+            monkeypatch, entrypoint, malformed_envelope,
+        )
+
+
+@pytest.mark.parametrize("entrypoint", ["batch", "working_tree"])
+def test_ctypes_certified_commit_accepts_complete_rust_payload(
+    monkeypatch: Any, entrypoint: str,
+) -> None:
+    commit_json = json.dumps({
+        "old_ref": "HEAD", "new_ref": "",
+        "file_diffs": [], "cross_file_changes": [],
+        "parse_errors": [], "guardrail_violations": [],
+    })
+    result = {
+        "control": {
+            "schema_version": 1, "status": "complete",
+            "certification": "python_native_v4kb",
+            "commit_diff_byte_size": len(commit_json.encode("utf-8")),
+        },
+        "commit_diff_json": commit_json,
+    }
+    attempt = _invoke_certified_commit_through_ctypes(monkeypatch, entrypoint, result)
+    assert attempt.used
+    assert attempt.commit_diff_json == commit_json.encode("utf-8")
+
+
+@pytest.mark.parametrize("entrypoint", ["batch", "working_tree"])
+def test_ctypes_certified_commit_accepts_explicit_rust_fallback(
+    monkeypatch: Any, entrypoint: str,
+) -> None:
+    attempt = _invoke_certified_commit_through_ctypes(
+        monkeypatch, entrypoint,
+        {
+            "control": {"schema_version": 1, "status": "fallback", "reason": "unsupported parser"},
+            "commit_diff_json": None,
+        },
+    )
+    assert not attempt.used
+    assert attempt.fallback_reason == "unsupported parser"
 
 
 def test_scope_trails_accepts_rust_certified_empty_arrays(monkeypatch: Any) -> None:
