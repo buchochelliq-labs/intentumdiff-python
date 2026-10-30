@@ -1716,6 +1716,21 @@ def _require_native_commit_diff_json(payload: bytes, operation: str) -> None:
     from intentumdiff.core.models import CommitDiff
 
     try:
+        # Reject malformed Rust-authored semantic flags *before* Pydantic's
+        # non-strict bool fields can coerce strings or integers (#201).
+        # Both certified commit adapters return the original JSON bytes, so
+        # validating the normalized model alone cannot certify those bytes.
+        raw = json.loads(payload)
+        if not isinstance(raw, dict) or not isinstance(raw.get("file_diffs"), list):
+            raise ValueError("Rust commit JSON requires a file_diffs array")
+        for index, file_diff in enumerate(raw["file_diffs"]):
+            if not isinstance(file_diff, dict):
+                raise ValueError(f"Rust commit JSON file_diffs[{index}] must be an object")
+            for flag in ("has_semantic_changes", "is_style_only", "is_fallback"):
+                if type(file_diff.get(flag)) is not bool:
+                    raise ValueError(
+                        f"Rust commit JSON file_diffs[{index}] requires {flag} boolean"
+                    )
         result = CommitDiff.model_validate_json(payload)
         # A successful Rust commit must explicitly carry its file inventory.
         # Pydantic otherwise supplies [] for omitted arrays, manufacturing an
