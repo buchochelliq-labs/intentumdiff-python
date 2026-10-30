@@ -488,6 +488,8 @@ def test_malformed_claimed_complete_rust_batch_is_integrity_failure(
         "unknown_envelope_status",
         "missing_envelope_status",
         "non_string_envelope_status",
+        "missing_fallback_inventory",
+        "missing_candidate_inventory",
     ),
 )
 def test_rust_batch_rejects_invalid_status_and_item_transport(
@@ -530,6 +532,12 @@ def test_rust_batch_rejects_invalid_status_and_item_transport(
         payload.pop("status")
     elif defect == "non_string_envelope_status":
         payload["status"] = 1
+    elif defect == "missing_fallback_inventory":
+        payload["status"] = "fallback"
+        payload.pop("diffs")
+    elif defect == "missing_candidate_inventory":
+        payload["status"] = "candidate"
+        payload.pop("diffs")
     else:
         payload["status"] = "unrecognized"
 
