@@ -13,6 +13,7 @@ import intentumdiff.differ as differ_module
 import intentumdiff.rust_core as rust_core
 from intentumdiff import DiffConfig, SemanticDiffer
 from intentumdiff.core.models import (
+    Change,
     ChangeType,
     CommitDiff,
     NodePosition,
@@ -1917,3 +1918,128 @@ def test_scope_trails_rejects_malformed_rust_envelope(
     tree = SimpleNamespace(model_dump=lambda **_kwargs: {"node_type": "module"})
     with pytest.raises(RuntimeError, match="Rust scope trail response"):
         rust_core.build_scope_trails(old_tree=tree, new_tree=tree, changes=[])
+
+
+def test_rust_finalize_fallback_diff_requires_complete_rust_dto(monkeypatch: Any) -> None:
+    """A parse-error fallback cannot drop a meaningful edit through Pydantic defaults (#209)."""
+    old_node = SemanticNode(
+        id="old", node_type="literal", label="1", structural_hash="old",
+        position=NodePosition(start_line=0, start_col=4, end_line=0, end_col=5),
+    )
+    new_node = old_node.model_copy(update={
+        "id": "new", "label": "2", "structural_hash": "new",
+    })
+    change = Change(change_type=ChangeType.MODIFICATION, old_node=old_node, new_node=new_node)
+    complete = SemanticDiff(
+        old_filename="edit.py", new_filename="edit.py", language="python",
+        changes=[change], has_semantic_changes=True, is_fallback=True,
+        parse_errors=["invalid syntax"], metadata={"engine_owner": "rust"},
+    ).model_dump(mode="json")
+    response = complete
+
+    def fake_finalize(*args: Any) -> str:
+        return json.dumps({
+            "used": True, "changes": [], "change_groups": [],
+            "ignored_style_changes": [], "is_style_only": False,
+            "no_surviving_changes": False, "fallback_diff": response,
+        })
+
+    monkeypatch.setattr(rust_core, "_load_backend",
+                        lambda: SimpleNamespace(finalize_review_json=fake_finalize))
+
+    def attempt() -> dict[str, Any] | None:
+        return rust_core.try_rust_finalize_review(
+            old_tree=old_node, new_tree=new_node, old_source="x = 1",
+            new_source="x = 2", language="python", config=DiffConfig(),
+        )
+
+    valid = attempt()
+    assert valid is not None and valid["fallback_diff"].is_fallback
+    assert len(valid["fallback_diff"].changes) == 1
+    assert valid["fallback_diff"].changes[0].new_node.position.start_col == 4
+
+    mandatory = (
+        "changes", "change_groups", "parse_errors", "guardrail_violations",
+        "has_semantic_changes", "is_style_only", "is_fallback", "metadata",
+    )
+    for field in mandatory:
+        response = dict(complete)
+        response.pop(field)
+        with pytest.raises(RuntimeError, match=f"Rust complete batch diff requires {field}"):
+            attempt()
+    for field, malformed in (
+        ("changes", None), ("guardrail_violations", {}),
+        ("has_semantic_changes", "false"), ("is_fallback", 0),
+        ("metadata", []),
+    ):
+        response = {**complete, field: malformed}
+        with pytest.raises(RuntimeError, match=f"Rust complete batch diff requires {field}"):
+            attempt()
+
+    # A genuinely empty Rust fallback still succeeds when Rust explicitly
+    # supplies every required array and boolean, including is_fallback=True.
+    response = SemanticDiff(
+        old_filename="edit.py", new_filename="edit.py", language="python",
+        is_fallback=True, metadata={"engine_owner": "rust"},
+    ).model_dump(mode="json")
+    empty = attempt()
+    assert empty is not None and empty["fallback_diff"].changes == []
+    assert empty["fallback_diff"].is_fallback is True
+
+
+def test_rust_source_fallback_requires_complete_response(monkeypatch: Any) -> None:
+    """The direct C ABI source fallback must not manufacture an empty success (#210)."""
+    old_node = SemanticNode(
+        id="old", node_type="literal", label="1", structural_hash="old",
+        position=NodePosition(start_line=0, start_col=4, end_line=0, end_col=5),
+    )
+    new_node = old_node.model_copy(update={
+        "id": "new", "label": "2", "structural_hash": "new",
+    })
+    change = Change(change_type=ChangeType.MODIFICATION, old_node=old_node, new_node=new_node)
+    complete = SemanticDiff(
+        old_filename="edit.py", new_filename="edit.py", language="python",
+        changes=[change], has_semantic_changes=True, is_fallback=True,
+        parse_errors=["invalid syntax"], metadata={"engine_owner": "rust"},
+    ).model_dump(mode="json")
+    raw = json.dumps(complete)
+    monkeypatch.setattr(
+        rust_core, "_load_backend",
+        lambda: SimpleNamespace(source_fallback_diff_json=lambda *args: raw),
+    )
+
+    def call() -> SemanticDiff:
+        return rust_core.source_fallback_diff(
+            "x = 1", "x = 2", "edit.py", "edit.py", "python", "parse_errors"
+        )
+
+    valid = call()
+    assert valid.is_fallback and valid.has_semantic_changes
+    assert valid.changes[0].new_node.label == "2"
+    assert valid.changes[0].new_node.position.start_col == 4
+
+    for field in (
+        "changes", "change_groups", "parse_errors", "guardrail_violations",
+        "has_semantic_changes", "is_style_only", "is_fallback", "metadata",
+    ):
+        truncated = dict(complete)
+        truncated.pop(field)
+        raw = json.dumps(truncated)
+        with pytest.raises(ValueError, match=f"Rust complete batch diff requires {field}"):
+            call()
+    for field, value in (
+        ("changes", None), ("parse_errors", {}), ("is_style_only", "false"),
+        ("is_fallback", 0), ("metadata", []),
+    ):
+        raw = json.dumps({**complete, field: value})
+        with pytest.raises(ValueError, match=f"Rust complete batch diff requires {field}"):
+            call()
+    raw = "not-json"
+    with pytest.raises(ValueError):
+        call()
+    raw = json.dumps(SemanticDiff(
+        old_filename="edit.py", new_filename="edit.py", language="python",
+        is_fallback=True, metadata={"engine_owner": "rust"},
+    ).model_dump(mode="json"))
+    empty = call()
+    assert empty.is_fallback and not empty.has_semantic_changes and empty.changes == []

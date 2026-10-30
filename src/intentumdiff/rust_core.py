@@ -729,7 +729,8 @@ def try_rust_finalize_review(
 
         return {
             "fallback_diff": (
-                SemanticDiff.model_validate(fallback_diff) if fallback_diff is not None else None
+                SemanticDiff.model_validate(_require_complete_batch_diff_dto(fallback_diff))
+                if fallback_diff is not None else None
             ),
             "changes": [Change.model_validate(item) for item in data["changes"]],
             "change_groups": [ChangeGroup.model_validate(item) for item in data["change_groups"]],
@@ -766,8 +767,13 @@ def complete_routed_review(*, finalized: dict[str, Any], old_tree: SemanticNode,
 def source_fallback_diff(old: str, new: str, old_filename: str, new_filename: str,
                          language: str, reason: str = "parse_errors") -> SemanticDiff:
     """Shared source comparison; Python only marshals the C ABI."""
-    return SemanticDiff.model_validate_json(_load_backend().source_fallback_diff_json(
-        old, new, old_filename, new_filename, language, reason))
+    # Rust owns source fallback classification, inventories, style and spans.
+    # Decode before Pydantic to prevent its defaults from hiding a truncated
+    # claimed-complete Rust response (#210).
+    raw = _load_backend().source_fallback_diff_json(
+        old, new, old_filename, new_filename, language, reason
+    )
+    return SemanticDiff.model_validate(_require_complete_batch_diff_dto(json.loads(raw)))
 
 
 def _decode_rust_boolean(payload: str, handler: str) -> bool:
