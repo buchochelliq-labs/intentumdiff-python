@@ -1493,10 +1493,32 @@ def _normalize_builtin_change_type_enums(diff: SemanticDiff) -> SemanticDiff:
     return diff.model_copy(update={"changes": normalized_changes})
 
 
+def _require_complete_batch_diff_dto(payload: Any) -> dict[str, Any]:
+    """Reject incomplete Rust success before Python DTO defaults can hide omissions.
+
+    Rust supplies the change inventory and semantic flags. This adapter checks
+    their presence and types only; it never recomputes semantic meaning (#198).
+    """
+    if not isinstance(payload, dict):
+        raise ValueError("Rust complete batch diff must be an object")
+    for field in ("changes", "change_groups", "parse_errors"):
+        if not isinstance(payload.get(field), list):
+            raise ValueError(f"Rust complete batch diff requires {field} array")
+    for field in ("has_semantic_changes", "is_style_only", "is_fallback"):
+        if type(payload.get(field)) is not bool:
+            raise ValueError(f"Rust complete batch diff requires {field} boolean")
+    if not isinstance(payload.get("metadata"), dict):
+        raise ValueError("Rust complete batch diff requires metadata object")
+    return payload
+
+
 def _stamp_certified_rust_diff(metadata: dict[str, Any]) -> dict[str, Any]:
-    """Stamp the public ownership contract for accepted Rust-finalized diffs."""
+    """Stamp accepted Rust provenance, never overriding contradictory ownership."""
 
     stamped = dict(metadata)
+    owner = stamped.get("engine_owner")
+    if owner is not None and owner != "rust":
+        raise ValueError(f"Rust complete batch diff contradicts engine ownership: {owner!r}")
     stamped.setdefault("engine_owner", "rust")
     stamped.setdefault("semantic_contract", "rust_finalized_v1")
     return stamped
@@ -1624,7 +1646,7 @@ def try_rust_core_batch_diffs(
                 )
                 continue
             diff = _normalize_builtin_change_type_enums(
-                SemanticDiff.model_validate(item["diff"])
+                SemanticDiff.model_validate(_require_complete_batch_diff_dto(item["diff"]))
             )
             validated_diffs.append((index, status, diff))
         _record_adapter_phase("rust_core_response_validation", phase_started)
