@@ -352,6 +352,89 @@ def test_parse_cache_distinguishes_language_and_filename_for_shared_grammar(
     assert cache.parse_hits == 1
 
 
+
+def test_instantiated_wasm_revision_cannot_poison_new_parser_cache(tmp_path: Path):
+    """Replacing A's backing Wasm with B must never cache A under B's key (#196)."""
+    import hashlib
+    from intentumdiff.core.models import NodePosition, SemanticNode
+
+    cache = _InMemoryCache()
+    differ = SemanticDiffer(cache=cache)
+    wasm = tmp_path / "shared_parser.wasm"
+    revision_a = b"wasm revision A"
+    revision_b = b"entirely different wasm revision B"
+    wasm.write_bytes(revision_a)
+
+    def make_parser(revision: bytes, label: str):
+        parser = MagicMock()
+        parser.grammar_id = "shared"
+        parser.wasm_path = str(wasm)
+        parser.compiled_wasm_sha256 = hashlib.sha256(revision).hexdigest()
+        parser.process.return_value = SemanticNode(
+            id=label, node_type="module", label=label, structural_hash=label,
+            position=NodePosition(
+                start_line=0, start_col=0, end_line=0, end_col=0,
+            ),
+            children=[],
+        )
+        return parser
+
+    parser_a = make_parser(revision_a, "A")
+    first = differ._cached_process(parser_a, "same source", "python", "a.py", 100)
+    assert first.id == "A"
+    assert differ._cached_process(parser_a, "same source", "python", "a.py", 100) == first
+    assert parser_a.process.call_count == 1
+
+    # The old parser still executes A, even though its filesystem path now
+    # points at B. It must neither read nor write a B-keyed cache entry.
+    wasm.write_bytes(revision_b)
+    with pytest.raises(RuntimeError, match="compiled parser Wasm differs"):
+        differ._cached_process(parser_a, "same source", "python", "a.py", 100)
+    assert parser_a.process.call_count == 1
+
+    parser_b = make_parser(revision_b, "B")
+    second = differ._cached_process(parser_b, "same source", "python", "a.py", 100)
+    assert second.id == "B"
+    assert differ._cached_process(parser_b, "same source", "python", "a.py", 100) == second
+    assert parser_b.process.call_count == 1
+    assert cache.parse_hits == 2
+
+
+def test_wasm_identity_change_during_process_does_not_write_cache(tmp_path: Path):
+    """A trap/reload during parsing must not store B output under A's key."""
+    import hashlib
+    from intentumdiff.core.models import NodePosition, SemanticNode
+
+    cache = _InMemoryCache()
+    differ = SemanticDiffer(cache=cache)
+    wasm = tmp_path / "reload_parser.wasm"
+    revision_a = b"compiled original A"
+    revision_b = b"compiled replacement revision B with a different size"
+    wasm.write_bytes(revision_a)
+
+    parser = MagicMock()
+    parser.grammar_id = "shared"
+    parser.wasm_path = str(wasm)
+    parser.compiled_wasm_sha256 = hashlib.sha256(revision_a).hexdigest()
+
+    def reload_while_parsing(*_args, **_kwargs):
+        wasm.write_bytes(revision_b)
+        parser.compiled_wasm_sha256 = hashlib.sha256(revision_b).hexdigest()
+        return SemanticNode(
+            id="B", node_type="module", label="", structural_hash="B",
+            position=NodePosition(
+                start_line=0, start_col=0, end_line=0, end_col=0,
+            ),
+            children=[],
+        )
+
+    parser.process.side_effect = reload_while_parsing
+    with pytest.raises(RuntimeError, match="identity changed during parse"):
+        differ._cached_process(parser, "same source", "python", "a.py", 100)
+    assert cache._parse == {}
+    assert parser.process.call_count == 1
+
+
 # ---------------------------------------------------------------------------
 # Cache limit input validation (B6-10)
 # ---------------------------------------------------------------------------
