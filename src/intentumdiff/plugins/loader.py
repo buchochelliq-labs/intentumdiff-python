@@ -733,6 +733,7 @@ class LoadedPlugin:
         fuel: int,
         iface_name: str,
         trusted: bool = False,
+        compiled_wasm_sha256: str | None = None,
     ) -> None:
         self._wasm_path = wasm_path
         self._instance = instance
@@ -740,6 +741,8 @@ class LoadedPlugin:
         self._fuel = fuel
         self._iface_name = iface_name
         self._trusted = trusted
+        # Digest of the *compiled* Wasm buffer, not a later filesystem snapshot.
+        self._compiled_wasm_sha256 = compiled_wasm_sha256
         # Cache the interface-level ExportIndex for nested function lookups
         self._iface_idx = instance.get_export_index(store, iface_name)
         # Wasm Store is not thread-safe; serialise all calls through this lock.
@@ -753,6 +756,11 @@ class LoadedPlugin:
     def wasm_path(self) -> str:
         """Path of the ``.wasm`` file that backs this plugin instance."""
         return self._wasm_path
+
+    @property
+    def compiled_wasm_sha256(self) -> str | None:
+        """SHA-256 of the exact Wasm bytes compiled for this live instance."""
+        return self._compiled_wasm_sha256
 
     @property
     def trusted(self) -> bool:
@@ -897,6 +905,7 @@ class LoadedPlugin:
         fresh = load_plugin(self._wasm_path, self._fuel, trusted=self._trusted)
         self._instance = fresh._instance
         self._store = fresh._store
+        self._compiled_wasm_sha256 = fresh._compiled_wasm_sha256
         self._iface_idx = fresh._instance.get_export_index(fresh._store, self._iface_name)
         self._tainted = False
 
@@ -1116,6 +1125,13 @@ def load_plugin(
         raise PluginSecurityError(str(path), "bundled Wasm changed between provenance and Rust approval")
     component_bytes = (approved_component_bytes
                        if approved_component_bytes is not None else verified_component_bytes)
+    if component_bytes is None:
+        # Third-party components also compile from an owned, hashed buffer;
+        # Component.from_file would hide which revision Wasmtime actually read.
+        try:
+            component_bytes = path.read_bytes()
+        except OSError as exc:
+            raise PluginLoadError(str(path), f"cannot read Wasm component: {exc}") from exc
 
     try:
         cfg = Config()
@@ -1152,11 +1168,9 @@ def load_plugin(
             )
         engine = Engine(cfg)
 
-        # Wasmtime Component(engine, bytes) compiles the exact buffer approved
-        # by Rust. Component.from_file would reopen a potentially replaced path.
-        component = (Component(engine, component_bytes)
-                     if component_bytes is not None
-                     else Component.from_file(engine, str(path)))
+        # Compile precisely the bytes whose digest is bound to this instance.
+        # First-party protected components were approved by Rust above.
+        component = Component(engine, component_bytes)
 
         linker = Linker(engine)
         linker.add_wasip2()
@@ -1214,6 +1228,7 @@ def load_plugin(
             fuel,
             iface_name,
             trusted=trusted,
+            compiled_wasm_sha256=hashlib.sha256(component_bytes).hexdigest(),
         )
 
     except (PluginLoadError, PluginSandboxViolation):
