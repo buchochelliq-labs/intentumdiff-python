@@ -1660,6 +1660,14 @@ def try_rust_core_batch_diffs(
                 adapter_phase_timings=adapter_phase_timings,
                 backend_version=backend_version,
             )
+        # Rust always emits one indexed result per requested file, including
+        # explicit candidate/fallback outcomes. A missing record is corrupted
+        # transport, not an implicit Rust decline (or an empty success).
+        if batch_status is not None and len(diff_items) != len(files):
+            raise ValueError(
+                f"Rust batch response has {len(diff_items)} items "
+                f"for {len(files)} requested files"
+            )
         batch_metadata = dict(data.get("metadata") or {})
         fallback_reasons: dict[int, str] = {}
         validated_diffs: list[tuple[int, str, SemanticDiff]] = []
