@@ -93,6 +93,7 @@ class RustCoreBatchAttempt:
     diff: SemanticDiff | None = None
     fallback_reason: str = ""
     backend_version: str = ""
+    invalid_output: bool = False  # An invalid claimed-success Rust DTO is never a normal decline.
 
     @property
     def used(self) -> bool:
@@ -107,6 +108,7 @@ class RustCoreBatchDiffsAttempt:
     adapter_phase_timings: list[dict[str, Any]] = field(default_factory=list)
     backend_version: str = ""
     fallback_reason: str = ""
+    invalid_output: bool = False
 
     @property
     def used(self) -> bool:
@@ -1466,6 +1468,7 @@ def try_rust_core_batch_diff(
         or batch.fallback_reason
         or "batch item is incomplete",
         backend_version=batch.backend_version,
+        invalid_output=batch.invalid_output,
     )
 
 
@@ -1608,11 +1611,14 @@ def try_rust_core_batch_diffs(
             _record_adapter_phase("rust_core_response_validation", phase_started)
             return RustCoreBatchDiffsAttempt(
                 fallback_reason=f"unexpected engine: {engine or '<missing>'}",
+                invalid_output=data.get("status") == _COMPLETE_STATUS,
                 adapter_phase_timings=adapter_phase_timings,
                 backend_version=backend_version,
             )
         diff_items = data.get("diffs")
         if not isinstance(diff_items, list):
+            if data.get("status") == _COMPLETE_STATUS:
+                raise ValueError("Rust complete batch response requires diffs array")
             reason = str(data.get("reason") or "batch response did not include a diff")
             _record_adapter_phase("rust_core_response_validation", phase_started)
             return RustCoreBatchDiffsAttempt(
@@ -1640,7 +1646,9 @@ def try_rust_core_batch_diffs(
                 raise ValueError(f"Rust batch response repeats file index {index}")
             seen_indices.add(index)
             status = str(item.get("status") or "")
-            if status != _COMPLETE_STATUS or "diff" not in item:
+            if status == _COMPLETE_STATUS and "diff" not in item:
+                raise ValueError("Rust complete batch item requires diff")
+            if status != _COMPLETE_STATUS:
                 fallback_reasons[index] = str(
                     item.get("reason") or status or "batch item is incomplete"
                 )
@@ -1697,6 +1705,7 @@ def try_rust_core_batch_diffs(
         logger.debug("Rust core batch output rejected: %s", exc)
         return RustCoreBatchDiffsAttempt(
             fallback_reason=f"invalid output: {exc}",
+            invalid_output=True,
             adapter_phase_timings=adapter_phase_timings,
         )
     except Exception as exc:  # noqa: BLE001 - optional accelerator must fall back.
