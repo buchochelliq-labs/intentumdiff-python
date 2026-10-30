@@ -423,8 +423,13 @@ class Indexer:
                 continue
             try:
                 content = path.read_text(encoding="utf-8", errors="replace")
-            except OSError:
-                continue
+            except OSError as exc:
+                # Host-I/O failure is not an intentional ignore or unsupported
+                # parser. Returning a successful partial directory index would
+                # conceal source files from downstream semantic analysis (#203).
+                raise RuntimeError(
+                    f"Failed to read directory index source {rel_posix!r}: {exc}"
+                ) from exc
             files.append((rel_posix, content))
 
         result = self._index_files(files, on_progress=callback)
