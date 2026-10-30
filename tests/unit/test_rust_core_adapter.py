@@ -1508,8 +1508,33 @@ def test_native_commit_dto_accepts_explicitly_empty_rust_collections() -> None:
     assert rust_core._require_native_commit_diff_json(payload, "test") is None
 
 
+def _malformed_native_semantic_flag_payloads() -> list[bytes]:
+    """Malformed certified bytes must fail before Pydantic bool coercion (#201)."""
+    valid_diff = SemanticDiff(
+        old_filename="a.py", new_filename="a.py", language="python",
+        metadata={"engine_owner": "rust"},
+    ).model_dump(mode="json")
+    payloads: list[bytes] = []
+    for flag in ("has_semantic_changes", "is_style_only", "is_fallback"):
+        for invalid in ("false", "true", 0, 1, None):
+            payloads.append(json.dumps({
+                "old_ref": "HEAD", "new_ref": "",
+                "file_diffs": [{**valid_diff, flag: invalid}],
+                "cross_file_changes": [], "parse_errors": [],
+                "guardrail_violations": [],
+            }).encode())
+    return payloads
+
+
+@pytest.mark.parametrize("payload", _malformed_native_semantic_flag_payloads())
+def test_native_commit_dto_rejects_coerced_semantic_flags(payload: bytes) -> None:
+    with pytest.raises(RuntimeError, match="requires .* boolean"):
+        rust_core._require_native_commit_diff_json(payload, "test")
+
+
 @pytest.mark.parametrize("payload", [
     b"not-json", b"{}", b"null", b"[]",
+    *_malformed_native_semantic_flag_payloads(),
     b'{"old_ref":"HEAD","new_ref":""}',
     b'{"old_ref":"HEAD","new_ref":"","cross_file_changes":[],"parse_errors":[],"guardrail_violations":[]}',
     b'{"old_ref":"HEAD","new_ref":"","file_diffs":[{"old_filename":"a.py","new_filename":"a.py","language":"python"}],"cross_file_changes":[],"parse_errors":[],"guardrail_violations":[]}',
@@ -1543,6 +1568,7 @@ def test_native_commit_adapter_rejects_malformed_complete_dto(
 
 @pytest.mark.parametrize("payload", [
     b"not-json", b"{}", b"null", b"[]", b"",
+    *_malformed_native_semantic_flag_payloads(),
     b'{"old_ref":"HEAD","new_ref":""}',
     b'{"old_ref":"HEAD","new_ref":"","cross_file_changes":[],"parse_errors":[],"guardrail_violations":[]}',
     b'{"old_ref":"HEAD","new_ref":"","file_diffs":[{"old_filename":"a.py","new_filename":"a.py","language":"python"}],"cross_file_changes":[],"parse_errors":[],"guardrail_violations":[]}',
