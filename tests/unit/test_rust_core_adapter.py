@@ -1802,7 +1802,7 @@ def _invoke_certified_commit_through_ctypes(
     if entrypoint == "batch":
         return rust_core.try_rust_core_commit_json(
             files=[{
-                "old_source": "value = 1\\n", "new_source": "value = 2\\n",
+                "old_source": "value = 1\n", "new_source": "value = 2\n",
                 "old_filename": "example.py", "new_filename": "example.py",
                 "language": "python", "parser_plugin_id": "python",
                 "parser_wasm_path": "python_parser.wasm",
