@@ -1271,6 +1271,15 @@ class SemanticDiffer:
                         rust_batch_attempt.diff,
                         file_lifecycle,
                     )
+                # An invalid claimed-complete Rust result is a broken engine/DTO
+                # contract, NOT an ordinary batch decline. Routing it through the
+                # alternate Rust finalizer can silently publish different semantic
+                # changes (observed in the 74-language corpus, #205).
+                if rust_batch_attempt.invalid_output:
+                    raise RuntimeError(
+                        f"Malformed Rust batch result for {filename!r}: "
+                        f"{rust_batch_attempt.fallback_reason}"
+                    )
                 # The certified BATCH shortcut declined — fall through to the native
                 # routed finalize path below. This is a Rust→Rust transition (the
                 # routed path finalizes through the Rust core for every certified
