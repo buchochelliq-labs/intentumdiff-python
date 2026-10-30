@@ -479,6 +479,10 @@ def test_malformed_claimed_complete_rust_batch_is_integrity_failure(
         "unknown_item_status",
         "missing_item_status",
         "non_string_item_status",
+        "missing_item_index",
+        "null_item_index",
+        "boolean_item_index",
+        "string_item_index",
         "complete_with_fallback",
         "complete_with_candidate",
         "fallback_with_complete",
@@ -490,6 +494,10 @@ def test_malformed_claimed_complete_rust_batch_is_integrity_failure(
         "non_string_envelope_status",
         "missing_fallback_inventory",
         "missing_candidate_inventory",
+        "unexpected_engine_fallback",
+        "unexpected_engine_candidate",
+        "unexpected_engine_partial",
+        "missing_engine_fallback",
     ),
 )
 def test_rust_batch_rejects_invalid_status_and_item_transport(
@@ -515,6 +523,14 @@ def test_rust_batch_rejects_invalid_status_and_item_transport(
         payload["diffs"][0].pop("status")
     elif defect == "non_string_item_status":
         payload["diffs"][0]["status"] = 1
+    elif defect == "missing_item_index":
+        payload["diffs"][0].pop("index")
+    elif defect == "null_item_index":
+        payload["diffs"][0]["index"] = None
+    elif defect == "boolean_item_index":
+        payload["diffs"][0]["index"] = False
+    elif defect == "string_item_index":
+        payload["diffs"][0]["index"] = "0"
     elif defect == "complete_with_fallback":
         payload["diffs"][0] = {"index": 0, "status": "fallback", "reason": "declined"}
     elif defect == "complete_with_candidate":
@@ -538,6 +554,25 @@ def test_rust_batch_rejects_invalid_status_and_item_transport(
     elif defect == "missing_candidate_inventory":
         payload["status"] = "candidate"
         payload.pop("diffs")
+    elif defect in (
+        "unexpected_engine_fallback",
+        "unexpected_engine_candidate",
+        "unexpected_engine_partial",
+        "missing_engine_fallback",
+    ):
+        status = (
+            "partial" if defect == "unexpected_engine_partial"
+            else "candidate" if defect == "unexpected_engine_candidate"
+            else "fallback"
+        )
+        payload["status"] = status
+        payload["diffs"] = [
+            {"index": 0, "status": "fallback" if status == "partial" else status, "reason": "declined"}
+        ]
+        if defect == "missing_engine_fallback":
+            payload.pop("engine")
+        else:
+            payload["engine"] = "wrong_batch_engine"
     else:
         payload["status"] = "unrecognized"
 
@@ -556,7 +591,11 @@ def test_rust_batch_rejects_invalid_status_and_item_transport(
     )
     assert not attempt.used
     assert attempt.invalid_output, (defect, attempt.fallback_reason)
-    assert "invalid" in attempt.fallback_reason or "contradicts" in attempt.fallback_reason
+    assert (
+        "invalid" in attempt.fallback_reason
+        or "contradicts" in attempt.fallback_reason
+        or "unexpected engine" in attempt.fallback_reason
+    )
 
 
 @pytest.mark.parametrize("status", ["candidate", "fallback"])
@@ -588,7 +627,11 @@ def test_rust_batch_retains_explicit_uncertified_rust_declines(
     assert attempt.fallback_reason == "Rust declined"
 
 
-@pytest.mark.parametrize("defect", ("missing_guardrails", "non_object_item", "unknown_status"))
+@pytest.mark.parametrize(
+    "defect",
+    ("missing_guardrails", "non_object_item", "unknown_status",
+     "missing_item_index", "wrong_engine_decline"),
+)
 def test_semantic_differ_rejects_malformed_batch_before_rust_routed_finalize(
     monkeypatch: Any, defect: str,
 ) -> None:
@@ -605,6 +648,12 @@ def test_semantic_differ_rejects_malformed_batch_before_rust_routed_finalize(
         diff.pop("guardrail_violations")
     elif defect == "non_object_item":
         payload["diffs"] = [None]
+    elif defect == "missing_item_index":
+        payload["diffs"][0].pop("index")
+    elif defect == "wrong_engine_decline":
+        payload["engine"] = "unrecognized_batch_engine"
+        payload["status"] = "fallback"
+        payload["diffs"] = [{"index": 0, "status": "fallback", "reason": "declined"}]
     else:
         payload["diffs"][0]["status"] = "nonsense"
     backend = SimpleNamespace(

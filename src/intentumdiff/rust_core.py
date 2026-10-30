@@ -1636,7 +1636,7 @@ def try_rust_core_batch_diffs(
             _record_adapter_phase("rust_core_response_validation", phase_started)
             return RustCoreBatchDiffsAttempt(
                 fallback_reason=f"unexpected engine: {engine or '<missing>'}",
-                invalid_output=data.get("status") == _COMPLETE_STATUS,
+                invalid_output=True,
                 adapter_phase_timings=adapter_phase_timings,
                 backend_version=backend_version,
             )
@@ -1666,14 +1666,17 @@ def try_rust_core_batch_diffs(
         fallback_reasons: dict[int, str] = {}
         validated_diffs: list[tuple[int, str, SemanticDiff]] = []
         seen_indices: set[int] = set()
-        for fallback_index, item in enumerate(diff_items):
+        for item in diff_items:
             if not isinstance(item, dict):
                 # Rust never emits a non-object item; interpreting one as a
                 # normal decline hides invalid native success behind rerouting.
                 raise ValueError("Rust batch diff item must be an object")
-            # An explicit index of zero is valid even when it appears after the
-            # first response item; a truthiness fallback silently remapped it.
-            index = item.get("index", fallback_index)
+            # Rust always sends an explicit file index, including on declines.
+            # Inferring a missing index from response order can certify a diff
+            # for the wrong requested file after transport damage.
+            if "index" not in item:
+                raise ValueError("Rust batch response item requires index")
+            index = item["index"]
             if type(index) is not int or not 0 <= index < len(files):
                 raise ValueError(f"Rust batch response index is invalid: {index!r}")
             if index in seen_indices:
