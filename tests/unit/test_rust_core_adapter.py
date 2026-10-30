@@ -1330,50 +1330,136 @@ def test_rust_core_commit_json_adapter_falls_back_on_control_status(
     assert attempt.control["status"] == "fallback"
 
 
-def test_rust_core_commit_json_adapter_rejects_byte_size_mismatch(
+def _call_commit_with_control(
     monkeypatch: Any,
-) -> None:
-    payload = b'{"old_ref":"HEAD","new_ref":"","file_diffs":[]}'
-
-    def diff_batch_commit_json(request_json: str) -> tuple[str, bytes]:
-        return (
-            json.dumps(
-                {
-                    "schema_version": 1,
-                    "status": "complete",
-                    "certification": "python_native_v4kb",
-                    "commit_diff_byte_size": len(payload) + 1,
-                }
-            ),
-            payload,
-        )
-
+    adapter: str,
+    control_json: str,
+    payload: Any,
+) -> rust_core.RustCoreCommitJsonAttempt:
     backend = SimpleNamespace(
         version=lambda: "0.4.0",
-        supports_language=lambda language: language == "python",
-        diff_batch_commit_json=diff_batch_commit_json,
+        supports_language=lambda _language: True,
+        diff_batch_commit_json=lambda _request: (control_json, payload),
+        diff_working_tree_python_commit_json=lambda _request: (control_json, payload),
     )
     monkeypatch.setattr(rust_core, "_load_backend", lambda: backend)
-
-    attempt = rust_core.try_rust_core_commit_json(
-        files=[
-            {
-                "old_source": "",
-                "new_source": "",
-                "old_filename": "example.py",
-                "new_filename": "example.py",
-                "language": "python",
-                "parser_plugin_id": "python",
+    monkeypatch.setattr(rust_core, "rust_core_enabled", lambda _config: True)
+    if adapter == "commit":
+        return rust_core.try_rust_core_commit_json(
+            files=[{
+                "old_source": "x = 1\n", "new_source": "x = 2\n",
+                "old_filename": "example.py", "new_filename": "example.py",
+                "language": "python", "parser_plugin_id": "python",
                 "parser_wasm_path": "python_parser.wasm",
-            }
-        ],
-        old_ref="HEAD",
-        new_ref="",
+            }],
+            old_ref="HEAD", new_ref="",
+            config=DiffConfig(experimental_rust_core=True),
+        )
+    return rust_core.try_rust_core_working_tree_commit_json(
+        repo_path=".", old_ref="HEAD",
         config=DiffConfig(experimental_rust_core=True),
     )
 
-    assert attempt.used is False
-    assert "byte size mismatch" in attempt.fallback_reason
+
+@pytest.mark.parametrize("adapter", ("commit", "working_tree"))
+@pytest.mark.parametrize(
+    ("invalid_case", "error"),
+    [
+        ("missing_certification", "invalid certification"),
+        ("wrong_certification", "invalid certification"),
+        ("numeric_certification", "invalid certification"),
+        ("missing_bytes", "without valid commit JSON bytes"),
+        ("non_bytes_payload", "without valid commit JSON bytes"),
+        ("empty_bytes", "empty commit JSON"),
+        ("missing_size", "byte size mismatch"),
+        ("string_size", "byte size mismatch"),
+        ("boolean_size", "byte size mismatch"),
+        ("off_by_one_size", "byte size mismatch"),
+        ("malformed_control_json", "malformed control JSON"),
+        ("array_control_json", "control object with status string"),
+        ("missing_status", "control object with status string"),
+        ("numeric_status", "control object with status string"),
+        ("empty_status", "empty control status"),
+    ],
+)
+def test_certified_commit_adapters_fail_closed_on_invalid_complete_controls(
+    monkeypatch: Any, adapter: str, invalid_case: str, error: str,
+) -> None:
+    # Valid empty inventories are intentionally explicit; only corrupt
+    # claimed-complete control/envelope data is rejected (#206).
+    payload: Any = json.dumps({
+        "old_ref": "HEAD", "new_ref": "",
+        "file_diffs": [], "cross_file_changes": [],
+        "parse_errors": [], "guardrail_violations": [],
+    }).encode()
+    control: dict[str, Any] = {
+        "schema_version": 1,
+        "status": "complete",
+        "certification": "python_native_v4kb",
+        "commit_diff_byte_size": len(payload),
+    }
+    if invalid_case == "missing_certification":
+        del control["certification"]
+    elif invalid_case == "wrong_certification":
+        control["certification"] = "uncertified"
+    elif invalid_case == "numeric_certification":
+        control["certification"] = 2
+    elif invalid_case == "missing_bytes":
+        payload = None
+    elif invalid_case == "non_bytes_payload":
+        payload = "not bytes"
+    elif invalid_case == "empty_bytes":
+        payload = b""
+    elif invalid_case == "missing_size":
+        del control["commit_diff_byte_size"]
+    elif invalid_case == "string_size":
+        control["commit_diff_byte_size"] = str(len(payload))
+    elif invalid_case == "boolean_size":
+        control["commit_diff_byte_size"] = True
+    elif invalid_case == "off_by_one_size":
+        control["commit_diff_byte_size"] = len(payload) + 1
+    elif invalid_case == "missing_status":
+        del control["status"]
+    elif invalid_case == "numeric_status":
+        control["status"] = 1
+    elif invalid_case == "empty_status":
+        control["status"] = ""
+    control_json = json.dumps(control)
+    if invalid_case == "malformed_control_json":
+        control_json = "{broken"
+    elif invalid_case == "array_control_json":
+        control_json = "[]"
+    with pytest.raises(RuntimeError, match=error):
+        _call_commit_with_control(monkeypatch, adapter, control_json, payload)
+
+
+@pytest.mark.parametrize("adapter", ("commit", "working_tree"))
+def test_certified_commit_control_preserves_explicit_declines_and_empty_success(
+    monkeypatch: Any, adapter: str,
+) -> None:
+    declined = _call_commit_with_control(
+        monkeypatch, adapter,
+        json.dumps({"status": "fallback", "reason": "unsupported candidate"}), None,
+    )
+    assert declined.used is False
+    assert declined.fallback_reason == "unsupported candidate"
+
+    payload = json.dumps({
+        "old_ref": "HEAD", "new_ref": "",
+        "file_diffs": [], "cross_file_changes": [],
+        "parse_errors": [], "guardrail_violations": [],
+    }).encode()
+    complete = _call_commit_with_control(
+        monkeypatch, adapter,
+        json.dumps({
+            "status": "complete", "certification": "python_native_v4kb",
+            "commit_diff_byte_size": len(payload),
+        }),
+        payload,
+    )
+    assert complete.used is True
+    assert complete.commit_diff_json == payload
+    assert complete.to_model().file_diffs == []
 
 
 def test_semantic_differ_batch_decline_requires_native_finalize_handler(monkeypatch: Any) -> None:
