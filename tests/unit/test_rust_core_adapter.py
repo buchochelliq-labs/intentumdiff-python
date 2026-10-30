@@ -468,6 +468,99 @@ def test_malformed_claimed_complete_rust_batch_is_integrity_failure(
     assert attempt.invalid_output, (defect, attempt.fallback_reason)
 
 
+@pytest.mark.parametrize(
+    "defect",
+    (
+        "null_item",
+        "array_item",
+        "unknown_item_status",
+        "missing_item_status",
+        "non_string_item_status",
+        "complete_with_fallback",
+        "complete_with_candidate",
+        "fallback_with_complete",
+        "unknown_envelope_status",
+    ),
+)
+def test_rust_batch_rejects_invalid_status_and_item_transport(
+    monkeypatch: Any, defect: str,
+) -> None:
+    """Malformed native batch envelopes are integrity failures, not Rust declines (#212)."""
+    diff = SemanticDiff(
+        old_filename="example.py", new_filename="example.py", language="python",
+    ).model_dump(mode="json")
+    payload: dict[str, Any] = {
+        "schema_version": 1,
+        "engine": "rust_core_batch_v4",
+        "status": "complete",
+        "diffs": [{"index": 0, "status": "complete", "diff": diff}],
+    }
+    if defect == "null_item":
+        payload["diffs"] = [None]
+    elif defect == "array_item":
+        payload["diffs"] = [[]]
+    elif defect == "unknown_item_status":
+        payload["diffs"][0]["status"] = "success"
+    elif defect == "missing_item_status":
+        payload["diffs"][0].pop("status")
+    elif defect == "non_string_item_status":
+        payload["diffs"][0]["status"] = 1
+    elif defect == "complete_with_fallback":
+        payload["diffs"][0] = {"index": 0, "status": "fallback", "reason": "declined"}
+    elif defect == "complete_with_candidate":
+        payload["diffs"][0] = {"index": 0, "status": "candidate", "candidate_diff": {}}
+    elif defect == "fallback_with_complete":
+        payload["status"] = "fallback"
+    else:
+        payload["status"] = "unrecognized"
+
+    backend = SimpleNamespace(
+        version=lambda: "0.4.0",
+        supports_language=lambda _language: True,
+        diff_batch=lambda *_: json.dumps(payload),
+    )
+    monkeypatch.setattr(rust_core, "_load_backend", lambda: backend)
+    attempt = rust_core.try_rust_core_batch_diff(
+        old_source="def f():\n    return 1\n",
+        new_source="def f():\n    return 2\n",
+        old_filename="example.py", new_filename="example.py",
+        parser_wasm_path="python_parser.wasm", language="python",
+        parser_plugin_id="python-parser", config=DiffConfig(experimental_rust_core=True),
+    )
+    assert not attempt.used
+    assert attempt.invalid_output, (defect, attempt.fallback_reason)
+    assert "invalid" in attempt.fallback_reason or "contradicts" in attempt.fallback_reason
+
+
+@pytest.mark.parametrize("status", ["candidate", "fallback"])
+def test_rust_batch_retains_explicit_uncertified_rust_declines(
+    monkeypatch: Any, status: str,
+) -> None:
+    """Rust-owned candidate and fallback are legitimate alternate-Rust routes (#212)."""
+    payload = {
+        "schema_version": 1, "engine": "rust_core_batch_v4",
+        "status": status, "diffs": [
+            {"index": 0, "status": status, "reason": "Rust declined"}
+        ],
+    }
+    backend = SimpleNamespace(
+        version=lambda: "0.4.0",
+        supports_language=lambda _language: True,
+        diff_batch=lambda *_: json.dumps(payload),
+    )
+    monkeypatch.setattr(rust_core, "_load_backend", lambda: backend)
+    attempt = rust_core.try_rust_core_batch_diff(
+        old_source="def f():\n    return 1\n",
+        new_source="def f():\n    return 2\n",
+        old_filename="example.py", new_filename="example.py",
+        parser_wasm_path="python_parser.wasm", language="python",
+        parser_plugin_id="python-parser", config=DiffConfig(experimental_rust_core=True),
+    )
+    assert not attempt.used
+    assert attempt.invalid_output is False
+    assert attempt.fallback_reason == "Rust declined"
+
+
 def test_semantic_differ_rejects_malformed_batch_before_rust_routed_finalize(
     monkeypatch: Any,
 ) -> None:
