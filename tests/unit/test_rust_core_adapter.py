@@ -430,6 +430,73 @@ def test_rust_complete_batch_rejects_invalid_guardrail_inventory(
     assert "guardrail_violations array" in attempt.fallback_reason
 
 
+@pytest.mark.parametrize("defect", ["missing_guardrails", "missing_diff", "missing_inventory", "wrong_engine"])
+def test_malformed_claimed_complete_rust_batch_is_integrity_failure(
+    monkeypatch: Any, defect: str,
+) -> None:
+    """An invalid success must never become a legitimate decline (#205)."""
+    diff = SemanticDiff(
+        old_filename="example.py", new_filename="example.py", language="python",
+    ).model_dump(mode="json")
+    payload: dict[str, Any] = {
+        "schema_version": 1, "status": "complete", "engine": "rust_core_batch_v4",
+        "diffs": [{"index": 0, "status": "complete", "diff": diff}],
+    }
+    if defect == "missing_guardrails":
+        diff.pop("guardrail_violations")
+    elif defect == "missing_diff":
+        payload["diffs"][0].pop("diff")
+    elif defect == "missing_inventory":
+        payload.pop("diffs")
+    else:
+        payload["engine"] = "unrecognized_batch_engine"
+    backend = SimpleNamespace(
+        version=lambda: "0.4.0",
+        supports_language=lambda _language: True,
+        diff_batch=lambda *_: json.dumps(payload),
+    )
+    monkeypatch.setattr(rust_core, "_load_backend", lambda: backend)
+    attempt = rust_core.try_rust_core_batch_diff(
+        old_source="def f():\n    return 1\n",
+        new_source="def f():\n    return 2\n",
+        old_filename="example.py", new_filename="example.py",
+        parser_wasm_path="python_parser.wasm", language="python",
+        parser_plugin_id="python-parser", config=DiffConfig(experimental_rust_core=True),
+    )
+    assert not attempt.used
+    assert attempt.invalid_output, (defect, attempt.fallback_reason)
+
+
+def test_semantic_differ_rejects_malformed_batch_before_rust_routed_finalize(
+    monkeypatch: Any,
+) -> None:
+    """Malformed Rust success is fatal even when a second Rust route could complete (#205)."""
+    real_backend = rust_core._load_backend()
+    diff = SemanticDiff(
+        old_filename="example.py", new_filename="example.py", language="python",
+    ).model_dump(mode="json")
+    diff.pop("guardrail_violations")
+    payload = {
+        "schema_version": 1, "status": "complete", "engine": "rust_core_batch_v4",
+        "diffs": [{"index": 0, "status": "complete", "diff": diff}],
+    }
+    backend = SimpleNamespace(
+        detect_content_type_json=real_backend.detect_content_type_json,
+        parser_candidate_shortlist=real_backend.parser_candidate_shortlist,
+        filename_selection_next=real_backend.filename_selection_next,
+        version=lambda: "0.4.0",
+        supports_language=lambda language: language == "python",
+        diff_batch=lambda *_: json.dumps(payload),
+    )
+    monkeypatch.setattr(rust_core, "_load_backend", lambda: backend)
+    with pytest.raises(RuntimeError, match="Malformed Rust batch result.*guardrail_violations"):
+        SemanticDiffer(DiffConfig(experimental_rust_core=True)).diff_strings(
+            "def f():\n    return 1\n",
+            "def f():\n    return 2\n",
+            "example.py", language_hint="python",
+        )
+
+
 def test_rust_complete_batch_rejects_contradictory_engine_owner(monkeypatch: Any) -> None:
     diff = SemanticDiff(
         old_filename="a.py", new_filename="a.py", language="python",
