@@ -1501,7 +1501,7 @@ def _require_complete_batch_diff_dto(payload: Any) -> dict[str, Any]:
     """
     if not isinstance(payload, dict):
         raise ValueError("Rust complete batch diff must be an object")
-    for field in ("changes", "change_groups", "parse_errors"):
+    for field in ("changes", "change_groups", "parse_errors", "guardrail_violations"):
         if not isinstance(payload.get(field), list):
             raise ValueError(f"Rust complete batch diff requires {field} array")
     for field in ("has_semantic_changes", "is_style_only", "is_fallback"):
