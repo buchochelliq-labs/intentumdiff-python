@@ -343,6 +343,7 @@ def _batch_mapping_fixture(
         for name in filenames
     ]
     payload = {
+        "status": "complete",
         "engine": "rust_core_batch_v4",
         "diffs": [
             {"index": indices[0], "status": "complete", "diff": diffs[0].model_dump(mode="json")},
@@ -385,6 +386,7 @@ def test_rust_complete_batch_missing_certification_fields_fails_closed(
     ).model_dump(mode="json")
     diff.pop(missing_field)
     payload = {
+        "status": "complete",
         "engine": "rust_core_batch_v4",
         "diffs": [{"index": 0, "status": "complete", "diff": diff}],
     }
@@ -417,6 +419,7 @@ def test_rust_complete_batch_rejects_invalid_guardrail_inventory(
         version=lambda: "0.4.0",
         supports_language=lambda _language: True,
         diff_batch=lambda *_: json.dumps({
+            "status": "complete",
             "engine": "rust_core_batch_v4",
             "diffs": [{"index": 0, "status": "complete", "diff": diff}],
         }),
@@ -483,6 +486,8 @@ def test_malformed_claimed_complete_rust_batch_is_integrity_failure(
         "missing_partial_inventory",
         "extra_complete_inventory",
         "unknown_envelope_status",
+        "missing_envelope_status",
+        "non_string_envelope_status",
     ),
 )
 def test_rust_batch_rejects_invalid_status_and_item_transport(
@@ -521,6 +526,10 @@ def test_rust_batch_rejects_invalid_status_and_item_transport(
         payload["diffs"] = []
     elif defect == "extra_complete_inventory":
         payload["diffs"].append({"index": 1, "status": "fallback", "reason": "bogus"})
+    elif defect == "missing_envelope_status":
+        payload.pop("status")
+    elif defect == "non_string_envelope_status":
+        payload["status"] = 1
     else:
         payload["status"] = "unrecognized"
 
@@ -613,6 +622,7 @@ def test_rust_complete_batch_rejects_contradictory_engine_owner(monkeypatch: Any
         metadata={"engine_owner": "python"},
     ).model_dump(mode="json")
     payload = {
+        "status": "complete",
         "engine": "rust_core_batch_v4",
         "diffs": [{"index": 0, "status": "complete", "diff": diff}],
     }
