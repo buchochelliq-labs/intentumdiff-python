@@ -334,3 +334,101 @@ def test_tsx_literal_exact_span_rejects_false_style_and_off_by_one():
     suppressed["metadata"] = {"ignored_style_changes": [{"rule_id": "unjustified"}]}
     with pytest.raises(AssertionError, match="falsely classified as formatting"):
         check(case, suppressed)
+
+
+def test_every_corpus_mutation_carries_a_source_derived_edit_extent():
+    harness = runpy.run_path(str(SCRIPT))
+    cases = harness["full_corpus_cases"]()
+    mutations = [case for case in cases if not case["id"].endswith("-addition")]
+    assert mutations, "missing source-judged mutations"
+    for case in mutations:
+        expected = harness["_mutation_source_extent"](case["old"], case["new"])
+        assert case["mutation_source_extent"] == expected
+        assert expected["new"]["token"].strip(), case["id"]
+
+
+def test_corpus_mutation_rejects_agreeing_fabricated_and_unrelated_spans():
+    harness = runpy.run_path(str(SCRIPT))
+    check = harness["check_mutation_source_evidence"]
+    case = {
+        "id": "corpus-python-bump_numeric_literal",
+        "old": "count = 1\n",
+        "new": "count = 2\n",
+    }
+    case["mutation_source_extent"] = harness["_mutation_source_extent"](
+        case["old"], case["new"]
+    )
+    # A valid semantic modification must be supported by both original and
+    # edited source coordinates, not merely native/Python projection parity.
+    valid = _diff(_node("2", col=8))
+    valid["changes"][0].update({
+        "change_type": "MODIFICATION",
+        "old_node": _node("1", col=8),
+    })
+    check(case, valid)
+
+    # Equal fabricated results used to pass the general bounds, parity and
+    # semantic-flag checks even though neither tree exposed the source edit.
+    fake = _diff(_node("NOT IN SOURCE"))
+    fake["changes"][0].update({
+        "change_type": "MODIFICATION",
+        "old_node": _node("NOT IN SOURCE"),
+    })
+    for side in ("old_node", "new_node"):
+        fake["changes"][0][side]["position"].update(
+            start_line=0, start_col=0, end_line=0, end_col=0
+        )
+    with pytest.raises(AssertionError, match="misses source-edited bytes"):
+        check(case, fake)
+
+    # Nonempty valid-looking spans on an unrelated identifier also fail.
+    unrelated = _diff(_node("count", col=0))
+    unrelated["changes"][0].update({
+        "change_type": "MODIFICATION",
+        "old_node": _node("count", col=0),
+    })
+    with pytest.raises(AssertionError, match="misses source-edited bytes"):
+        check(case, unrelated)
+
+    for bad_side in ("old_node", "new_node"):
+        import copy
+        corrupt = copy.deepcopy(valid)
+        corrupt["changes"][0][bad_side] = _node("count", col=0)
+        with pytest.raises(AssertionError, match="misses source-edited bytes"):
+            check(case, corrupt)
+
+
+def test_corpus_mutation_byte_anchor_handles_utf8_and_append_only():
+    harness = runpy.run_path(str(SCRIPT))
+    check = harness["check_mutation_source_evidence"]
+    old = "value = 'é'\n"
+    new = "value = 'éX'\n"
+    case = {
+        "id": "corpus-python-edit_string",
+        "old": old,
+        "new": new,
+        "mutation_source_extent": harness["_mutation_source_extent"](old, new),
+    }
+    # The é is two UTF-8 bytes: the inserted X starts at byte column 11.
+    assert case["mutation_source_extent"]["new"]["start"] == [0, 11]
+    assert case["mutation_source_extent"]["new"]["end"] == [0, 12]
+    check(case, _diff(_node("X", col=11)))
+    with pytest.raises(AssertionError, match="misses source-edited bytes"):
+        check(case, _diff(_node("é", col=9)))
+
+    old = "x = 1\n"
+    new = "x = 1\nprint(2)\n"
+    appended = {
+        "id": "corpus-python-append_statement",
+        "old": old,
+        "new": new,
+        "mutation_source_extent": harness["_mutation_source_extent"](old, new),
+    }
+    assert (appended["mutation_source_extent"]["old"]["start"]
+            == appended["mutation_source_extent"]["old"]["end"])
+    node = _node("print(2)", col=0)
+    node["position"].update(start_line=1, end_line=1)
+    check(appended, _diff(node))
+    unrelated = _node("x", col=0)
+    with pytest.raises(AssertionError, match="misses source-edited bytes"):
+        check(appended, _diff(unrelated))

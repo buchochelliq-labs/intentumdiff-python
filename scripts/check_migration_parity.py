@@ -111,6 +111,46 @@ def corpus_mutations(source: str, manifest: dict) -> list[tuple[str, str]]:
     return mutations
 
 
+
+def _mutation_source_extent(old_source: str, new_source: str) -> dict:
+    """Record the actual contiguous edit as UTF-8 source positions, not parser claims.
+
+    Corpus mutations change one site (or append one statement). The edited
+    bytes are independently derived from the two supplied source texts, so
+    native and Python cannot agree on an unrelated or zero-width changed tree.
+    """
+    assert old_source != new_source
+    prefix = 0
+    while (prefix < min(len(old_source), len(new_source))
+           and old_source[prefix] == new_source[prefix]):
+        prefix += 1
+    suffix = 0
+    limit = min(len(old_source) - prefix, len(new_source) - prefix)
+    while (suffix < limit
+           and old_source[len(old_source) - suffix - 1]
+           == new_source[len(new_source) - suffix - 1]):
+        suffix += 1
+    old_end = len(old_source) - suffix
+    new_end = len(new_source) - suffix
+    assert new_source[prefix:new_end].strip(), "mutation has no new semantic content"
+
+    def point(source: str, index: int) -> list[int]:
+        preceding = source[:index]
+        return [
+            preceding.count("\n"),
+            len(preceding.rsplit("\n", 1)[-1].encode("utf-8")),
+        ]
+
+    return {
+        "old": {"start": point(old_source, prefix),
+                "end": point(old_source, old_end),
+                "token": old_source[prefix:old_end]},
+        "new": {"start": point(new_source, prefix),
+                "end": point(new_source, new_end),
+                "token": new_source[prefix:new_end]},
+    }
+
+
 _RELEASE_CORPUS_LANGUAGES = frozenset("""
     abap adf asciidoc asm assemblyscript astro bash c clojure cmake cpp csharp css dart
     databricks-workflow databricks dax delphi dockerfile elixir generic gitignore go
@@ -171,6 +211,7 @@ def full_corpus_cases() -> list[dict]:
                 "filename": manifest["filename"],
                 "mode": "sources",
                 "corpus_language": language,
+                "mutation_source_extent": _mutation_source_extent(source, edited),
                 # These edits change semantic content, never just formatting.
                 # Do not accept a false style reduction even when the same
                 # result also contains a real semantic change.
@@ -180,6 +221,46 @@ def full_corpus_cases() -> list[dict]:
         directory.name for directory in directories
     }
     return cases
+
+
+
+def check_mutation_source_evidence(case: dict, diff: dict) -> None:
+    """Require changed-tree evidence at the actual edited bytes on each route.
+
+    Bound-valid coordinates elsewhere in the file are insufficient, as are
+    agreeing fabricated zero-width trees. A pure insertion need not fabricate
+    an old-side change; replacements must expose both sides of the edit.
+    Parser semantics and change classification remain entirely Rust-owned.
+    """
+    expected = case.get("mutation_source_extent")
+    if expected is None:
+        return
+    for side in ("old", "new"):
+        region = expected[side]
+        start, end = region["start"], region["end"]
+        if start == end:
+            continue  # No bytes on this side, e.g. append-only insertion.
+        nodes = [
+            change.get(f"{side}_node") for change in diff["changes"]
+            if change.get(f"{side}_node") is not None
+        ]
+        stack = nodes[:]
+        found = False
+        while stack:
+            node = stack.pop()
+            span = node["position"]
+            node_start = [span["start_line"], span["start_col"]]
+            node_end = [span["end_line"], span["end_col"]]
+            # Both spans are half-open UTF-8 byte positions, independently
+            # validated by check_source_spans before this release assertion.
+            if node_start < end and start < node_end and node_start < node_end:
+                found = True
+                break
+            stack.extend(node.get("children") or [])
+        assert found, (
+            case["id"], side, "changed subtree misses source-edited bytes",
+            region, [(node["label"], node["position"]) for node in nodes],
+        )
 
 
 def check_visible_corpus_tokens(case: dict, diff: dict) -> None:
@@ -465,6 +546,7 @@ def main():
                                 case['id'], origin, output['language'])
                             assert output['changes'], (case['id'], origin, 'zero changes')
                             check_source_spans(case, output)
+                            check_mutation_source_evidence(case, output)
                             check_visible_corpus_tokens(case, output)
                             check_vbnet_declaration_extent(case, output)
                             check_tsx_literal_exact(case, output)
@@ -484,6 +566,7 @@ def main():
                         )
                         assert abi['changes'], (case['id'], 'c_abi', 'zero semantic changes')
                         check_source_spans(case, abi)
+                        check_mutation_source_evidence(case, abi)
                         check_visible_corpus_tokens(case, abi)
                         check_vbnet_declaration_extent(case, abi)
                         check_tsx_literal_exact(case, abi)
