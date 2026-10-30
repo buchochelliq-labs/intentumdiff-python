@@ -1380,6 +1380,7 @@ def _call_commit_with_control(
         ("missing_status", "control object with status string"),
         ("numeric_status", "control object with status string"),
         ("empty_status", "empty control status"),
+        ("unknown_status", "unknown control status"),
     ],
 )
 def test_certified_commit_adapters_fail_closed_on_invalid_complete_controls(
@@ -1424,6 +1425,8 @@ def test_certified_commit_adapters_fail_closed_on_invalid_complete_controls(
         control["status"] = 1
     elif invalid_case == "empty_status":
         control["status"] = ""
+    elif invalid_case == "unknown_status":
+        control["status"] = "complete_typo"
     control_json = json.dumps(control)
     if invalid_case == "malformed_control_json":
         control_json = "{broken"
