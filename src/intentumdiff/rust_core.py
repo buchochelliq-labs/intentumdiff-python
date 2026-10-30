@@ -343,9 +343,24 @@ class _CtypesBackend:
         if name in self._COMMIT_TUPLE:
             def _commit(request_json: str, _name: str = name) -> tuple[str, bytes | None]:
                 envelope = _c_abi_call(_name, request_json)
+                # A malformed claimed-success C ABI result must not raise a
+                # generic AttributeError here: the commit adapters would treat
+                # it as a normal backend failure and silently reroute (#207).
+                # Check transport types before encoding; Rust owns the control
+                # status and CommitDiff semantics, which the callers validate.
+                if not isinstance(envelope, dict) or not isinstance(
+                    envelope.get("control"), dict
+                ):
+                    raise _InvalidNativeCommitDto(
+                        f"Rust {_name} returned malformed C ABI commit envelope"
+                    )
                 payload = envelope.get("commit_diff_json")
+                if payload is not None and not isinstance(payload, str):
+                    raise _InvalidNativeCommitDto(
+                        f"Rust {_name} returned non-string commit_diff_json in C ABI envelope"
+                    )
                 return (
-                    json.dumps(envelope.get("control")),
+                    json.dumps(envelope["control"]),
                     payload.encode("utf-8") if payload is not None else None,
                 )
 
