@@ -561,19 +561,25 @@ def test_rust_batch_retains_explicit_uncertified_rust_declines(
     assert attempt.fallback_reason == "Rust declined"
 
 
+@pytest.mark.parametrize("defect", ("missing_guardrails", "non_object_item", "unknown_status"))
 def test_semantic_differ_rejects_malformed_batch_before_rust_routed_finalize(
-    monkeypatch: Any,
+    monkeypatch: Any, defect: str,
 ) -> None:
-    """Malformed Rust success is fatal even when a second Rust route could complete (#205)."""
+    """Malformed Rust success is fatal before any other Rust route (#205, #212)."""
     real_backend = rust_core._load_backend()
     diff = SemanticDiff(
         old_filename="example.py", new_filename="example.py", language="python",
     ).model_dump(mode="json")
-    diff.pop("guardrail_violations")
     payload = {
         "schema_version": 1, "status": "complete", "engine": "rust_core_batch_v4",
         "diffs": [{"index": 0, "status": "complete", "diff": diff}],
     }
+    if defect == "missing_guardrails":
+        diff.pop("guardrail_violations")
+    elif defect == "non_object_item":
+        payload["diffs"] = [None]
+    else:
+        payload["diffs"][0]["status"] = "nonsense"
     backend = SimpleNamespace(
         detect_content_type_json=real_backend.detect_content_type_json,
         parser_candidate_shortlist=real_backend.parser_candidate_shortlist,
@@ -583,7 +589,7 @@ def test_semantic_differ_rejects_malformed_batch_before_rust_routed_finalize(
         diff_batch=lambda *_: json.dumps(payload),
     )
     monkeypatch.setattr(rust_core, "_load_backend", lambda: backend)
-    with pytest.raises(RuntimeError, match="Malformed Rust batch result.*guardrail_violations"):
+    with pytest.raises(RuntimeError, match="Malformed Rust batch result"):
         SemanticDiffer(DiffConfig(experimental_rust_core=True)).diff_strings(
             "def f():\n    return 1\n",
             "def f():\n    return 2\n",
