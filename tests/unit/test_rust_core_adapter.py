@@ -372,7 +372,7 @@ def _two_python_batch_inputs() -> list[dict[str, str]]:
 
 @pytest.mark.parametrize(
     "missing_field",
-    ("changes", "change_groups", "parse_errors",
+    ("changes", "change_groups", "parse_errors", "guardrail_violations",
      "has_semantic_changes", "is_style_only", "is_fallback", "metadata"),
 )
 def test_rust_complete_batch_missing_certification_fields_fails_closed(
@@ -401,6 +401,33 @@ def test_rust_complete_batch_missing_certification_fields_fails_closed(
     assert attempt.diffs == {}
     assert "invalid output:" in attempt.fallback_reason
     assert missing_field in attempt.fallback_reason
+
+
+@pytest.mark.parametrize("invalid", [None, {}, "[]", False])
+def test_rust_complete_batch_rejects_invalid_guardrail_inventory(
+    monkeypatch: Any, invalid: Any,
+) -> None:
+    """Rust must supply an array; Pydantic may not synthesize empty guardrails (#202)."""
+    diff = SemanticDiff(
+        old_filename="a.py", new_filename="a.py", language="python",
+    ).model_dump(mode="json")
+    diff["guardrail_violations"] = invalid
+    backend = SimpleNamespace(
+        version=lambda: "0.4.0",
+        supports_language=lambda _language: True,
+        diff_batch=lambda *_: json.dumps({
+            "engine": "rust_core_batch_v4",
+            "diffs": [{"index": 0, "status": "complete", "diff": diff}],
+        }),
+    )
+    monkeypatch.setattr(rust_core, "_load_backend", lambda: backend)
+    attempt = rust_core.try_rust_core_batch_diffs(
+        files=[_two_python_batch_inputs()[0]],
+        config=DiffConfig(experimental_rust_core=True),
+    )
+    assert not attempt.used
+    assert attempt.diffs == {}
+    assert "guardrail_violations array" in attempt.fallback_reason
 
 
 def test_rust_complete_batch_rejects_contradictory_engine_owner(monkeypatch: Any) -> None:
