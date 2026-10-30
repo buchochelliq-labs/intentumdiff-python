@@ -1720,6 +1720,48 @@ class _InvalidNativeCommitDto(RuntimeError):
     """Native claimed complete output but sent an invalid public commit DTO."""
 
 
+def _decode_native_commit_control(raw: Any, operation: str) -> dict[str, Any]:
+    """Reject malformed Rust control transport; only an explicit decline can fall back."""
+    try:
+        control = json.loads(raw)
+    except (TypeError, ValueError) as exc:
+        raise _InvalidNativeCommitDto(
+            f"Rust {operation} returned malformed control JSON: {exc}"
+        ) from exc
+    if not isinstance(control, dict) or not isinstance(control.get("status"), str):
+        raise _InvalidNativeCommitDto(
+            f"Rust {operation} requires a control object with status string"
+        )
+    if not control["status"]:
+        raise _InvalidNativeCommitDto(f"Rust {operation} returned empty control status")
+    return control
+
+
+def _require_claimed_complete_commit_bytes(
+    control: dict[str, Any], payload: Any, operation: str
+) -> bytes:
+    """Do not reinterpret an invalid claimed-complete result as a Rust decline."""
+    if control.get("certification") != _PYTHON_NATIVE_CERTIFICATION:
+        raise _InvalidNativeCommitDto(
+            f"Rust {operation} claimed complete with invalid certification: "
+            f"{control.get('certification')!r}"
+        )
+    if not isinstance(payload, (bytes, bytearray, memoryview)):
+        raise _InvalidNativeCommitDto(
+            f"Rust {operation} claimed complete without valid commit JSON bytes"
+        )
+    commit_json = bytes(payload)
+    if not commit_json:
+        raise _InvalidNativeCommitDto(f"Rust {operation} claimed complete with empty commit JSON")
+    declared_size = control.get("commit_diff_byte_size")
+    if type(declared_size) is not int or declared_size != len(commit_json):
+        raise _InvalidNativeCommitDto(
+            f"Rust {operation} commit JSON byte size mismatch: "
+            f"control={declared_size!r}, payload={len(commit_json)}"
+        )
+    return commit_json
+
+
 def _require_native_commit_diff_json(payload: bytes, operation: str) -> None:
     """Validate Rust-authored commit bytes before exposing a successful adapter attempt."""
     from intentumdiff.core.models import CommitDiff
@@ -1856,13 +1898,10 @@ def try_rust_core_commit_json(
             summary_exclude=True,
         )
         phase_started = time.perf_counter()
-        control = json.loads(control_json)
-        if not isinstance(control, dict):
-            raise ValueError("certified commit control must be a JSON object")
+        control = _decode_native_commit_control(control_json, "certified commit")
         _record_adapter_phase("rust_core_commit_control_decode", phase_started)
         phase_started = time.perf_counter()
         status = str(control.get("status") or "")
-        certification = str(control.get("certification") or "")
         if status != _COMPLETE_STATUS:
             reason = str(control.get("reason") or status or "commit JSON incomplete")
             _record_adapter_phase("rust_core_commit_control_validation", phase_started)
@@ -1872,45 +1911,9 @@ def try_rust_core_commit_json(
                 backend_version=backend_version,
                 fallback_reason=reason,
             )
-        if certification != _PYTHON_NATIVE_CERTIFICATION:
-            _record_adapter_phase("rust_core_commit_control_validation", phase_started)
-            return RustCoreCommitJsonAttempt(
-                control=control,
-                adapter_phase_timings=adapter_phase_timings,
-                backend_version=backend_version,
-                fallback_reason=(
-                    f"unexpected certification: {certification or '<missing>'}"
-                ),
-            )
-        if commit_payload is None:
-            _record_adapter_phase("rust_core_commit_control_validation", phase_started)
-            return RustCoreCommitJsonAttempt(
-                control=control,
-                adapter_phase_timings=adapter_phase_timings,
-                backend_version=backend_version,
-                fallback_reason="commit JSON bytes missing",
-            )
-        commit_json = bytes(commit_payload)
-        if not commit_json:
-            _record_adapter_phase("rust_core_commit_control_validation", phase_started)
-            return RustCoreCommitJsonAttempt(
-                control=control,
-                adapter_phase_timings=adapter_phase_timings,
-                backend_version=backend_version,
-                fallback_reason="commit JSON bytes empty",
-            )
-        declared_size = int(control.get("commit_diff_byte_size") or 0)
-        if declared_size != len(commit_json):
-            _record_adapter_phase("rust_core_commit_control_validation", phase_started)
-            return RustCoreCommitJsonAttempt(
-                control=control,
-                adapter_phase_timings=adapter_phase_timings,
-                backend_version=backend_version,
-                fallback_reason=(
-                    "commit JSON byte size mismatch: "
-                    f"control={declared_size}, payload={len(commit_json)}"
-                ),
-            )
+        commit_json = _require_claimed_complete_commit_bytes(
+            control, commit_payload, "certified commit"
+        )
         _record_adapter_phase("rust_core_commit_control_validation", phase_started)
         # The C ABI control status and matching byte count are not proof that
         # the bytes constitute a valid CommitDiff. Validate every successful
@@ -2010,14 +2013,11 @@ def try_rust_core_working_tree_commit_json(
             summary_exclude=True,
         )
         phase_started = time.perf_counter()
-        control = json.loads(control_json)
-        if not isinstance(control, dict):
-            raise ValueError("certified working-tree control must be a JSON object")
+        control = _decode_native_commit_control(control_json, "working-tree commit")
         _record_adapter_phase("rust_core_working_tree_control_decode", phase_started)
 
         phase_started = time.perf_counter()
         status = str(control.get("status") or "")
-        certification = str(control.get("certification") or "")
         if status != _COMPLETE_STATUS:
             reason = str(control.get("reason") or status or "working-tree JSON incomplete")
             _record_adapter_phase("rust_core_working_tree_control_validation", phase_started)
@@ -2027,35 +2027,9 @@ def try_rust_core_working_tree_commit_json(
                 backend_version=backend_version,
                 fallback_reason=reason,
             )
-        if certification != _PYTHON_NATIVE_CERTIFICATION:
-            _record_adapter_phase("rust_core_working_tree_control_validation", phase_started)
-            return RustCoreCommitJsonAttempt(
-                control=control,
-                adapter_phase_timings=adapter_phase_timings,
-                backend_version=backend_version,
-                fallback_reason=f"unexpected certification: {certification or '<missing>'}",
-            )
-        if commit_payload is None:
-            _record_adapter_phase("rust_core_working_tree_control_validation", phase_started)
-            return RustCoreCommitJsonAttempt(
-                control=control,
-                adapter_phase_timings=adapter_phase_timings,
-                backend_version=backend_version,
-                fallback_reason="commit JSON bytes missing",
-            )
-        commit_json = bytes(commit_payload)
-        declared_size = int(control.get("commit_diff_byte_size") or 0)
-        if declared_size != len(commit_json):
-            _record_adapter_phase("rust_core_working_tree_control_validation", phase_started)
-            return RustCoreCommitJsonAttempt(
-                control=control,
-                adapter_phase_timings=adapter_phase_timings,
-                backend_version=backend_version,
-                fallback_reason=(
-                    "commit JSON byte size mismatch: "
-                    f"control={declared_size}, payload={len(commit_json)}"
-                ),
-            )
+        commit_json = _require_claimed_complete_commit_bytes(
+            control, commit_payload, "working-tree commit"
+        )
         _record_adapter_phase("rust_core_working_tree_control_validation", phase_started)
         phase_started = time.perf_counter()
         _require_native_commit_diff_json(commit_json, "working-tree commit")
