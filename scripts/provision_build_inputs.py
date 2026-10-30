@@ -31,7 +31,9 @@ CORE_REPO = "https://github.com/buchochelliq-labs/intentumdiff-core"
 # parser availability, Rust-owned semantic promotions and fail-closed live
 # diff/commit-review completeness and Rust-owned live provenance. Four-platform CI must independently pass.
 # Override only for deliberate integration builds, not a moving branch.
-CORE_REF = os.environ.get("INTENTUMDIFF_CORE_REF", "d275e3311e7bbf8cac181064559cae8eb6d8f665")
+# Core #187 now emits explicit guardrail_violations even for valid empty Rust
+# batch inventories; Python #202 rejects omitted fields rather than defaulting.
+CORE_REF = os.environ.get("INTENTUMDIFF_CORE_REF", "c6612f585d743bb8f6c5aa7797be44bd0263be36")
 # Reviewed registry RC candidate: VB.NET plus exact-span M/Q#/PHP parser Wasm.
 # Registry PR #13 CI has vetted this immutable manifest; every staged byte
 # remains separately verified against its source artifact and SHA-256.
