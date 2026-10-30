@@ -1650,15 +1650,10 @@ def try_rust_core_batch_diffs(
             raise ValueError(f"Rust batch response status is invalid: {batch_status!r}")
         diff_items = data.get("diffs")
         if not isinstance(diff_items, list):
-            if data.get("status") == _COMPLETE_STATUS:
-                raise ValueError("Rust complete batch response requires diffs array")
-            reason = str(data.get("reason") or "batch response did not include a diff")
-            _record_adapter_phase("rust_core_response_validation", phase_started)
-            return RustCoreBatchDiffsAttempt(
-                fallback_reason=reason,
-                adapter_phase_timings=adapter_phase_timings,
-                backend_version=backend_version,
-            )
+            # Core's C ABI emits an explicit item inventory for every declared
+            # batch status, even when all files are Rust-declined. Omitting the
+            # array is corrupted transport, not a valid fallback.
+            raise ValueError("Rust batch response requires diffs array")
         # Rust always emits one indexed result per requested file, including
         # explicit candidate/fallback outcomes. A missing record is corrupted
         # transport, not an implicit Rust decline (or an empty success).
