@@ -1734,6 +1734,12 @@ def _decode_native_commit_control(raw: Any, operation: str) -> dict[str, Any]:
         )
     if not control["status"]:
         raise _InvalidNativeCommitDto(f"Rust {operation} returned empty control status")
+    # Rust commit_json_control emits only these two statuses. Unknown statuses
+    # are malformed transport, never a valid explicit Rust decline.
+    if control["status"] not in (_COMPLETE_STATUS, "fallback"):
+        raise _InvalidNativeCommitDto(
+            f"Rust {operation} returned unknown control status: {control['status']!r}"
+        )
     return control
 
 
