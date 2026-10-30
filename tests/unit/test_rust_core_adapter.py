@@ -479,6 +479,9 @@ def test_malformed_claimed_complete_rust_batch_is_integrity_failure(
         "complete_with_fallback",
         "complete_with_candidate",
         "fallback_with_complete",
+        "empty_complete_inventory",
+        "missing_partial_inventory",
+        "extra_complete_inventory",
         "unknown_envelope_status",
     ),
 )
@@ -511,6 +514,13 @@ def test_rust_batch_rejects_invalid_status_and_item_transport(
         payload["diffs"][0] = {"index": 0, "status": "candidate", "candidate_diff": {}}
     elif defect == "fallback_with_complete":
         payload["status"] = "fallback"
+    elif defect == "empty_complete_inventory":
+        payload["diffs"] = []
+    elif defect == "missing_partial_inventory":
+        payload["status"] = "partial"
+        payload["diffs"] = []
+    elif defect == "extra_complete_inventory":
+        payload["diffs"].append({"index": 1, "status": "fallback", "reason": "bogus"})
     else:
         payload["status"] = "unrecognized"
 
