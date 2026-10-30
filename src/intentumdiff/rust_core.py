@@ -493,7 +493,17 @@ def build_scope_trails(
         raise RuntimeError(f"Rust scope trail engine unavailable: {exc}") from exc
 
     scope_trails = data.get("scope_trails") if isinstance(data, dict) else None
-    return dict(scope_trails) if isinstance(scope_trails, dict) else {}
+    if not isinstance(scope_trails, dict):
+        raise RuntimeError("Rust scope trail response requires scope_trails object")
+    if any(not isinstance(scope_trails.get(side), list) for side in ("old", "new")):
+        raise RuntimeError("Rust scope trail response requires old/new arrays")
+    if any(
+        not isinstance(entry, dict)
+        for side in ("old", "new")
+        for entry in scope_trails[side]
+    ):
+        raise RuntimeError("Rust scope trail response contains non-object entry")
+    return dict(scope_trails)
 
 
 def try_rust_generic_text_review(

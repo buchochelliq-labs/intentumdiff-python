@@ -49,7 +49,7 @@ def _passthrough_invariances_json(request_json: str) -> str:
 
 def _empty_scope_trails_json(request_json: str) -> str:
     json.loads(request_json)
-    return json.dumps({})
+    return json.dumps({"scope_trails": {"old": [], "new": []}})
 
 
 def test_rust_core_defaults_to_native_first_and_can_be_disabled(monkeypatch: Any) -> None:
@@ -1442,3 +1442,40 @@ def test_native_working_tree_adapter_rejects_malformed_complete_dto(
         rust_core.try_rust_core_working_tree_commit_json(
             repo_path=".", old_ref="HEAD", config=DiffConfig(experimental_rust_core=True),
         )
+
+
+def test_scope_trails_accepts_rust_certified_empty_arrays(monkeypatch: Any) -> None:
+    """A valid zero-scope response is explicit, never inferred by Python."""
+    def scope_trails_json(request_json: str) -> str:
+        request = json.loads(request_json)
+        assert request["changes"] == []
+        return json.dumps({"scope_trails": {"old": [], "new": []}})
+
+    monkeypatch.setattr(
+        rust_core, "_load_backend",
+        lambda: SimpleNamespace(scope_trails_json=scope_trails_json),
+    )
+    tree = SimpleNamespace(model_dump=lambda **_kwargs: {"node_type": "module"})
+    assert rust_core.build_scope_trails(
+        old_tree=tree, new_tree=tree, changes=[],
+    ) == {"old": [], "new": []}
+
+
+@pytest.mark.parametrize("payload", [
+    "{}", "null", "[]", '{"scope_trails": null}',
+    '{"scope_trails": {}}',
+    '{"scope_trails": {"old": [], "new": null}}',
+    '{"scope_trails": {"old": {}, "new": []}}',
+    '{"scope_trails": {"old": [42], "new": []}}',
+])
+def test_scope_trails_rejects_malformed_rust_envelope(
+    monkeypatch: Any, payload: str,
+) -> None:
+    """Never manufacture missing Rust ancestry as an empty success."""
+    monkeypatch.setattr(
+        rust_core, "_load_backend",
+        lambda: SimpleNamespace(scope_trails_json=lambda _request: payload),
+    )
+    tree = SimpleNamespace(model_dump=lambda **_kwargs: {"node_type": "module"})
+    with pytest.raises(RuntimeError, match="Rust scope trail response"):
+        rust_core.build_scope_trails(old_tree=tree, new_tree=tree, changes=[])
