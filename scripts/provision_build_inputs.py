@@ -33,7 +33,7 @@ CORE_REPO = "https://github.com/buchochelliq-labs/intentumdiff-core"
 # Override only for deliberate integration builds, not a moving branch.
 # Core #187 now emits explicit guardrail_violations even for valid empty Rust
 # batch inventories; Python #202 rejects omitted fields rather than defaulting.
-CORE_REF = os.environ.get("INTENTUMDIFF_CORE_REF", "c6612f585d743bb8f6c5aa7797be44bd0263be36")
+CORE_REF = os.environ.get("INTENTUMDIFF_CORE_REF", "24b9fa68514155bed9c1bf988103a0c7f50cb5d0")
 # Reviewed registry RC candidate: source-anchored Astro plus VB.NET, M/Q#/PHP parser Wasm.
 # Registry PR #13 CI has vetted this immutable manifest; every staged byte
 # remains separately verified against its source artifact and SHA-256.
