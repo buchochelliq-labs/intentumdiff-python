@@ -1727,6 +1727,25 @@ def _require_native_commit_diff_json(payload: bytes, operation: str) -> None:
         omitted = mandatory_arrays - result.model_fields_set
         if omitted:
             raise ValueError(f"Rust commit JSON omitted required arrays: {sorted(omitted)}")
+        # A valid top-level file_diffs array does not certify the nested files:
+        # SemanticDiff has default empty arrays and false flags. Without this
+        # check a truncated Rust per-file result becomes a successful no-change
+        # diff when Pydantic fills those defaults (#200).
+        mandatory_file_fields = {
+            "changes", "change_groups", "parse_errors", "guardrail_violations",
+            "has_semantic_changes", "is_style_only", "is_fallback", "metadata",
+        }
+        for index, file_diff in enumerate(result.file_diffs):
+            omitted_file_fields = mandatory_file_fields - file_diff.model_fields_set
+            if omitted_file_fields:
+                raise ValueError(
+                    f"Rust commit JSON file_diffs[{index}] omitted required fields: "
+                    f"{sorted(omitted_file_fields)}"
+                )
+            if file_diff.metadata.get("engine_owner") != "rust":
+                raise ValueError(
+                    f"Rust commit JSON file_diffs[{index}] lacks certified Rust ownership"
+                )
     except (ValidationError, ValueError, TypeError) as exc:
         raise _InvalidNativeCommitDto(f"Rust {operation} returned malformed CommitDiff JSON: {exc}") from exc
 
