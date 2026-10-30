@@ -751,12 +751,16 @@ def complete_routed_review(*, finalized: dict[str, Any], old_tree: SemanticNode,
     payload = dict(finalized)
     for field in ("changes", "change_groups"):
         payload[field] = [item.model_dump(mode="json") for item in finalized[field]]
-    return SemanticDiff.model_validate(_c_abi_call("complete_routed_review", json.dumps({
+    # Rust owns the final inventories and semantic flags. Pydantic defaults
+    # must never turn a truncated claimed-complete Rust response into a
+    # successful no-change or style-only result (#208).
+    response = _c_abi_call("complete_routed_review", json.dumps({
         "finalized": payload, "old_tree": old_tree.model_dump(mode="json"),
         "new_tree": new_tree.model_dump(mode="json"), "old_source": old_source,
         "new_source": new_source, "old_filename": old_filename, "new_filename": new_filename,
         "language": language, "schema_metadata": schema_metadata, "compile_metadata": compile_metadata,
-    })))
+    }))
+    return SemanticDiff.model_validate(_require_complete_batch_diff_dto(response))
 
 
 def source_fallback_diff(old: str, new: str, old_filename: str, new_filename: str,
