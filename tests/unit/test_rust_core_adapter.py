@@ -567,7 +567,11 @@ def test_rust_batch_rejects_invalid_status_and_item_transport(
         )
         payload["status"] = status
         payload["diffs"] = [
-            {"index": 0, "status": "fallback" if status == "partial" else status, "reason": "declined"}
+            {
+                "index": 0,
+                "status": "fallback" if status == "partial" else status,
+                "reason": "declined",
+            }
         ]
         if defect == "missing_engine_fallback":
             payload.pop("engine")
