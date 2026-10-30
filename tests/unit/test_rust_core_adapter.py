@@ -1451,7 +1451,20 @@ def test_native_semantic_predicates_preserve_actual_booleans(
     assert rust_core.review_trees_equivalent(root, root) is expected
 
 
-@pytest.mark.parametrize("payload", [b"not-json", b"{}", b"null", b"[]"])
+def test_native_commit_dto_accepts_explicitly_empty_rust_collections() -> None:
+    payload = json.dumps({
+        "old_ref": "HEAD", "new_ref": "",
+        "file_diffs": [], "cross_file_changes": [],
+        "parse_errors": [], "guardrail_violations": [],
+    }).encode()
+    assert rust_core._require_native_commit_diff_json(payload, "test") is None
+
+
+@pytest.mark.parametrize("payload", [
+    b"not-json", b"{}", b"null", b"[]",
+    b'{"old_ref":"HEAD","new_ref":""}',
+    b'{"old_ref":"HEAD","new_ref":"","cross_file_changes":[],"parse_errors":[],"guardrail_violations":[]}',
+])
 def test_native_commit_adapter_rejects_malformed_complete_dto(
     monkeypatch: Any, payload: bytes,
 ) -> None:
@@ -1479,7 +1492,11 @@ def test_native_commit_adapter_rejects_malformed_complete_dto(
         )
 
 
-@pytest.mark.parametrize("payload", [b"not-json", b"{}", b"null", b"[]", b""])
+@pytest.mark.parametrize("payload", [
+    b"not-json", b"{}", b"null", b"[]", b"",
+    b'{"old_ref":"HEAD","new_ref":""}',
+    b'{"old_ref":"HEAD","new_ref":"","cross_file_changes":[],"parse_errors":[],"guardrail_violations":[]}',
+])
 def test_native_working_tree_adapter_rejects_malformed_complete_dto(
     monkeypatch: Any, payload: bytes,
 ) -> None:

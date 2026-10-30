@@ -1716,7 +1716,17 @@ def _require_native_commit_diff_json(payload: bytes, operation: str) -> None:
     from intentumdiff.core.models import CommitDiff
 
     try:
-        CommitDiff.model_validate_json(payload)
+        result = CommitDiff.model_validate_json(payload)
+        # A successful Rust commit must explicitly carry its file inventory.
+        # Pydantic otherwise supplies [] for omitted arrays, manufacturing an
+        # empty successful review from a truncated native response (#199).
+        mandatory_arrays = {
+            "file_diffs", "cross_file_changes", "parse_errors",
+            "guardrail_violations",
+        }
+        omitted = mandatory_arrays - result.model_fields_set
+        if omitted:
+            raise ValueError(f"Rust commit JSON omitted required arrays: {sorted(omitted)}")
     except (ValidationError, ValueError, TypeError) as exc:
         raise _InvalidNativeCommitDto(f"Rust {operation} returned malformed CommitDiff JSON: {exc}") from exc
 
