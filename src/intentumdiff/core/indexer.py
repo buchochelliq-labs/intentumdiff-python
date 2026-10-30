@@ -159,33 +159,47 @@ def _make_index_key(repo_root: str, commit_sha: str) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def _parse_catfile_output(buf: bytes) -> dict[str, str]:
-    """Decode each unique Git blob once; file paths are expanded in tree order."""
-    blobs: dict[str, str] = {}
+def _parse_catfile_output(buf: bytes) -> dict[str, str | None]:
+    """Decode complete Git batch responses; None marks an intentionally skipped binary.
+
+    A missing object, bad header, or truncated content is not a binary file.
+    Such failures must abort indexing instead of silently dropping source files.
+    """
+    blobs: dict[str, str | None] = {}
     i = 0
     n = len(buf)
     while i < n:
         nl = buf.find(b"\n", i)
         if nl == -1:
-            break
-        header = buf[i:nl].decode("ascii", errors="replace")
+            raise RuntimeError("Incomplete git cat-file batch response header")
+        try:
+            header = buf[i:nl].decode("ascii", errors="strict")
+        except UnicodeDecodeError as exc:
+            raise RuntimeError("Invalid git cat-file batch response header") from exc
         i = nl + 1
         parts = header.split()
-        # Expected: "<sha> blob <size>"; ignore missing and non-blob entries.
-        if len(parts) < 3 or parts[1] != "blob":
-            continue
+        if len(parts) == 2 and parts[1] == "missing":
+            raise RuntimeError(f"Git blob {parts[0]} is missing")
+        if len(parts) != 3 or parts[1] != "blob":
+            raise RuntimeError(f"Unexpected git cat-file batch response: {header!r}")
+        sha = parts[0]
+        if sha in blobs:
+            raise RuntimeError(f"Duplicate git cat-file batch response for {sha}")
         try:
             size = int(parts[2])
-        except ValueError:
-            continue
+        except ValueError as exc:
+            raise RuntimeError(f"Invalid git cat-file batch size for {sha}") from exc
+        if size < 0 or i + size >= n or buf[i + size] != 0x0A:
+            raise RuntimeError(f"Truncated git cat-file batch payload for {sha}")
         content_bytes = buf[i : i + size]
-        i += size + 1  # skip trailing newline
-        if b"\x00" in content_bytes[:8192]:  # binary heuristic
+        i += size + 1  # consume the required trailing newline
+        if b"\x00" in content_bytes[:8192]:
+            blobs[sha] = None  # binary: intentionally excluded from text indexing
             continue
         try:
-            blobs[parts[0]] = content_bytes.decode("utf-8", errors="strict")
+            blobs[sha] = content_bytes.decode("utf-8", errors="strict")
         except UnicodeDecodeError:
-            blobs[parts[0]] = content_bytes.decode("utf-8", errors="replace")
+            blobs[sha] = content_bytes.decode("utf-8", errors="replace")
     return blobs
 
 
@@ -226,11 +240,23 @@ def _collect_blob_files(
     shas_input = "\n".join(dict.fromkeys(sha for _, sha in paths_in_tree_order)).encode()
     out = run_git_bytes(repo_root, ["cat-file", "--batch"], input_bytes=shas_input)
     decoded_by_sha = _parse_catfile_output(out)
-    files = [
-        (path, decoded_by_sha[sha])
-        for path, sha in paths_in_tree_order
-        if sha in decoded_by_sha  # binary or missing blob stays excluded as before
-    ]
+    requested = set(sha for _, sha in paths_in_tree_order)
+    missing = requested.difference(decoded_by_sha)
+    if missing:
+        raise RuntimeError(
+            "Incomplete git cat-file batch response: missing blob(s) "
+            + ", ".join(sorted(missing)[:5])
+        )
+    unexpected = set(decoded_by_sha).difference(requested)
+    if unexpected:
+        raise RuntimeError(
+            "Unexpected git cat-file batch blob(s): " + ", ".join(sorted(unexpected)[:5])
+        )
+    files: list[tuple[str, str]] = []
+    for path, sha in paths_in_tree_order:
+        content = decoded_by_sha[sha]
+        if content is not None:  # only known binary blobs may be omitted
+            files.append((path, content))
     return files, ignored_files
 
 
