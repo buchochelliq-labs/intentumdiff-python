@@ -1640,6 +1640,15 @@ def try_rust_core_batch_diffs(
                 adapter_phase_timings=adapter_phase_timings,
                 backend_version=backend_version,
             )
+        # Rust's batch contract has exactly four outer statuses. A malformed
+        # envelope is not a legitimate Rust decline, even if a later Rust
+        # finalizer could produce an otherwise valid result.
+        batch_status = data.get("status")
+        if batch_status is not None and (
+            type(batch_status) is not str
+            or batch_status not in (_COMPLETE_STATUS, "candidate", "partial", "fallback")
+        ):
+            raise ValueError(f"Rust batch response status is invalid: {batch_status!r}")
         diff_items = data.get("diffs")
         if not isinstance(diff_items, list):
             if data.get("status") == _COMPLETE_STATUS:
@@ -1657,11 +1666,9 @@ def try_rust_core_batch_diffs(
         seen_indices: set[int] = set()
         for fallback_index, item in enumerate(diff_items):
             if not isinstance(item, dict):
-                if fallback_index >= len(files) or fallback_index in seen_indices:
-                    raise ValueError("Rust batch response contains an invalid fallback index")
-                seen_indices.add(fallback_index)
-                fallback_reasons[fallback_index] = "batch diff item must be an object"
-                continue
+                # Rust never emits a non-object item; interpreting one as a
+                # normal decline hides invalid native success behind rerouting.
+                raise ValueError("Rust batch diff item must be an object")
             # An explicit index of zero is valid even when it appears after the
             # first response item; a truthiness fallback silently remapped it.
             index = item.get("index", fallback_index)
@@ -1670,7 +1677,20 @@ def try_rust_core_batch_diffs(
             if index in seen_indices:
                 raise ValueError(f"Rust batch response repeats file index {index}")
             seen_indices.add(index)
-            status = str(item.get("status") or "")
+            status = item.get("status")
+            # Candidate is a real, explicitly uncertified Rust benchmark
+            # outcome; both it and fallback may route to Rust finalization.
+            if type(status) is not str or status not in (
+                _COMPLETE_STATUS, "candidate", "fallback"
+            ):
+                raise ValueError(f"Rust batch item status is invalid: {status!r}")
+            if (batch_status == _COMPLETE_STATUS and status != _COMPLETE_STATUS) or (
+                batch_status == "fallback" and status != "fallback"
+            ):
+                raise ValueError(
+                    f"Rust batch envelope status {batch_status!r} "
+                    f"contradicts item status {status!r}"
+                )
             if status == _COMPLETE_STATUS and "diff" not in item:
                 raise ValueError("Rust complete batch item requires diff")
             if status != _COMPLETE_STATUS:
