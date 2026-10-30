@@ -1644,9 +1644,8 @@ def try_rust_core_batch_diffs(
         # envelope is not a legitimate Rust decline, even if a later Rust
         # finalizer could produce an otherwise valid result.
         batch_status = data.get("status")
-        if batch_status is not None and (
-            type(batch_status) is not str
-            or batch_status not in (_COMPLETE_STATUS, "candidate", "partial", "fallback")
+        if type(batch_status) is not str or batch_status not in (
+            _COMPLETE_STATUS, "candidate", "partial", "fallback"
         ):
             raise ValueError(f"Rust batch response status is invalid: {batch_status!r}")
         diff_items = data.get("diffs")
@@ -1663,7 +1662,7 @@ def try_rust_core_batch_diffs(
         # Rust always emits one indexed result per requested file, including
         # explicit candidate/fallback outcomes. A missing record is corrupted
         # transport, not an implicit Rust decline (or an empty success).
-        if batch_status is not None and len(diff_items) != len(files):
+        if len(diff_items) != len(files):
             raise ValueError(
                 f"Rust batch response has {len(diff_items)} items "
                 f"for {len(files)} requested files"
