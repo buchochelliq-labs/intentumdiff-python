@@ -1088,7 +1088,7 @@ def test_rust_core_commit_json_adapter_validates_complete_bytes(
         old_filename="example.py",
         new_filename="example.py",
         language="python",
-        metadata={"rust_core": {"status": "complete"}},
+        metadata={"engine_owner": "rust", "rust_core": {"status": "complete"}},
     ).model_dump(mode="json")
     commit_payload = json.dumps(
         {
@@ -1451,6 +1451,54 @@ def test_native_semantic_predicates_preserve_actual_booleans(
     assert rust_core.review_trees_equivalent(root, root) is expected
 
 
+@pytest.mark.parametrize("file_diff", [
+    {"old_filename": "a.py", "new_filename": "a.py", "language": "python"},
+    {
+        "old_filename": "a.py", "new_filename": "a.py", "language": "python",
+        "changes": [], "change_groups": [], "parse_errors": [],
+        "guardrail_violations": [],
+        "has_semantic_changes": False, "is_style_only": False,
+        "metadata": {"engine_owner": "rust"},
+        # is_fallback omitted: Python must not default it to False.
+    },
+    {
+        "old_filename": "a.py", "new_filename": "a.py", "language": "python",
+        "changes": [], "change_groups": [], "parse_errors": [],
+        "guardrail_violations": [],
+        "has_semantic_changes": False, "is_style_only": False,
+        "is_fallback": False, "metadata": {},
+    },
+    {
+        "old_filename": "a.py", "new_filename": "a.py", "language": "python",
+        "changes": [], "change_groups": [], "parse_errors": [],
+        "guardrail_violations": [],
+        "has_semantic_changes": False, "is_style_only": False,
+        "is_fallback": False, "metadata": {"engine_owner": "python"},
+    },
+])
+def test_native_commit_dto_rejects_incomplete_or_non_rust_file_diff(file_diff: dict) -> None:
+    payload = json.dumps({
+        "old_ref": "HEAD", "new_ref": "",
+        "file_diffs": [file_diff],
+        "cross_file_changes": [], "parse_errors": [], "guardrail_violations": [],
+    }).encode()
+    with pytest.raises(RuntimeError, match="malformed CommitDiff JSON"):
+        rust_core._require_native_commit_diff_json(payload, "test")
+
+
+def test_native_commit_dto_accepts_explicitly_complete_empty_file_diff() -> None:
+    diff = SemanticDiff(
+        old_filename="a.py", new_filename="a.py", language="python",
+        metadata={"engine_owner": "rust"},
+    )
+    payload = json.dumps({
+        "old_ref": "HEAD", "new_ref": "",
+        "file_diffs": [diff.model_dump(mode="json")],
+        "cross_file_changes": [], "parse_errors": [], "guardrail_violations": [],
+    }).encode()
+    assert rust_core._require_native_commit_diff_json(payload, "test") is None
+
+
 def test_native_commit_dto_accepts_explicitly_empty_rust_collections() -> None:
     payload = json.dumps({
         "old_ref": "HEAD", "new_ref": "",
@@ -1464,6 +1512,7 @@ def test_native_commit_dto_accepts_explicitly_empty_rust_collections() -> None:
     b"not-json", b"{}", b"null", b"[]",
     b'{"old_ref":"HEAD","new_ref":""}',
     b'{"old_ref":"HEAD","new_ref":"","cross_file_changes":[],"parse_errors":[],"guardrail_violations":[]}',
+    b'{"old_ref":"HEAD","new_ref":"","file_diffs":[{"old_filename":"a.py","new_filename":"a.py","language":"python"}],"cross_file_changes":[],"parse_errors":[],"guardrail_violations":[]}',
 ])
 def test_native_commit_adapter_rejects_malformed_complete_dto(
     monkeypatch: Any, payload: bytes,
@@ -1496,6 +1545,7 @@ def test_native_commit_adapter_rejects_malformed_complete_dto(
     b"not-json", b"{}", b"null", b"[]", b"",
     b'{"old_ref":"HEAD","new_ref":""}',
     b'{"old_ref":"HEAD","new_ref":"","cross_file_changes":[],"parse_errors":[],"guardrail_violations":[]}',
+    b'{"old_ref":"HEAD","new_ref":"","file_diffs":[{"old_filename":"a.py","new_filename":"a.py","language":"python"}],"cross_file_changes":[],"parse_errors":[],"guardrail_violations":[]}',
 ])
 def test_native_working_tree_adapter_rejects_malformed_complete_dto(
     monkeypatch: Any, payload: bytes,
