@@ -218,14 +218,23 @@ def _collect_blob_files(
 
     ignored_files: list[str] = []
     paths_in_tree_order: list[tuple[str, str]] = []
-    # ls-tree -r -z: "<mode> <type> <sha>\t<path>\0" per entry.
-    for entry in run_git_bytes(repo_root, ["ls-tree", "-r", "-z", ref]).split(b"\x00"):
+    # Git's -z output always terminates every record with NUL. Validating
+    # the later cat-file blobs cannot discover paths lost from this inventory.
+    tree_bytes = run_git_bytes(repo_root, ["ls-tree", "-r", "-z", ref])
+    if tree_bytes and not tree_bytes.endswith(b"\x00"):
+        raise RuntimeError("Incomplete git ls-tree -z output: missing NUL delimiter")
+    for entry in tree_bytes.split(b"\x00"):
         if not entry:
             continue
-        meta, _tab, raw_path = entry.partition(b"\t")
+        meta, separator, raw_path = entry.partition(b"\t")
         parts = meta.split()
-        if len(parts) < 3 or parts[1] != b"blob":
+        if separator != b"\t" or not raw_path or len(parts) != 3:
+            raise RuntimeError(f"Malformed git ls-tree entry: {entry[:128]!r}")
+        if parts[1] == b"commit":
+            # Gitlinks are submodules, not readable blobs at this tree.
             continue
+        if parts[1] != b"blob":
+            raise RuntimeError(f"Unexpected git ls-tree object type: {parts[1]!r}")
         path = raw_path.decode("utf-8", errors="replace")
         if diffignore and diffignore.is_ignored(path):
             ignored_files.append(path)
