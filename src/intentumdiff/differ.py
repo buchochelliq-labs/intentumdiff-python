@@ -175,6 +175,7 @@ from intentumdiff.core.models import (
     SemanticDiff,
     SemanticNode,
 )
+from intentumdiff.plugins.adapter import ParserAdapter
 from intentumdiff.plugins.exceptions import (
     PluginFuelExhausted,
     PluginNotFoundError,
@@ -1745,6 +1746,10 @@ class SemanticDiffer:
             return SemanticNode.model_validate_json(cached)
 
         node = parser.process(input_, language, filename, fuel=fuel)
+        # A trap may reload the Wasm module during process(); never write its
+        # output under a key computed for a different compiled component.
+        if self._wasm_hash_for(parser) != wasm_hash:
+            raise RuntimeError("parser Wasm identity changed during parse")
         cache.put_parse(key, node.model_dump_json(), grammar_id=grammar_id)
         return node
 
@@ -1770,18 +1775,28 @@ class SemanticDiffer:
 
         identity = (str(path), *_identity(stat_before))
         digest = self._wasm_hash_cache.get(identity)
-        if digest is not None:
-            return digest
+        if digest is None:
+            try:
+                wasm_bytes = path.read_bytes()
+                stat_after = path.stat()
+            except OSError as exc:
+                raise RuntimeError(f"cannot fingerprint parser Wasm at {str(path)!r}") from exc
+            if _identity(stat_before) != _identity(stat_after):
+                raise RuntimeError(f"parser Wasm changed while hashing: {path}")
+            digest = hashlib.sha256(wasm_bytes).hexdigest()
+            self._wasm_hash_cache[identity] = digest
 
-        try:
-            wasm_bytes = path.read_bytes()
-            stat_after = path.stat()
-        except OSError as exc:
-            raise RuntimeError(f"cannot fingerprint parser Wasm at {str(path)!r}") from exc
-        if _identity(stat_before) != _identity(stat_after):
-            raise RuntimeError(f"parser Wasm changed while hashing: {path}")
-        digest = hashlib.sha256(wasm_bytes).hexdigest()
-        self._wasm_hash_cache[identity] = digest
+        # The path can be replaced while a LoadedPlugin still executes the
+        # previous compiled component. File digest alone is not a safe cache
+        # identity: bind it to the *instantiated* Wasmtime bytes (#196).
+        compiled = getattr(parser, "compiled_wasm_sha256", None)
+        if isinstance(parser, ParserAdapter) and (
+            not isinstance(compiled, str) or len(compiled) != 64
+            or any(c not in "0123456789abcdef" for c in compiled)
+        ):
+            raise RuntimeError(f"cannot verify compiled parser Wasm identity: {path}")
+        if isinstance(compiled, str) and compiled != digest:
+            raise RuntimeError(f"compiled parser Wasm differs from backing artifact: {path}")
         return digest
 
     def _parse(
