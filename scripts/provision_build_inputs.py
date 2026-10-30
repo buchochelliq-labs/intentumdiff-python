@@ -37,7 +37,7 @@ CORE_REF = os.environ.get("INTENTUMDIFF_CORE_REF", "076c382b9fc1eae1d68bfdbc78e5
 # Reviewed registry RC candidate: source-anchored Astro plus VB.NET, M/Q#/PHP parser Wasm.
 # Registry PR #13 CI has vetted this immutable manifest; every staged byte
 # remains separately verified against its source artifact and SHA-256.
-REGISTRY_REF = "8c8f7c94d9d97fd7ed7fe45aaac50a945ec4ba2a"
+REGISTRY_REF = "8a7bdfc300b529e7af55efc098b59a6c349039ac"
 
 
 def load_reviewed_registry(get, api: str, org: str):
