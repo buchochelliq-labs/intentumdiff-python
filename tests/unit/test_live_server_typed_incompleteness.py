@@ -246,6 +246,7 @@ def test_incomplete_commit_dto_fails_closed_in_both_review_transports(tmp_path, 
     bad_file = SemanticDiff(
         old_filename="broken.js", new_filename="broken.js", language="javascript",
         is_fallback=True, parse_errors=["Syntax error in broken.js"],
+        metadata={"engine_owner": "rust"},
     )
     invalid_review = CommitDiff(
         old_ref="HEAD", new_ref="", file_diffs=[bad_file],
@@ -269,3 +270,101 @@ def test_incomplete_commit_dto_fails_closed_in_both_review_transports(tmp_path, 
     assert "broken.js" in sent[0]["error"]["message"]
     assert "Syntax error" in sent[0]["error"]["message"]
     differ_cls.return_value.diff_commit.assert_not_called()
+
+
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("corruption", [
+    "missing_changes", "missing_change_groups", "missing_parse_errors",
+    "missing_guardrail_violations", "invalid_changes",
+    "invalid_has_semantic_changes", "invalid_is_style_only",
+    "invalid_is_fallback", "invalid_metadata",
+])
+def test_truncated_rust_live_diff_never_becomes_empty_success(
+    tmp_path, stream, corruption,
+):
+    server, differ = _server(tmp_path)
+    request = _ParsedRequest(
+        op="diff", seq=71, path="edit.py", content="x = 2\n",
+        ref="HEAD", edit_deltas=None, stream=stream,
+    )
+    source = LiveBufferSource(tmp_path, "edit.py", request.content, ref="HEAD")
+    valid = SemanticDiff(
+        old_filename="edit.py", new_filename="edit.py", language="python",
+        metadata={"engine_owner": "rust"},
+    ).model_dump(mode="json")
+    if corruption.startswith("missing_"):
+        valid.pop(corruption.removeprefix("missing_"))
+    elif corruption == "invalid_changes":
+        valid["changes"] = None
+    elif corruption == "invalid_metadata":
+        valid["metadata"] = [["engine_owner", "rust"]]
+    else:
+        valid[corruption.removeprefix("invalid_")] = "false"
+
+    sent = []
+    with (
+        patch("intentumdiff.rust_core.live_handle_diff", return_value={"diff": valid}),
+        patch("intentumdiff.rust_core.live_error_response", side_effect=_error),
+    ):
+        server._process_request_with_source(source, request, sent.append)
+
+    assert len(sent) == 1
+    assert sent[0]["ok"] is False
+    assert sent[0]["error"]["code"] == "native_diff_uncertified"
+    assert "malformed Rust Core live diff" in sent[0]["error"]["message"]
+    assert not any(msg.get("done") for msg in sent)
+    differ.diff.assert_not_called()
+    differ.diff_stream_progressive.assert_not_called()
+
+
+@pytest.mark.parametrize("corruption", [
+    "missing_file_diffs", "missing_cross_file_changes",
+    "missing_parse_errors", "missing_guardrail_violations",
+    "invalid_file_diffs", "missing_file_changes",
+    "missing_file_metadata", "invalid_file_is_style_only",
+    "invalid_file_metadata",
+])
+def test_truncated_rust_live_review_never_becomes_empty_success(
+    tmp_path, corruption,
+):
+    from intentumdiff.core.models import CommitDiff
+
+    server, _ = _server(tmp_path)
+    commit_differ = MagicMock()
+    valid = CommitDiff(
+        old_ref="HEAD", new_ref="",
+        file_diffs=[SemanticDiff(
+            old_filename="edit.py", new_filename="edit.py", language="python",
+            metadata={"engine_owner": "rust"},
+        )],
+    ).model_dump(mode="json")
+    if corruption.startswith("missing_file_") and corruption != "missing_file_diffs":
+        valid["file_diffs"][0].pop(corruption.removeprefix("missing_file_"))
+    elif corruption == "invalid_file_diffs":
+        valid["file_diffs"] = None
+    elif corruption == "invalid_file_is_style_only":
+        valid["file_diffs"][0]["is_style_only"] = "false"
+    elif corruption == "invalid_file_metadata":
+        valid["file_diffs"][0]["metadata"] = [["engine_owner", "rust"]]
+    else:
+        valid.pop(corruption.removeprefix("missing_"))
+
+    with patch("intentumdiff.rust_core.live_handle_review", return_value={"commit_diff": valid}):
+        with pytest.raises(_RustLiveDecline) as exc:
+            server._compute_review(server._differ._config, commit_differ, "HEAD", "")
+
+    assert exc.value.code == "native_review_uncertified"
+    assert "malformed Rust Core live review" in str(exc.value)
+    commit_differ.diff_commit.assert_not_called()
+
+
+def test_explicit_rust_empty_commit_inventory_remains_valid(tmp_path):
+    from intentumdiff.core.models import CommitDiff
+
+    server, _ = _server(tmp_path)
+    commit_differ = MagicMock()
+    raw = CommitDiff(old_ref="HEAD", new_ref="", file_diffs=[]).model_dump(mode="json")
+    with patch("intentumdiff.rust_core.live_handle_review", return_value={"commit_diff": raw}):
+        result = server._compute_review(server._differ._config, commit_differ, "HEAD", "")
+    assert result.file_diffs == []
+    commit_differ.diff_commit.assert_not_called()
