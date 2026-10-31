@@ -13,6 +13,7 @@ import intentumdiff.differ as differ_module
 import intentumdiff.rust_core as rust_core
 from intentumdiff import DiffConfig, SemanticDiffer
 from intentumdiff.core.models import (
+    Change,
     ChangeType,
     CommitDiff,
     NodePosition,
@@ -49,7 +50,7 @@ def _passthrough_invariances_json(request_json: str) -> str:
 
 def _empty_scope_trails_json(request_json: str) -> str:
     json.loads(request_json)
-    return json.dumps({})
+    return json.dumps({"scope_trails": {"old": [], "new": []}})
 
 
 def test_rust_core_defaults_to_native_first_and_can_be_disabled(monkeypatch: Any) -> None:
@@ -83,144 +84,6 @@ def test_rust_core_unavailable_raises_required_engine_error(monkeypatch: Any) ->
     assert isinstance(error.value.__cause__, ModuleNotFoundError)
 
 
-def test_rust_core_incomplete_result_falls_back_to_python(monkeypatch: Any) -> None:
-    monkeypatch.setattr(SemanticDiffer, "_run_stages_1_to_11", _python_fallback)
-    backend = SimpleNamespace(
-        detect_content_type_json=rust_core._load_backend().detect_content_type_json,
-        parser_candidate_shortlist=rust_core._load_backend().parser_candidate_shortlist,
-        filename_selection_next=rust_core._load_backend().filename_selection_next,
-        version=lambda: "0.1.0",
-        supports_language=lambda language: language == "python",
-        diff_python_json=lambda *args: SemanticDiff(
-            old_filename="example.py",
-            new_filename="example.py",
-            language="python",
-            metadata={"rust_core": {"status": "scaffold"}},
-        ).model_dump_json(),
-    )
-    monkeypatch.setattr(rust_core, "_load_backend", lambda: backend)
-
-    diff = SemanticDiffer(DiffConfig(experimental_rust_core=True)).diff_strings(
-        "old",
-        "new",
-        "example.py",
-    )
-
-    assert diff.language == "python"
-    assert "rust_core" not in diff.metadata
-
-
-def test_rust_core_complete_result_is_used(monkeypatch: Any) -> None:
-    backend = SimpleNamespace(
-        version=lambda: "0.1.0",
-        supports_language=lambda language: language == "python",
-        diff_python_json=lambda *args: SemanticDiff(
-            old_filename="example.py",
-            new_filename="example.py",
-            language="python",
-            metadata={"rust_core": {"status": "complete"}},
-        ).model_dump_json(),
-    )
-    monkeypatch.setattr(rust_core, "_load_backend", lambda: backend)
-
-    attempt = rust_core.try_rust_core_diff(
-        old_content="same",
-        new_content="same",
-        old_filename="example.py",
-        new_filename="example.py",
-        language_hint="python",
-        parser_plugin_id="python-parser",
-        config=DiffConfig(experimental_rust_core=True),
-    )
-
-    assert attempt.used is True
-    assert attempt.diff is not None
-    assert attempt.diff.metadata["rust_core"]["used"] is True
-    assert attempt.diff.metadata["rust_core"]["backend_version"] == "0.1.0"
-
-
-def test_rust_core_accepts_python_parser_plugin_id(monkeypatch: Any) -> None:
-    backend = SimpleNamespace(
-        version=lambda: "0.1.0",
-        supports_language=lambda language: language == "python",
-        diff_python_json=lambda *args: SemanticDiff(
-            old_filename="example.py",
-            new_filename="example.py",
-            language="python",
-            metadata={"rust_core": {"status": "complete"}},
-        ).model_dump_json(),
-    )
-    monkeypatch.setattr(rust_core, "_load_backend", lambda: backend)
-
-    attempt = rust_core.try_rust_core_diff(
-        old_content="same",
-        new_content="same",
-        old_filename="example.py",
-        new_filename="example.py",
-        language_hint="python",
-        parser_plugin_id="python-parser",
-        config=DiffConfig(experimental_rust_core=True),
-    )
-
-    assert attempt.used is True
-
-
-def test_rust_core_cst_complete_result_is_used(monkeypatch: Any) -> None:
-    backend = SimpleNamespace(
-        version=lambda: "0.1.0",
-        supports_language=lambda language: language == "python",
-        diff_python_cst_json=lambda *args: SemanticDiff(
-            old_filename="example.py",
-            new_filename="example.py",
-            language="python",
-            metadata={"rust_core": {"status": "complete"}},
-        ).model_dump_json(),
-    )
-    monkeypatch.setattr(rust_core, "_load_backend", lambda: backend)
-
-    attempt = rust_core.try_rust_core_cst_diff(
-        old_filtered_cst_json='{"type":"module"}',
-        new_filtered_cst_json='{"type":"module"}',
-        old_raw_source="",
-        new_raw_source="",
-        old_filename="example.py",
-        new_filename="example.py",
-        parser_wasm_path="python_parser.wasm",
-        language="python",
-        parser_plugin_id="python-parser",
-        config=DiffConfig(experimental_rust_core=True),
-    )
-
-    assert attempt.used is True
-    assert attempt.diff is not None
-    assert attempt.diff.metadata["rust_core"]["used"] is True
-
-
-def test_rust_core_cst_falls_back_for_non_python_language(monkeypatch: Any) -> None:
-    backend = SimpleNamespace(
-        version=lambda: "0.1.0",
-        supports_language=lambda language: language == "python",
-        diff_python_cst_json=lambda *args: "should not be called",
-    )
-    monkeypatch.setattr(rust_core, "_load_backend", lambda: backend)
-
-    attempt = rust_core.try_rust_core_cst_diff(
-        old_filtered_cst_json="{}",
-        new_filtered_cst_json="{}",
-        old_raw_source="",
-        new_raw_source="",
-        old_filename="example.go",
-        new_filename="example.go",
-        parser_wasm_path="go_parser.wasm",
-        language="go",
-        parser_plugin_id="go",
-        config=DiffConfig(experimental_rust_core=True),
-    )
-
-    assert attempt.used is False
-    assert attempt.fallback_reason == "unsupported language"
-
-
 def test_rust_core_batch_complete_result_is_used(monkeypatch: Any) -> None:
     diff = SemanticDiff(
         old_filename="example.py",
@@ -232,7 +95,7 @@ def test_rust_core_batch_complete_result_is_used(monkeypatch: Any) -> None:
         "schema_version": 1,
         "status": "complete",
         "engine": "rust_core_batch_v4",
-        "diffs": [{"status": "complete", "diff": diff.model_dump(mode="json")}],
+        "diffs": [{"index": 0, "status": "complete", "diff": diff.model_dump(mode="json")}],
         "metadata": {"rust_core_stage": "batch_boundary"},
     }
     backend = SimpleNamespace(
@@ -291,7 +154,7 @@ def test_rust_core_batch_accepts_canonical_python_parser_id(
         "schema_version": 1,
         "status": "complete",
         "engine": "rust_core_batch_v4",
-        "diffs": [{"status": "complete", "diff": diff.model_dump(mode="json")}],
+        "diffs": [{"index": 0, "status": "complete", "diff": diff.model_dump(mode="json")}],
         "metadata": {},
     }
 
@@ -326,7 +189,7 @@ def test_rust_core_batch_fallback_item_is_not_used(monkeypatch: Any) -> None:
         "schema_version": 1,
         "status": "fallback",
         "engine": "rust_core_batch_v4",
-        "diffs": [{"status": "fallback", "reason": "changed-file finalization pending"}],
+        "diffs": [{"index": 0, "status": "fallback", "reason": "changed-file finalization pending"}],
     }
     backend = SimpleNamespace(
         version=lambda: "0.4.0",
@@ -480,6 +343,7 @@ def _batch_mapping_fixture(
         for name in filenames
     ]
     payload = {
+        "status": "complete",
         "engine": "rust_core_batch_v4",
         "diffs": [
             {"index": indices[0], "status": "complete", "diff": diffs[0].model_dump(mode="json")},
@@ -506,6 +370,335 @@ def _two_python_batch_inputs() -> list[dict[str, str]]:
         }
         for name in ("a.py", "b.py")
     ]
+
+
+@pytest.mark.parametrize(
+    "missing_field",
+    ("changes", "change_groups", "parse_errors", "guardrail_violations",
+     "has_semantic_changes", "is_style_only", "is_fallback", "metadata"),
+)
+def test_rust_complete_batch_missing_certification_fields_fails_closed(
+    monkeypatch: Any, missing_field: str,
+) -> None:
+    """An incomplete Rust result cannot become a default-empty Python success (#198)."""
+    diff = SemanticDiff(
+        old_filename="a.py", new_filename="a.py", language="python",
+    ).model_dump(mode="json")
+    diff.pop(missing_field)
+    payload = {
+        "status": "complete",
+        "engine": "rust_core_batch_v4",
+        "diffs": [{"index": 0, "status": "complete", "diff": diff}],
+    }
+    backend = SimpleNamespace(
+        version=lambda: "0.4.0",
+        supports_language=lambda language: language == "python",
+        diff_batch=lambda *_: json.dumps(payload),
+    )
+    monkeypatch.setattr(rust_core, "_load_backend", lambda: backend)
+    attempt = rust_core.try_rust_core_batch_diffs(
+        files=[_two_python_batch_inputs()[0]],
+        config=DiffConfig(experimental_rust_core=True),
+    )
+    assert attempt.used is False
+    assert attempt.diffs == {}
+    assert "invalid output:" in attempt.fallback_reason
+    assert missing_field in attempt.fallback_reason
+
+
+@pytest.mark.parametrize("invalid", [None, {}, "[]", False])
+def test_rust_complete_batch_rejects_invalid_guardrail_inventory(
+    monkeypatch: Any, invalid: Any,
+) -> None:
+    """Rust must supply an array; Pydantic may not synthesize empty guardrails (#202)."""
+    diff = SemanticDiff(
+        old_filename="a.py", new_filename="a.py", language="python",
+    ).model_dump(mode="json")
+    diff["guardrail_violations"] = invalid
+    backend = SimpleNamespace(
+        version=lambda: "0.4.0",
+        supports_language=lambda _language: True,
+        diff_batch=lambda *_: json.dumps({
+            "status": "complete",
+            "engine": "rust_core_batch_v4",
+            "diffs": [{"index": 0, "status": "complete", "diff": diff}],
+        }),
+    )
+    monkeypatch.setattr(rust_core, "_load_backend", lambda: backend)
+    attempt = rust_core.try_rust_core_batch_diffs(
+        files=[_two_python_batch_inputs()[0]],
+        config=DiffConfig(experimental_rust_core=True),
+    )
+    assert not attempt.used
+    assert attempt.diffs == {}
+    assert "guardrail_violations array" in attempt.fallback_reason
+
+
+@pytest.mark.parametrize("defect", ["missing_guardrails", "missing_diff", "missing_inventory", "wrong_engine"])
+def test_malformed_claimed_complete_rust_batch_is_integrity_failure(
+    monkeypatch: Any, defect: str,
+) -> None:
+    """An invalid success must never become a legitimate decline (#205)."""
+    diff = SemanticDiff(
+        old_filename="example.py", new_filename="example.py", language="python",
+    ).model_dump(mode="json")
+    payload: dict[str, Any] = {
+        "schema_version": 1, "status": "complete", "engine": "rust_core_batch_v4",
+        "diffs": [{"index": 0, "status": "complete", "diff": diff}],
+    }
+    if defect == "missing_guardrails":
+        diff.pop("guardrail_violations")
+    elif defect == "missing_diff":
+        payload["diffs"][0].pop("diff")
+    elif defect == "missing_inventory":
+        payload.pop("diffs")
+    else:
+        payload["engine"] = "unrecognized_batch_engine"
+    backend = SimpleNamespace(
+        version=lambda: "0.4.0",
+        supports_language=lambda _language: True,
+        diff_batch=lambda *_: json.dumps(payload),
+    )
+    monkeypatch.setattr(rust_core, "_load_backend", lambda: backend)
+    attempt = rust_core.try_rust_core_batch_diff(
+        old_source="def f():\n    return 1\n",
+        new_source="def f():\n    return 2\n",
+        old_filename="example.py", new_filename="example.py",
+        parser_wasm_path="python_parser.wasm", language="python",
+        parser_plugin_id="python-parser", config=DiffConfig(experimental_rust_core=True),
+    )
+    assert not attempt.used
+    assert attempt.invalid_output, (defect, attempt.fallback_reason)
+
+
+@pytest.mark.parametrize(
+    "defect",
+    (
+        "null_item",
+        "array_item",
+        "unknown_item_status",
+        "missing_item_status",
+        "non_string_item_status",
+        "missing_item_index",
+        "null_item_index",
+        "boolean_item_index",
+        "string_item_index",
+        "complete_with_fallback",
+        "complete_with_candidate",
+        "fallback_with_complete",
+        "empty_complete_inventory",
+        "missing_partial_inventory",
+        "extra_complete_inventory",
+        "unknown_envelope_status",
+        "missing_envelope_status",
+        "non_string_envelope_status",
+        "missing_fallback_inventory",
+        "missing_candidate_inventory",
+        "unexpected_engine_fallback",
+        "unexpected_engine_candidate",
+        "unexpected_engine_partial",
+        "missing_engine_fallback",
+    ),
+)
+def test_rust_batch_rejects_invalid_status_and_item_transport(
+    monkeypatch: Any, defect: str,
+) -> None:
+    """Malformed native batch envelopes are integrity failures, not Rust declines (#212)."""
+    diff = SemanticDiff(
+        old_filename="example.py", new_filename="example.py", language="python",
+    ).model_dump(mode="json")
+    payload: dict[str, Any] = {
+        "schema_version": 1,
+        "engine": "rust_core_batch_v4",
+        "status": "complete",
+        "diffs": [{"index": 0, "status": "complete", "diff": diff}],
+    }
+    if defect == "null_item":
+        payload["diffs"] = [None]
+    elif defect == "array_item":
+        payload["diffs"] = [[]]
+    elif defect == "unknown_item_status":
+        payload["diffs"][0]["status"] = "success"
+    elif defect == "missing_item_status":
+        payload["diffs"][0].pop("status")
+    elif defect == "non_string_item_status":
+        payload["diffs"][0]["status"] = 1
+    elif defect == "missing_item_index":
+        payload["diffs"][0].pop("index")
+    elif defect == "null_item_index":
+        payload["diffs"][0]["index"] = None
+    elif defect == "boolean_item_index":
+        payload["diffs"][0]["index"] = False
+    elif defect == "string_item_index":
+        payload["diffs"][0]["index"] = "0"
+    elif defect == "complete_with_fallback":
+        payload["diffs"][0] = {"index": 0, "status": "fallback", "reason": "declined"}
+    elif defect == "complete_with_candidate":
+        payload["diffs"][0] = {"index": 0, "status": "candidate", "candidate_diff": {}}
+    elif defect == "fallback_with_complete":
+        payload["status"] = "fallback"
+    elif defect == "empty_complete_inventory":
+        payload["diffs"] = []
+    elif defect == "missing_partial_inventory":
+        payload["status"] = "partial"
+        payload["diffs"] = []
+    elif defect == "extra_complete_inventory":
+        payload["diffs"].append({"index": 1, "status": "fallback", "reason": "bogus"})
+    elif defect == "missing_envelope_status":
+        payload.pop("status")
+    elif defect == "non_string_envelope_status":
+        payload["status"] = 1
+    elif defect == "missing_fallback_inventory":
+        payload["status"] = "fallback"
+        payload.pop("diffs")
+    elif defect == "missing_candidate_inventory":
+        payload["status"] = "candidate"
+        payload.pop("diffs")
+    elif defect in (
+        "unexpected_engine_fallback",
+        "unexpected_engine_candidate",
+        "unexpected_engine_partial",
+        "missing_engine_fallback",
+    ):
+        status = (
+            "partial" if defect == "unexpected_engine_partial"
+            else "candidate" if defect == "unexpected_engine_candidate"
+            else "fallback"
+        )
+        payload["status"] = status
+        payload["diffs"] = [
+            {
+                "index": 0,
+                "status": "fallback" if status == "partial" else status,
+                "reason": "declined",
+            }
+        ]
+        if defect == "missing_engine_fallback":
+            payload.pop("engine")
+        else:
+            payload["engine"] = "wrong_batch_engine"
+    else:
+        payload["status"] = "unrecognized"
+
+    backend = SimpleNamespace(
+        version=lambda: "0.4.0",
+        supports_language=lambda _language: True,
+        diff_batch=lambda *_: json.dumps(payload),
+    )
+    monkeypatch.setattr(rust_core, "_load_backend", lambda: backend)
+    attempt = rust_core.try_rust_core_batch_diff(
+        old_source="def f():\n    return 1\n",
+        new_source="def f():\n    return 2\n",
+        old_filename="example.py", new_filename="example.py",
+        parser_wasm_path="python_parser.wasm", language="python",
+        parser_plugin_id="python-parser", config=DiffConfig(experimental_rust_core=True),
+    )
+    assert not attempt.used
+    assert attempt.invalid_output, (defect, attempt.fallback_reason)
+    assert (
+        "invalid" in attempt.fallback_reason
+        or "contradicts" in attempt.fallback_reason
+        or "unexpected engine" in attempt.fallback_reason
+    )
+
+
+@pytest.mark.parametrize("status", ["candidate", "fallback"])
+def test_rust_batch_retains_explicit_uncertified_rust_declines(
+    monkeypatch: Any, status: str,
+) -> None:
+    """Rust-owned candidate and fallback are legitimate alternate-Rust routes (#212)."""
+    payload = {
+        "schema_version": 1, "engine": "rust_core_batch_v4",
+        "status": status, "diffs": [
+            {"index": 0, "status": status, "reason": "Rust declined"}
+        ],
+    }
+    backend = SimpleNamespace(
+        version=lambda: "0.4.0",
+        supports_language=lambda _language: True,
+        diff_batch=lambda *_: json.dumps(payload),
+    )
+    monkeypatch.setattr(rust_core, "_load_backend", lambda: backend)
+    attempt = rust_core.try_rust_core_batch_diff(
+        old_source="def f():\n    return 1\n",
+        new_source="def f():\n    return 2\n",
+        old_filename="example.py", new_filename="example.py",
+        parser_wasm_path="python_parser.wasm", language="python",
+        parser_plugin_id="python-parser", config=DiffConfig(experimental_rust_core=True),
+    )
+    assert not attempt.used
+    assert attempt.invalid_output is False
+    assert attempt.fallback_reason == "Rust declined"
+
+
+@pytest.mark.parametrize(
+    "defect",
+    ("missing_guardrails", "non_object_item", "unknown_status",
+     "missing_item_index", "wrong_engine_decline"),
+)
+def test_semantic_differ_rejects_malformed_batch_before_rust_routed_finalize(
+    monkeypatch: Any, defect: str,
+) -> None:
+    """Malformed Rust success is fatal before any other Rust route (#205, #212)."""
+    real_backend = rust_core._load_backend()
+    diff = SemanticDiff(
+        old_filename="example.py", new_filename="example.py", language="python",
+    ).model_dump(mode="json")
+    payload = {
+        "schema_version": 1, "status": "complete", "engine": "rust_core_batch_v4",
+        "diffs": [{"index": 0, "status": "complete", "diff": diff}],
+    }
+    if defect == "missing_guardrails":
+        diff.pop("guardrail_violations")
+    elif defect == "non_object_item":
+        payload["diffs"] = [None]
+    elif defect == "missing_item_index":
+        payload["diffs"][0].pop("index")
+    elif defect == "wrong_engine_decline":
+        payload["engine"] = "unrecognized_batch_engine"
+        payload["status"] = "fallback"
+        payload["diffs"] = [{"index": 0, "status": "fallback", "reason": "declined"}]
+    else:
+        payload["diffs"][0]["status"] = "nonsense"
+    backend = SimpleNamespace(
+        detect_content_type_json=real_backend.detect_content_type_json,
+        parser_candidate_shortlist=real_backend.parser_candidate_shortlist,
+        filename_selection_next=real_backend.filename_selection_next,
+        version=lambda: "0.4.0",
+        supports_language=lambda language: language == "python",
+        diff_batch=lambda *_: json.dumps(payload),
+    )
+    monkeypatch.setattr(rust_core, "_load_backend", lambda: backend)
+    with pytest.raises(RuntimeError, match="Malformed Rust batch result"):
+        SemanticDiffer(DiffConfig(experimental_rust_core=True)).diff_strings(
+            "def f():\n    return 1\n",
+            "def f():\n    return 2\n",
+            "example.py", language_hint="python",
+        )
+
+
+def test_rust_complete_batch_rejects_contradictory_engine_owner(monkeypatch: Any) -> None:
+    diff = SemanticDiff(
+        old_filename="a.py", new_filename="a.py", language="python",
+        metadata={"engine_owner": "python"},
+    ).model_dump(mode="json")
+    payload = {
+        "status": "complete",
+        "engine": "rust_core_batch_v4",
+        "diffs": [{"index": 0, "status": "complete", "diff": diff}],
+    }
+    backend = SimpleNamespace(
+        version=lambda: "0.4.0",
+        supports_language=lambda language: language == "python",
+        diff_batch=lambda *_: json.dumps(payload),
+    )
+    monkeypatch.setattr(rust_core, "_load_backend", lambda: backend)
+    attempt = rust_core.try_rust_core_batch_diffs(
+        files=[_two_python_batch_inputs()[0]],
+        config=DiffConfig(experimental_rust_core=True),
+    )
+    assert not attempt.used
+    assert "engine ownership" in attempt.fallback_reason
 
 
 def test_rust_batch_out_of_order_explicit_index_zero_is_not_remapped(
@@ -612,7 +805,7 @@ def test_rust_core_batch_candidate_item_is_not_used_by_product_adapter(
         "engine": "rust_core_batch_v4",
         "diffs": [
             {
-                "status": "candidate",
+                "index": 0, "status": "candidate",
                 "candidate_diff": diff.model_dump(mode="json"),
                 "fallback_reason": "candidate is not parity-certified",
             }
@@ -754,7 +947,6 @@ def test_optional_rust_adapters_raise_on_engine_failure(
 @pytest.mark.parametrize(
     ("handler", "call"),
     [
-        ("generic_text_review_json", lambda root: rust_core.try_rust_generic_text_review("old", "new", 0)),
         ("markdown_section_review_json", lambda root: rust_core.try_rust_markdown_section_review("old", "new")),
         (
             "finalize_review_json",
@@ -769,16 +961,123 @@ def test_optional_rust_adapters_raise_on_engine_failure(
         ),
     ],
 )
-def test_optional_rust_adapters_still_decline_when_handler_is_absent(
+def test_required_rust_review_adapters_fail_closed_when_handler_is_absent(
     monkeypatch: Any,
     handler: str,
     call: Any,
 ) -> None:
     root = _node("root", "module", "module", line=0)
     monkeypatch.setattr(rust_core, "_load_backend", lambda: SimpleNamespace())
-    assert call(root) is None
+    with pytest.raises(RuntimeError, match="required Rust"):
+        call(root)
 
 
+
+
+def test_generic_text_review_missing_handler_fails_closed(monkeypatch: Any) -> None:
+    monkeypatch.setattr(rust_core, "_load_backend", lambda: SimpleNamespace())
+    with pytest.raises(RuntimeError, match="required Rust generic-text review handler"):
+        rust_core.try_rust_generic_text_review("before", "after", 1)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {"used": False},
+        {"used": False, "reason": "backend unavailable"},
+        {"used": True},
+        {"used": True, "changes": None},
+        {"used": True, "changes": []},  # Rust must include the group field, even if null.
+        {"used": True, "changes": [], "group": {}},  # Malformed object must not bypass DTO validation.
+        {"used": True, "changes": [], "group": []},
+        [],
+    ],
+)
+def test_generic_text_review_rejects_uncertified_or_invalid_payload(
+    monkeypatch: Any, payload: Any
+) -> None:
+    def handler(*_args: Any) -> str:
+        return json.dumps(payload)
+
+    monkeypatch.setattr(
+        rust_core, "_load_backend", lambda: SimpleNamespace(generic_text_review_json=handler)
+    )
+    with pytest.raises(RuntimeError, match="Rust generic-text review failed"):
+        rust_core.try_rust_generic_text_review("old", "new", 1)
+
+
+def test_generic_text_review_accepts_explicit_rust_size_cap_decline(monkeypatch: Any) -> None:
+    def handler(*_args: Any) -> str:
+        return json.dumps({"used": False, "reason": "input too large for LCS table"})
+
+    monkeypatch.setattr(
+        rust_core, "_load_backend", lambda: SimpleNamespace(generic_text_review_json=handler)
+    )
+    assert rust_core.try_rust_generic_text_review("old", "new", 3) is None
+
+
+def test_generic_text_review_preserves_valid_empty_rust_result(monkeypatch: Any) -> None:
+    def handler(*_args: Any) -> str:
+        return json.dumps({"used": True, "changes": [], "group": None})
+
+    monkeypatch.setattr(
+        rust_core, "_load_backend", lambda: SimpleNamespace(generic_text_review_json=handler)
+    )
+    assert rust_core.try_rust_generic_text_review("old", "old", 0) == ([], [])
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        [],
+        {"used": False},
+        {"used": "true"},
+        {"used": True},
+        {"used": True, "moves": None},
+        {"used": True, "moves": [], "renames": [], "moved_labels": [],
+         "old_heading_lines": [], "new_heading_lines": [], "move_group": None},
+        {"used": True, "moves": [], "renames": [], "moved_labels": [],
+         "old_heading_lines": [], "new_heading_lines": [], "move_group": [],
+         "rename_group": None},
+        {"used": True, "moves": [], "renames": [], "moved_labels": [2],
+         "old_heading_lines": [], "new_heading_lines": [], "move_group": None,
+         "rename_group": None},
+        {"used": True, "moves": [], "renames": [], "moved_labels": [],
+         "old_heading_lines": [True], "new_heading_lines": [], "move_group": None,
+         "rename_group": None},
+    ],
+)
+def test_markdown_review_invalid_native_envelopes_fail_closed(
+    monkeypatch: Any, payload: Any,
+) -> None:
+    monkeypatch.setattr(
+        rust_core, "_load_backend",
+        lambda: SimpleNamespace(markdown_section_review_json=lambda *_args: json.dumps(payload)),
+    )
+    with pytest.raises(RuntimeError, match="Rust markdown section review failed"):
+        rust_core.try_rust_markdown_section_review("# Old\\n", "# New\\n")
+
+
+def test_markdown_review_valid_empty_envelope_is_not_a_decline(
+    monkeypatch: Any,
+) -> None:
+    valid = {
+        "used": True,
+        "moves": [], "moved_labels": [], "move_group": None,
+        "renames": [], "old_heading_lines": [], "new_heading_lines": [],
+        "rename_group": None,
+    }
+    monkeypatch.setattr(
+        rust_core, "_load_backend",
+        lambda: SimpleNamespace(markdown_section_review_json=lambda *_args: json.dumps(valid)),
+    )
+    result = rust_core.try_rust_markdown_section_review("# Old\\n", "# Old\\n")
+    assert result is not None
+    assert result["moves"] == [] and result["renames"] == []
+    assert result["old_heading_lines"] == set()
+    assert result["new_heading_lines"] == set()
 
 
 def test_node_facts_enrichment_requires_authoritative_rust_handler(monkeypatch: Any) -> None:
@@ -949,159 +1248,6 @@ def test_rust_finalize_declines_only_for_explicit_tree_limit(
             attempt()
 
 
-def test_rust_core_tree_reconstructs_matching_and_changes(monkeypatch: Any) -> None:
-    old_child = _node("old.fn", "function", "total", line=0)
-    new_child = _node("new.fn", "function", "sum_total", line=0)
-    old_tree = _node("old.root", "module", "module", line=0, children=[old_child])
-    new_tree = _node("new.root", "module", "module", line=0, children=[new_child])
-    payload = {
-        "status": "complete",
-        "engine": "rust_core_semantic_tree_v2_stage11",
-        "changes": [
-            {
-                "change_type": "MODIFICATION",
-                "old_node": old_child.model_dump(mode="json"),
-                "new_node": new_child.model_dump(mode="json"),
-            }
-        ],
-        "matching_pairs": [
-            {"old_id": "old.root", "new_id": "new.root"},
-            {"old_id": "old.fn", "new_id": "new.fn"},
-        ],
-        "metadata": {"old_nodes": 2, "new_nodes": 2},
-    }
-    backend = SimpleNamespace(
-        version=lambda: "0.2.0",
-        supports_language=lambda language: language == "python",
-        diff_python_semantic_tree_json=lambda *args: payload,
-    )
-    monkeypatch.setattr(rust_core, "_load_backend", lambda: backend)
-
-    attempt = rust_core.try_rust_core_tree_diff(
-        old_tree=old_tree,
-        new_tree=new_tree,
-        old_filename="example.py",
-        new_filename="example.py",
-        language="python",
-        config=DiffConfig(experimental_rust_core=True),
-    )
-
-    assert attempt.used is True
-    assert attempt.matching is not None
-    assert [(pair.old_node.id, pair.new_node.id) for pair in attempt.matching] == [
-        ("old.root", "new.root"),
-        ("old.fn", "new.fn"),
-    ]
-    assert attempt.changes is not None
-    assert attempt.changes[0].change_type == ChangeType.MODIFICATION
-    assert attempt.changes[0].old_node is old_child
-    assert attempt.changes[0].new_node is new_child
-    assert attempt.metadata is not None
-    assert attempt.metadata["rust_core"]["used"] is True
-    assert attempt.metadata["rust_core"]["backend_version"] == "0.2.0"
-
-
-def test_rust_core_tree_invalid_matching_id_falls_back(monkeypatch: Any) -> None:
-    old_tree = _node("old.root", "module", "module", line=0)
-    new_tree = _node("new.root", "module", "module", line=0)
-    backend = SimpleNamespace(
-        version=lambda: "0.2.0",
-        supports_language=lambda language: language == "python",
-        diff_python_semantic_tree_json=lambda *args: {
-            "status": "complete",
-            "engine": "rust_core_semantic_tree_v2_stage11",
-            "changes": [],
-            "matching_pairs": [{"old_id": "missing", "new_id": "new.root"}],
-            "metadata": {},
-        },
-    )
-    monkeypatch.setattr(rust_core, "_load_backend", lambda: backend)
-
-    attempt = rust_core.try_rust_core_tree_diff(
-        old_tree=old_tree,
-        new_tree=new_tree,
-        old_filename="example.py",
-        new_filename="example.py",
-        language="python",
-        config=DiffConfig(experimental_rust_core=True),
-    )
-
-    assert attempt.used is False
-    assert "unknown node id" in attempt.fallback_reason
-
-
-def test_rust_core_tree_diagnostics_fall_back_before_backend(monkeypatch: Any) -> None:
-    old_tree = _node("old.root", "module", "module", line=0)
-    new_tree = _node("new.root", "module", "module", line=0)
-
-    def fail_backend() -> Any:
-        raise AssertionError("backend should not be loaded")
-
-    monkeypatch.setattr(rust_core, "_load_backend", fail_backend)
-
-    attempt = rust_core.try_rust_core_tree_diff(
-        old_tree=old_tree,
-        new_tree=new_tree,
-        old_filename="example.py",
-        new_filename="example.py",
-        language="python",
-        config=DiffConfig(experimental_rust_core=True, diagnostics=True),
-    )
-
-    assert attempt.used is False
-    assert attempt.fallback_reason == "diagnostics require Python pipeline"
-
-
-def test_rust_core_source_stage_reconstructs_stage11_payload(monkeypatch: Any) -> None:
-    old_tree = _node("old.root", "module", "module", line=0)
-    new_tree = _node("new.root", "module", "module", line=0)
-    payload = {
-        "status": "complete",
-        "engine": "rust_core_sources_v3_stage11",
-        "old_tree": old_tree.model_dump(mode="json"),
-        "new_tree": new_tree.model_dump(mode="json"),
-        "changes": [],
-        "matching_pairs": [{"old_id": "old.root", "new_id": "new.root"}],
-        "adaptive_fuel": 123,
-        "metadata": {
-            "engine": "rust_core_sources_v3_stage11",
-            "old_nodes": 1,
-            "new_nodes": 1,
-            "matching_pairs": 1,
-            "wasm_boundary": "rust_wasmtime",
-        },
-    }
-    backend = SimpleNamespace(
-        version=lambda: "0.3.0",
-        supports_language=lambda language: language == "python",
-        diff_python_sources_stage11_json=lambda *args: payload,
-    )
-    monkeypatch.setattr(rust_core, "_load_backend", lambda: backend)
-
-    attempt = rust_core.try_rust_core_sources_stage11(
-        old_source="def old():\n    pass\n",
-        new_source="def new():\n    pass\n",
-        old_filename="example.py",
-        new_filename="example.py",
-        parser_wasm_path="python_parser.wasm",
-        language="python",
-        parser_plugin_id="python-parser",
-        config=DiffConfig(experimental_rust_core=True),
-    )
-
-    assert attempt.used is True
-    assert attempt.old_tree == old_tree
-    assert attempt.new_tree == new_tree
-    assert attempt.adaptive_fuel == 123
-    assert attempt.matching is not None
-    assert [(pair.old_node.id, pair.new_node.id) for pair in attempt.matching] == [
-        ("old.root", "new.root")
-    ]
-    assert attempt.metadata is not None
-    assert attempt.metadata["rust_core"]["engine"] == "rust_core_sources_v3_stage11"
-    assert attempt.metadata["rust_core"]["backend_version"] == "0.3.0"
-
-
 def test_semantic_differ_uses_rust_batch_metadata(monkeypatch: Any) -> None:
     diff_payload = SemanticDiff(
         old_filename="example.py",
@@ -1113,7 +1259,7 @@ def test_semantic_differ_uses_rust_batch_metadata(monkeypatch: Any) -> None:
         "schema_version": 1,
         "status": "complete",
         "engine": "rust_core_batch_v4",
-        "diffs": [{"status": "complete", "diff": diff_payload}],
+        "diffs": [{"index": 0, "status": "complete", "diff": diff_payload}],
         "metadata": {
             "rust_core_stage": "batch_boundary",
             "phase_timings": [{"name": "rust_batch_request_decode", "duration_ms": 1.0}],
@@ -1167,7 +1313,7 @@ def test_semantic_differ_uses_rust_batch_for_changed_complete_output(
         "schema_version": 1,
         "status": "complete",
         "engine": "rust_core_batch_v4",
-        "diffs": [{"status": "complete", "diff": diff_payload}],
+        "diffs": [{"index": 0, "status": "complete", "diff": diff_payload}],
         "metadata": {
             "rust_core_stage": "batch_boundary",
             "phase_timings": [{"name": "rust_batch_request_decode", "duration_ms": 1.0}],
@@ -1209,7 +1355,7 @@ def test_semantic_differ_uses_rust_batch_for_changed_complete_output(
     assert "matching" not in phases
 
 
-def test_rust_core_commit_json_adapter_keeps_commit_bytes_lazy(
+def test_rust_core_commit_json_adapter_validates_complete_bytes(
     monkeypatch: Any,
 ) -> None:
     monkeypatch.delenv("INTENTUMDIFF_RUST_CORE_VALIDATE_JSON", raising=False)
@@ -1217,7 +1363,7 @@ def test_rust_core_commit_json_adapter_keeps_commit_bytes_lazy(
         old_filename="example.py",
         new_filename="example.py",
         language="python",
-        metadata={"rust_core": {"status": "complete"}},
+        metadata={"engine_owner": "rust", "rust_core": {"status": "complete"}},
     ).model_dump(mode="json")
     commit_payload = json.dumps(
         {
@@ -1230,15 +1376,6 @@ def test_rust_core_commit_json_adapter_keeps_commit_bytes_lazy(
         }
     ).encode("utf-8")
     captured: list[dict[str, Any]] = []
-
-    def fail_hot_path_validation(cls: type[CommitDiff], payload: bytes) -> CommitDiff:
-        raise AssertionError("CommitDiff validation should be lazy on the fast path")
-
-    monkeypatch.setattr(
-        CommitDiff,
-        "model_validate_json",
-        classmethod(fail_hot_path_validation),
-    )
 
     def diff_batch_commit_json(request_json: str) -> tuple[str, bytes]:
         captured.append(json.loads(request_json))
@@ -1301,7 +1438,7 @@ def test_rust_core_commit_json_adapter_keeps_commit_bytes_lazy(
         for phase in attempt.adapter_phase_timings
         if phase["name"] == "rust_core_commit_pyo3_call"
     )["summary_exclude"] is True
-    assert "rust_core_commit_debug_pydantic_validation" not in phase_names
+    assert "rust_core_commit_pydantic_validation" in phase_names
 
 
 def test_rust_core_commit_json_lazy_wrapper_validates_on_demand() -> None:
@@ -1374,65 +1511,147 @@ def test_rust_core_commit_json_adapter_falls_back_on_control_status(
     assert attempt.control["status"] == "fallback"
 
 
-def test_rust_core_commit_json_adapter_rejects_byte_size_mismatch(
+def _call_commit_with_control(
     monkeypatch: Any,
-) -> None:
-    payload = b'{"old_ref":"HEAD","new_ref":"","file_diffs":[]}'
-
-    def diff_batch_commit_json(request_json: str) -> tuple[str, bytes]:
-        return (
-            json.dumps(
-                {
-                    "schema_version": 1,
-                    "status": "complete",
-                    "certification": "python_native_v4kb",
-                    "commit_diff_byte_size": len(payload) + 1,
-                }
-            ),
-            payload,
-        )
-
+    adapter: str,
+    control_json: str,
+    payload: Any,
+) -> rust_core.RustCoreCommitJsonAttempt:
     backend = SimpleNamespace(
         version=lambda: "0.4.0",
-        supports_language=lambda language: language == "python",
-        diff_batch_commit_json=diff_batch_commit_json,
+        supports_language=lambda _language: True,
+        diff_batch_commit_json=lambda _request: (control_json, payload),
+        diff_working_tree_python_commit_json=lambda _request: (control_json, payload),
     )
     monkeypatch.setattr(rust_core, "_load_backend", lambda: backend)
-
-    attempt = rust_core.try_rust_core_commit_json(
-        files=[
-            {
-                "old_source": "",
-                "new_source": "",
-                "old_filename": "example.py",
-                "new_filename": "example.py",
-                "language": "python",
-                "parser_plugin_id": "python",
+    monkeypatch.setattr(rust_core, "rust_core_enabled", lambda _config: True)
+    if adapter == "commit":
+        return rust_core.try_rust_core_commit_json(
+            files=[{
+                "old_source": "x = 1\n", "new_source": "x = 2\n",
+                "old_filename": "example.py", "new_filename": "example.py",
+                "language": "python", "parser_plugin_id": "python",
                 "parser_wasm_path": "python_parser.wasm",
-            }
-        ],
-        old_ref="HEAD",
-        new_ref="",
+            }],
+            old_ref="HEAD", new_ref="",
+            config=DiffConfig(experimental_rust_core=True),
+        )
+    return rust_core.try_rust_core_working_tree_commit_json(
+        repo_path=".", old_ref="HEAD",
         config=DiffConfig(experimental_rust_core=True),
     )
 
-    assert attempt.used is False
-    assert "byte size mismatch" in attempt.fallback_reason
 
-
-@pytest.mark.skipif(
-    _RUST_ONLY,
-    reason=(
-        "Exercises the coarse token-level fallback (synthetic backend exposes no "
-        "finalize_review_json -> rust_finalize_declined), which the RUST_ONLY gate forbids."
-    ),
+@pytest.mark.parametrize("adapter", ("commit", "working_tree"))
+@pytest.mark.parametrize(
+    ("invalid_case", "error"),
+    [
+        ("missing_certification", "invalid certification"),
+        ("wrong_certification", "invalid certification"),
+        ("numeric_certification", "invalid certification"),
+        ("missing_bytes", "without valid commit JSON bytes"),
+        ("non_bytes_payload", "without valid commit JSON bytes"),
+        ("empty_bytes", "empty commit JSON"),
+        ("missing_size", "byte size mismatch"),
+        ("string_size", "byte size mismatch"),
+        ("boolean_size", "byte size mismatch"),
+        ("off_by_one_size", "byte size mismatch"),
+        ("malformed_control_json", "malformed control JSON"),
+        ("array_control_json", "control object with status string"),
+        ("missing_status", "control object with status string"),
+        ("numeric_status", "control object with status string"),
+        ("empty_status", "empty control status"),
+        ("unknown_status", "unknown control status"),
+    ],
 )
-def test_semantic_differ_batch_fallback_continues_python_pipeline(monkeypatch: Any) -> None:
+def test_certified_commit_adapters_fail_closed_on_invalid_complete_controls(
+    monkeypatch: Any, adapter: str, invalid_case: str, error: str,
+) -> None:
+    # Valid empty inventories are intentionally explicit; only corrupt
+    # claimed-complete control/envelope data is rejected (#206).
+    payload: Any = json.dumps({
+        "old_ref": "HEAD", "new_ref": "",
+        "file_diffs": [], "cross_file_changes": [],
+        "parse_errors": [], "guardrail_violations": [],
+    }).encode()
+    control: dict[str, Any] = {
+        "schema_version": 1,
+        "status": "complete",
+        "certification": "python_native_v4kb",
+        "commit_diff_byte_size": len(payload),
+    }
+    if invalid_case == "missing_certification":
+        del control["certification"]
+    elif invalid_case == "wrong_certification":
+        control["certification"] = "uncertified"
+    elif invalid_case == "numeric_certification":
+        control["certification"] = 2
+    elif invalid_case == "missing_bytes":
+        payload = None
+    elif invalid_case == "non_bytes_payload":
+        payload = "not bytes"
+    elif invalid_case == "empty_bytes":
+        payload = b""
+    elif invalid_case == "missing_size":
+        del control["commit_diff_byte_size"]
+    elif invalid_case == "string_size":
+        control["commit_diff_byte_size"] = str(len(payload))
+    elif invalid_case == "boolean_size":
+        control["commit_diff_byte_size"] = True
+    elif invalid_case == "off_by_one_size":
+        control["commit_diff_byte_size"] = len(payload) + 1
+    elif invalid_case == "missing_status":
+        del control["status"]
+    elif invalid_case == "numeric_status":
+        control["status"] = 1
+    elif invalid_case == "empty_status":
+        control["status"] = ""
+    elif invalid_case == "unknown_status":
+        control["status"] = "complete_typo"
+    control_json = json.dumps(control)
+    if invalid_case == "malformed_control_json":
+        control_json = "{broken"
+    elif invalid_case == "array_control_json":
+        control_json = "[]"
+    with pytest.raises(RuntimeError, match=error):
+        _call_commit_with_control(monkeypatch, adapter, control_json, payload)
+
+
+@pytest.mark.parametrize("adapter", ("commit", "working_tree"))
+def test_certified_commit_control_preserves_explicit_declines_and_empty_success(
+    monkeypatch: Any, adapter: str,
+) -> None:
+    declined = _call_commit_with_control(
+        monkeypatch, adapter,
+        json.dumps({"status": "fallback", "reason": "unsupported candidate"}), None,
+    )
+    assert declined.used is False
+    assert declined.fallback_reason == "unsupported candidate"
+
+    payload = json.dumps({
+        "old_ref": "HEAD", "new_ref": "",
+        "file_diffs": [], "cross_file_changes": [],
+        "parse_errors": [], "guardrail_violations": [],
+    }).encode()
+    complete = _call_commit_with_control(
+        monkeypatch, adapter,
+        json.dumps({
+            "status": "complete", "certification": "python_native_v4kb",
+            "commit_diff_byte_size": len(payload),
+        }),
+        payload,
+    )
+    assert complete.used is True
+    assert complete.commit_diff_json == payload
+    assert complete.to_model().file_diffs == []
+
+
+def test_semantic_differ_batch_decline_requires_native_finalize_handler(monkeypatch: Any) -> None:
     payload = {
         "schema_version": 1,
         "status": "fallback",
         "engine": "rust_core_batch_v4",
-        "diffs": [{"status": "fallback", "reason": "changed-file finalization pending"}],
+        "diffs": [{"index": 0, "status": "fallback", "reason": "changed-file finalization pending"}],
     }
     real_backend = rust_core._load_backend()
     backend = SimpleNamespace(
@@ -1453,27 +1672,16 @@ def test_semantic_differ_batch_fallback_continues_python_pipeline(monkeypatch: A
     )
     monkeypatch.setattr(rust_core, "_load_backend", lambda: backend)
 
-    diff = SemanticDiffer(
-        DiffConfig(experimental_rust_core=True, profile_phases=True)
-    ).diff_strings(
-        "def total(items):\n    return sum(items)\n",
-        "def total(items):\n    return sum(item for item in items)\n",
-        "example.py",
-        language_hint="python",
-    )
-
-    assert diff.metadata["engine_owner"] == "rust"
-    assert diff.metadata["semantic_contract"] == "rust_source_fallback_v1"
-    assert diff.has_semantic_changes is True
-    phases = [phase["name"] for phase in diff.metadata["phase_timings"]["phases"]]
-    assert "rust_core_batch_execution" in phases
-    # Post-retirement degradation chain (issue #57 payoff, stage 4b): batch declined ->
-    # the per-stage Rust finalize is attempted next; this synthetic backend exposes no
-    # finalize_review_json, so the pipeline degrades to the Rust source fallback
-    # (the python stages are retired). A REAL backend serves at the finalize tier.
-    assert "rust_finalize_review" in phases
-    assert diff.metadata.get("fallback_reason") == "rust_finalize_declined"
-
+    # An absent required Rust finalizer cannot silently become a coarse source diff.
+    with pytest.raises(RuntimeError, match="required Rust finalize_review_json handler is unavailable"):
+        SemanticDiffer(
+            DiffConfig(experimental_rust_core=True, profile_phases=True)
+        ).diff_strings(
+            "def total(items):\n    return sum(items)\n",
+            "def total(items):\n    return sum(item for item in items)\n",
+            "example.py",
+            language_hint="python",
+        )
 
 def test_semantic_differ_skips_rust_batch_when_guardrails_may_apply(
     monkeypatch: Any,
@@ -1576,3 +1784,679 @@ def test_semantic_differ_skips_rust_batch_when_python_diff_analyzer_is_registere
     rust_core_meta = diff.metadata.get("rust_core")
     if rust_core_meta is not None:
         assert rust_core_meta.get("stage") == "per_stage_finalize_routing"
+
+
+@pytest.mark.parametrize("payload", ["null", '"false"', '"true"', "0", "1", "[]", "{}"])
+def test_native_semantic_predicates_reject_nonboolean_success(monkeypatch: Any, payload: str) -> None:
+    """Rust semantic flags are bool DTOs, not Python truthiness conversions."""
+    backend = SimpleNamespace(
+        parse_errors_present_json=lambda *_args: payload,
+        review_trees_equivalent_json=lambda *_args: payload,
+    )
+    monkeypatch.setattr(rust_core, "_load_backend", lambda: backend)
+    root = _node("root", "module", "module", line=0)
+    with pytest.raises(ValueError, match="Rust parse_errors_present must return a JSON boolean"):
+        rust_core.parse_errors_present("source", "{}", "python")
+    with pytest.raises(ValueError, match="Rust review_trees_equivalent must return a JSON boolean"):
+        rust_core.review_trees_equivalent(root, root)
+
+
+@pytest.mark.parametrize("payload,expected", [("true", True), ("false", False)])
+def test_native_semantic_predicates_preserve_actual_booleans(
+    monkeypatch: Any, payload: str, expected: bool,
+) -> None:
+    backend = SimpleNamespace(
+        parse_errors_present_json=lambda *_args: payload,
+        review_trees_equivalent_json=lambda *_args: payload,
+    )
+    monkeypatch.setattr(rust_core, "_load_backend", lambda: backend)
+    root = _node("root", "module", "module", line=0)
+    assert rust_core.parse_errors_present("source", "{}", "python") is expected
+    assert rust_core.review_trees_equivalent(root, root) is expected
+
+
+@pytest.mark.parametrize("file_diff", [
+    {"old_filename": "a.py", "new_filename": "a.py", "language": "python"},
+    {
+        "old_filename": "a.py", "new_filename": "a.py", "language": "python",
+        "changes": [], "change_groups": [], "parse_errors": [],
+        "guardrail_violations": [],
+        "has_semantic_changes": False, "is_style_only": False,
+        "metadata": {"engine_owner": "rust"},
+        # is_fallback omitted: Python must not default it to False.
+    },
+    {
+        "old_filename": "a.py", "new_filename": "a.py", "language": "python",
+        "changes": [], "change_groups": [], "parse_errors": [],
+        "guardrail_violations": [],
+        "has_semantic_changes": False, "is_style_only": False,
+        "is_fallback": False, "metadata": {},
+    },
+    {
+        "old_filename": "a.py", "new_filename": "a.py", "language": "python",
+        "changes": [], "change_groups": [], "parse_errors": [],
+        "guardrail_violations": [],
+        "has_semantic_changes": False, "is_style_only": False,
+        "is_fallback": False, "metadata": {"engine_owner": "python"},
+    },
+])
+def test_native_commit_dto_rejects_incomplete_or_non_rust_file_diff(file_diff: dict) -> None:
+    payload = json.dumps({
+        "old_ref": "HEAD", "new_ref": "",
+        "file_diffs": [file_diff],
+        "cross_file_changes": [], "parse_errors": [], "guardrail_violations": [],
+    }).encode()
+    with pytest.raises(RuntimeError, match="malformed CommitDiff JSON"):
+        rust_core._require_native_commit_diff_json(payload, "test")
+
+
+def test_native_commit_dto_accepts_explicitly_complete_empty_file_diff() -> None:
+    diff = SemanticDiff(
+        old_filename="a.py", new_filename="a.py", language="python",
+        metadata={"engine_owner": "rust"},
+    )
+    payload = json.dumps({
+        "old_ref": "HEAD", "new_ref": "",
+        "file_diffs": [diff.model_dump(mode="json")],
+        "cross_file_changes": [], "parse_errors": [], "guardrail_violations": [],
+    }).encode()
+    assert rust_core._require_native_commit_diff_json(payload, "test") is None
+
+
+def test_native_commit_dto_accepts_explicitly_empty_rust_collections() -> None:
+    payload = json.dumps({
+        "old_ref": "HEAD", "new_ref": "",
+        "file_diffs": [], "cross_file_changes": [],
+        "parse_errors": [], "guardrail_violations": [],
+    }).encode()
+    assert rust_core._require_native_commit_diff_json(payload, "test") is None
+
+
+def _malformed_native_semantic_flag_payloads() -> list[bytes]:
+    """Malformed certified bytes must fail before Pydantic bool coercion (#201)."""
+    valid_diff = SemanticDiff(
+        old_filename="a.py", new_filename="a.py", language="python",
+        metadata={"engine_owner": "rust"},
+    ).model_dump(mode="json")
+    payloads: list[bytes] = []
+    for flag in ("has_semantic_changes", "is_style_only", "is_fallback"):
+        for invalid in ("false", "true", 0, 1, None):
+            payloads.append(json.dumps({
+                "old_ref": "HEAD", "new_ref": "",
+                "file_diffs": [{**valid_diff, flag: invalid}],
+                "cross_file_changes": [], "parse_errors": [],
+                "guardrail_violations": [],
+            }).encode())
+    return payloads
+
+
+def _malformed_native_metadata_payloads() -> list[bytes]:
+    """Reject raw JSON metadata arrays before Pydantic turns pair arrays into dicts (#217)."""
+    valid_diff = SemanticDiff(
+        old_filename="a.py", new_filename="a.py", language="python",
+        metadata={"engine_owner": "rust"},
+    ).model_dump(mode="json")
+    return [
+        json.dumps({
+            "old_ref": "HEAD", "new_ref": "",
+            "file_diffs": [{**valid_diff, "metadata": malformed}],
+            "cross_file_changes": [], "parse_errors": [],
+            "guardrail_violations": [],
+        }).encode()
+        for malformed in ([["engine_owner", "rust"]], [], None, "rust")
+    ]
+
+
+@pytest.mark.parametrize("payload", _malformed_native_metadata_payloads())
+def test_native_commit_dto_rejects_raw_non_object_metadata(payload: bytes) -> None:
+    with pytest.raises(RuntimeError, match="requires metadata object"):
+        rust_core._require_native_commit_diff_json(payload, "test")
+
+
+@pytest.mark.parametrize("payload", _malformed_native_semantic_flag_payloads())
+def test_native_commit_dto_rejects_coerced_semantic_flags(payload: bytes) -> None:
+    with pytest.raises(RuntimeError, match="requires .* boolean"):
+        rust_core._require_native_commit_diff_json(payload, "test")
+
+
+@pytest.mark.parametrize("payload", [
+    b"not-json", b"{}", b"null", b"[]", b"",
+    *_malformed_native_semantic_flag_payloads(),
+    *_malformed_native_metadata_payloads(),
+    b'{"old_ref":"HEAD","new_ref":""}',
+    b'{"old_ref":"HEAD","new_ref":"","cross_file_changes":[],"parse_errors":[],"guardrail_violations":[]}',
+    b'{"old_ref":"HEAD","new_ref":"","file_diffs":[{"old_filename":"a.py","new_filename":"a.py","language":"python"}],"cross_file_changes":[],"parse_errors":[],"guardrail_violations":[]}',
+])
+def test_native_commit_adapter_rejects_malformed_complete_dto(
+    monkeypatch: Any, payload: bytes,
+) -> None:
+    control = json.dumps({
+        "schema_version": 1, "status": "complete",
+        "certification": "python_native_v4kb",
+        "commit_diff_byte_size": len(payload),
+    })
+    backend = SimpleNamespace(
+        version=lambda: "0.4.0",
+        supports_language=lambda _language: True,
+        diff_batch_commit_json=lambda _request: (control, payload),
+    )
+    monkeypatch.setattr(rust_core, "_load_backend", lambda: backend)
+    with pytest.raises(RuntimeError, match="empty commit JSON" if not payload else "malformed CommitDiff JSON"):
+        rust_core.try_rust_core_commit_json(
+            files=[{
+                "old_source": "x = 1\n", "new_source": "x = 2\n",
+                "old_filename": "example.py", "new_filename": "example.py",
+                "language": "python", "parser_plugin_id": "python",
+                "parser_wasm_path": "python_parser.wasm",
+            }],
+            old_ref="HEAD", new_ref="",
+            config=DiffConfig(experimental_rust_core=True),
+        )
+
+
+@pytest.mark.parametrize("payload", [
+    b"not-json", b"{}", b"null", b"[]", b"",
+    *_malformed_native_semantic_flag_payloads(),
+    *_malformed_native_metadata_payloads(),
+    b'{"old_ref":"HEAD","new_ref":""}',
+    b'{"old_ref":"HEAD","new_ref":"","cross_file_changes":[],"parse_errors":[],"guardrail_violations":[]}',
+    b'{"old_ref":"HEAD","new_ref":"","file_diffs":[{"old_filename":"a.py","new_filename":"a.py","language":"python"}],"cross_file_changes":[],"parse_errors":[],"guardrail_violations":[]}',
+])
+def test_native_working_tree_adapter_rejects_malformed_complete_dto(
+    monkeypatch: Any, payload: bytes,
+) -> None:
+    control = json.dumps({
+        "schema_version": 1, "status": "complete",
+        "certification": "python_native_v4kb",
+        "commit_diff_byte_size": len(payload),
+    })
+    backend = SimpleNamespace(
+        version=lambda: "0.4.0",
+        diff_working_tree_python_commit_json=lambda _request: (control, payload),
+    )
+    monkeypatch.setattr(rust_core, "_load_backend", lambda: backend)
+    monkeypatch.setattr(rust_core, "rust_core_enabled", lambda _config: True)
+    with pytest.raises(RuntimeError, match="empty commit JSON" if not payload else "malformed CommitDiff JSON"):
+        rust_core.try_rust_core_working_tree_commit_json(
+            repo_path=".", old_ref="HEAD", config=DiffConfig(experimental_rust_core=True),
+        )
+
+
+
+def _invoke_certified_commit_through_ctypes(
+    monkeypatch: Any, entrypoint: str, result: Any,
+) -> rust_core.RustCoreCommitJsonAttempt:
+    """Exercise the actual CtypesBackend, not the tuple-returning test double (#207)."""
+    handler = (
+        "diff_batch_commit_json" if entrypoint == "batch"
+        else "diff_working_tree_python_commit_json"
+    )
+
+    def fake_c_abi_call(name: str, *_args: Any) -> Any:
+        if name == "version":
+            return "0.4.0"
+        if name == "supports_language":
+            return True
+        if name == handler:
+            return result
+        raise AssertionError(f"unexpected C ABI operation: {name}")
+
+    monkeypatch.setattr(rust_core, "_c_abi_call", fake_c_abi_call)
+    monkeypatch.setattr(rust_core, "_load_backend", rust_core._CtypesBackend)
+    monkeypatch.setattr(rust_core, "rust_core_enabled", lambda _config: True)
+    config = DiffConfig(experimental_rust_core=True)
+    if entrypoint == "batch":
+        return rust_core.try_rust_core_commit_json(
+            files=[{
+                "old_source": "value = 1\n", "new_source": "value = 2\n",
+                "old_filename": "example.py", "new_filename": "example.py",
+                "language": "python", "parser_plugin_id": "python",
+                "parser_wasm_path": "python_parser.wasm",
+            }],
+            old_ref="HEAD", new_ref="", config=config,
+        )
+    return rust_core.try_rust_core_working_tree_commit_json(
+        repo_path=".", old_ref="HEAD", config=config,
+    )
+
+
+@pytest.mark.parametrize("entrypoint", ["batch", "working_tree"])
+@pytest.mark.parametrize("invalid_payload", [0, [], {}, True])
+def test_ctypes_certified_commit_rejects_non_string_payload_without_fallback(
+    monkeypatch: Any, entrypoint: str, invalid_payload: Any,
+) -> None:
+    control = {
+        "schema_version": 1, "status": "complete",
+        "certification": "python_native_v4kb",
+        "commit_diff_byte_size": 0,
+    }
+    with pytest.raises(RuntimeError, match="non-string commit_diff_json"):
+        _invoke_certified_commit_through_ctypes(
+            monkeypatch, entrypoint,
+            {"control": control, "commit_diff_json": invalid_payload},
+        )
+
+
+@pytest.mark.parametrize("entrypoint", ["batch", "working_tree"])
+@pytest.mark.parametrize("malformed_envelope", [
+    None, [], {}, {"control": [], "commit_diff_json": "{}"},
+    {"control": None, "commit_diff_json": "{}"},
+])
+def test_ctypes_certified_commit_rejects_bad_envelope_without_fallback(
+    monkeypatch: Any, entrypoint: str, malformed_envelope: Any,
+) -> None:
+    with pytest.raises(RuntimeError, match="malformed C ABI commit envelope"):
+        _invoke_certified_commit_through_ctypes(
+            monkeypatch, entrypoint, malformed_envelope,
+        )
+
+
+@pytest.mark.parametrize("entrypoint", ["batch", "working_tree"])
+def test_ctypes_certified_commit_accepts_complete_rust_payload(
+    monkeypatch: Any, entrypoint: str,
+) -> None:
+    commit_json = json.dumps({
+        "old_ref": "HEAD", "new_ref": "",
+        "file_diffs": [], "cross_file_changes": [],
+        "parse_errors": [], "guardrail_violations": [],
+    })
+    result = {
+        "control": {
+            "schema_version": 1, "status": "complete",
+            "certification": "python_native_v4kb",
+            "commit_diff_byte_size": len(commit_json.encode("utf-8")),
+        },
+        "commit_diff_json": commit_json,
+    }
+    attempt = _invoke_certified_commit_through_ctypes(monkeypatch, entrypoint, result)
+    assert attempt.used
+    assert attempt.commit_diff_json == commit_json.encode("utf-8")
+
+
+@pytest.mark.parametrize("entrypoint", ["batch", "working_tree"])
+def test_ctypes_certified_commit_accepts_explicit_rust_fallback(
+    monkeypatch: Any, entrypoint: str,
+) -> None:
+    attempt = _invoke_certified_commit_through_ctypes(
+        monkeypatch, entrypoint,
+        {
+            "control": {"schema_version": 1, "status": "fallback", "reason": "unsupported parser"},
+            "commit_diff_json": None,
+        },
+    )
+    assert not attempt.used
+    assert attempt.fallback_reason == "unsupported parser"
+
+
+@pytest.mark.parametrize("wire", [
+    b'{"ok":"true","result":{}}',
+    b'{"ok":true}',
+    b'{"ok":false,"error":"declined"}',
+    b'{"ok":false,"error":"declined","error_type":42}',
+    b'{"ok":false,"error_type":"unexpected_kind","error":"declined"}',
+    b'{"ok":false,"error_type":"value_error","error":"declined"}',
+    b'[]',
+    b'not-json',
+])
+def test_ctypes_outer_abi_envelopes_reject_corruption(
+    monkeypatch: Any, wire: bytes,
+) -> None:
+    """Test the real ctypes pointer/decoder boundary, not a tuple-returning fake (#216)."""
+    import ctypes
+
+    buffer = ctypes.create_string_buffer(wire)
+    lib = SimpleNamespace(
+        intentumdiff_call=lambda *_args, _buffer=buffer: ctypes.addressof(_buffer),
+        intentumdiff_free=lambda *_args: None,
+    )
+    monkeypatch.setattr(rust_core, "_c_abi_lib", lambda: lib)
+    if wire == b'{"ok":false,"error_type":"value_error","error":"declined"}':
+        # Only an explicitly well-formed Rust error is a legitimate engine decline.
+        with pytest.raises(ValueError, match="declined"):
+            rust_core._c_abi_call("diff_batch", "{}")
+    else:
+        with pytest.raises(rust_core._InvalidNativeCAbiEnvelope):
+            rust_core._c_abi_call("diff_batch", "{}")
+
+
+def test_ctypes_null_pointer_is_transport_integrity_error(monkeypatch: Any) -> None:
+    lib = SimpleNamespace(
+        intentumdiff_call=lambda *_args: None,
+        intentumdiff_free=lambda *_args: None,
+    )
+    monkeypatch.setattr(rust_core, "_c_abi_lib", lambda: lib)
+    with pytest.raises(rust_core._InvalidNativeCAbiEnvelope, match="returned NULL"):
+        rust_core._c_abi_call("diff_batch", "{}")
+
+
+def test_ctypes_batch_marks_outer_abi_corruption_invalid(
+    monkeypatch: Any,
+) -> None:
+    def fake_c_abi_call(name: str, *_args: Any) -> Any:
+        if name == "version":
+            return "0.4.0"
+        if name == "supports_language":
+            return True
+        raise rust_core._InvalidNativeCAbiEnvelope(
+            f"invalid C ABI envelope for {name!r}: expected a boolean 'ok'"
+        )
+
+    monkeypatch.setattr(rust_core, "_c_abi_call", fake_c_abi_call)
+    monkeypatch.setattr(rust_core, "_load_backend", rust_core._CtypesBackend)
+    monkeypatch.setattr(rust_core, "rust_core_enabled", lambda _config: True)
+    attempt = rust_core.try_rust_core_batch_diffs(
+        files=[{
+            "old_source": "x = 1", "new_source": "x = 2",
+            "old_filename": "a.py", "new_filename": "a.py",
+            "language": "python", "parser_plugin_id": "python",
+            "parser_wasm_path": "python_parser.wasm",
+        }],
+        config=DiffConfig(experimental_rust_core=True),
+    )
+    assert attempt.invalid_output
+    assert not attempt.diffs
+    assert "invalid native transport" in attempt.fallback_reason
+
+
+@pytest.mark.parametrize("entrypoint", ["batch", "working_tree"])
+def test_ctypes_commit_routes_propagate_outer_abi_corruption(
+    monkeypatch: Any, entrypoint: str,
+) -> None:
+    def fake_c_abi_call(name: str, *_args: Any) -> Any:
+        if name == "version":
+            return "0.4.0"
+        if name == "supports_language":
+            return True
+        raise rust_core._InvalidNativeCAbiEnvelope(
+            f"invalid C ABI envelope for {name!r}: expected a boolean 'ok'"
+        )
+
+    monkeypatch.setattr(rust_core, "_c_abi_call", fake_c_abi_call)
+    monkeypatch.setattr(rust_core, "_load_backend", rust_core._CtypesBackend)
+    monkeypatch.setattr(rust_core, "rust_core_enabled", lambda _config: True)
+    config = DiffConfig(experimental_rust_core=True)
+    with pytest.raises(rust_core._InvalidNativeCAbiEnvelope):
+        if entrypoint == "batch":
+            rust_core.try_rust_core_commit_json(
+                files=[{
+                    "old_source": "x = 1", "new_source": "x = 2",
+                    "old_filename": "a.py", "new_filename": "a.py",
+                    "language": "python", "parser_plugin_id": "python",
+                    "parser_wasm_path": "python_parser.wasm",
+                }],
+                old_ref="HEAD", new_ref="", config=config,
+            )
+        else:
+            rust_core.try_rust_core_working_tree_commit_json(
+                repo_path=".", old_ref="HEAD", config=config,
+            )
+
+
+def test_scope_trails_accepts_rust_certified_empty_arrays(monkeypatch: Any) -> None:
+    """A valid zero-scope response is explicit, never inferred by Python."""
+    def scope_trails_json(request_json: str) -> str:
+        request = json.loads(request_json)
+        assert request["changes"] == []
+        return json.dumps({"scope_trails": {"old": [], "new": []}})
+
+    monkeypatch.setattr(
+        rust_core, "_load_backend",
+        lambda: SimpleNamespace(scope_trails_json=scope_trails_json),
+    )
+    tree = SimpleNamespace(model_dump=lambda **_kwargs: {"node_type": "module"})
+    assert rust_core.build_scope_trails(
+        old_tree=tree, new_tree=tree, changes=[],
+    ) == {"old": [], "new": []}
+
+
+@pytest.mark.parametrize("payload", [
+    "{}", "null", "[]", '{"scope_trails": null}',
+    '{"scope_trails": {}}',
+    '{"scope_trails": {"old": [], "new": null}}',
+    '{"scope_trails": {"old": {}, "new": []}}',
+    '{"scope_trails": {"old": [42], "new": []}}',
+])
+def test_scope_trails_rejects_malformed_rust_envelope(
+    monkeypatch: Any, payload: str,
+) -> None:
+    """Never manufacture missing Rust ancestry as an empty success."""
+    monkeypatch.setattr(
+        rust_core, "_load_backend",
+        lambda: SimpleNamespace(scope_trails_json=lambda _request: payload),
+    )
+    tree = SimpleNamespace(model_dump=lambda **_kwargs: {"node_type": "module"})
+    with pytest.raises(RuntimeError, match="Rust scope trail response"):
+        rust_core.build_scope_trails(old_tree=tree, new_tree=tree, changes=[])
+
+
+def test_rust_finalize_fallback_diff_requires_complete_rust_dto(monkeypatch: Any) -> None:
+    """A parse-error fallback cannot drop a meaningful edit through Pydantic defaults (#209)."""
+    old_node = SemanticNode(
+        id="old", node_type="literal", label="1", structural_hash="old",
+        position=NodePosition(start_line=0, start_col=4, end_line=0, end_col=5),
+    )
+    new_node = old_node.model_copy(update={
+        "id": "new", "label": "2", "structural_hash": "new",
+    })
+    change = Change(change_type=ChangeType.MODIFICATION, old_node=old_node, new_node=new_node)
+    complete = SemanticDiff(
+        old_filename="edit.py", new_filename="edit.py", language="python",
+        changes=[change], has_semantic_changes=True, is_fallback=True,
+        parse_errors=["invalid syntax"], metadata={"engine_owner": "rust"},
+    ).model_dump(mode="json")
+    response = complete
+
+    def fake_finalize(*args: Any) -> str:
+        return json.dumps({
+            "used": True, "changes": [], "change_groups": [],
+            "ignored_style_changes": [], "is_style_only": False,
+            "no_surviving_changes": False, "fallback_diff": response,
+        })
+
+    monkeypatch.setattr(rust_core, "_load_backend",
+                        lambda: SimpleNamespace(finalize_review_json=fake_finalize))
+
+    def attempt() -> dict[str, Any] | None:
+        return rust_core.try_rust_finalize_review(
+            old_tree=old_node, new_tree=new_node, old_source="x = 1",
+            new_source="x = 2", language="python", config=DiffConfig(),
+        )
+
+    valid = attempt()
+    assert valid is not None and valid["fallback_diff"].is_fallback
+    assert len(valid["fallback_diff"].changes) == 1
+    assert valid["fallback_diff"].changes[0].new_node.position.start_col == 4
+
+    mandatory = (
+        "changes", "change_groups", "parse_errors", "guardrail_violations",
+        "has_semantic_changes", "is_style_only", "is_fallback", "metadata",
+    )
+    for field in mandatory:
+        response = dict(complete)
+        response.pop(field)
+        with pytest.raises(RuntimeError, match=f"Rust complete batch diff requires {field}"):
+            attempt()
+    for field, malformed in (
+        ("changes", None), ("guardrail_violations", {}),
+        ("has_semantic_changes", "false"), ("is_fallback", 0),
+        ("metadata", []),
+    ):
+        response = {**complete, field: malformed}
+        with pytest.raises(RuntimeError, match=f"Rust complete batch diff requires {field}"):
+            attempt()
+
+    # A genuinely empty Rust fallback still succeeds when Rust explicitly
+    # supplies every required array and boolean, including is_fallback=True.
+    response = SemanticDiff(
+        old_filename="edit.py", new_filename="edit.py", language="python",
+        is_fallback=True, metadata={"engine_owner": "rust"},
+    ).model_dump(mode="json")
+    empty = attempt()
+    assert empty is not None and empty["fallback_diff"].changes == []
+    assert empty["fallback_diff"].is_fallback is True
+
+
+def test_rust_source_fallback_requires_complete_response(monkeypatch: Any) -> None:
+    """The direct C ABI source fallback must not manufacture an empty success (#210)."""
+    old_node = SemanticNode(
+        id="old", node_type="literal", label="1", structural_hash="old",
+        position=NodePosition(start_line=0, start_col=4, end_line=0, end_col=5),
+    )
+    new_node = old_node.model_copy(update={
+        "id": "new", "label": "2", "structural_hash": "new",
+    })
+    change = Change(change_type=ChangeType.MODIFICATION, old_node=old_node, new_node=new_node)
+    complete = SemanticDiff(
+        old_filename="edit.py", new_filename="edit.py", language="python",
+        changes=[change], has_semantic_changes=True, is_fallback=True,
+        parse_errors=["invalid syntax"], metadata={"engine_owner": "rust"},
+    ).model_dump(mode="json")
+    raw = json.dumps(complete)
+    monkeypatch.setattr(
+        rust_core, "_load_backend",
+        lambda: SimpleNamespace(source_fallback_diff_json=lambda *args: raw),
+    )
+
+    def call() -> SemanticDiff:
+        return rust_core.source_fallback_diff(
+            "x = 1", "x = 2", "edit.py", "edit.py", "python", "parse_errors"
+        )
+
+    valid = call()
+    assert valid.is_fallback and valid.has_semantic_changes
+    assert valid.changes[0].new_node.label == "2"
+    assert valid.changes[0].new_node.position.start_col == 4
+
+    for field in (
+        "changes", "change_groups", "parse_errors", "guardrail_violations",
+        "has_semantic_changes", "is_style_only", "is_fallback", "metadata",
+    ):
+        truncated = dict(complete)
+        truncated.pop(field)
+        raw = json.dumps(truncated)
+        with pytest.raises(ValueError, match=f"Rust complete batch diff requires {field}"):
+            call()
+    for field, value in (
+        ("changes", None), ("parse_errors", {}), ("is_style_only", "false"),
+        ("is_fallback", 0), ("metadata", []),
+    ):
+        raw = json.dumps({**complete, field: value})
+        with pytest.raises(ValueError, match=f"Rust complete batch diff requires {field}"):
+            call()
+    raw = "not-json"
+    with pytest.raises(ValueError):
+        call()
+    raw = json.dumps(SemanticDiff(
+        old_filename="edit.py", new_filename="edit.py", language="python",
+        is_fallback=True, metadata={"engine_owner": "rust"},
+    ).model_dump(mode="json"))
+    empty = call()
+    assert empty.is_fallback and not empty.has_semantic_changes and empty.changes == []
+
+@pytest.mark.parametrize("kind, expected_error", [
+    ("internal", RuntimeError),
+    ("not_found", FileNotFoundError),
+    ("value_error", ValueError),
+    ("bad_request", ValueError),
+])
+@pytest.mark.parametrize("route", ["batch", "commit", "working_tree"])
+def test_ctypes_native_operation_errors_fail_closed_in_every_commit_adapter(
+    monkeypatch: Any, kind: str, expected_error: type[Exception], route: str,
+) -> None:
+    """A real C ABI error must never be recast as a Rust-controlled decline (#219)."""
+    import ctypes
+
+    buffers = []
+
+    def native_call(name: bytes, *_args: Any) -> int:
+        handler = name.decode("utf-8")
+        if handler == "version":
+            wire = {"ok": True, "result": "0.4.0"}
+        elif handler == "supports_language":
+            wire = {"ok": True, "result": True}
+        else:
+            wire = {"ok": False, "error_type": kind, "error": "native operation failed"}
+        buffer = ctypes.create_string_buffer(json.dumps(wire).encode("utf-8"))
+        buffers.append(buffer)  # Preserve ownership through ctypes.cast/free.
+        return ctypes.addressof(buffer)
+
+    monkeypatch.setattr(
+        rust_core, "_c_abi_lib",
+        lambda: SimpleNamespace(
+            intentumdiff_call=native_call,
+            intentumdiff_free=lambda *_args: None,
+        ),
+    )
+    monkeypatch.setattr(rust_core, "_load_backend", rust_core._CtypesBackend)
+    monkeypatch.setattr(rust_core, "rust_core_enabled", lambda _config: True)
+
+    config = DiffConfig(experimental_rust_core=True)
+    files = [{
+        "old_source": "x = 1", "new_source": "x = 2",
+        "old_filename": "a.py", "new_filename": "a.py",
+        "language": "python", "parser_plugin_id": "python",
+        "parser_wasm_path": "python_parser.wasm",
+    }]
+    if route == "batch":
+        attempt = rust_core.try_rust_core_batch_diffs(files=files, config=config)
+        assert attempt.invalid_output
+        assert not attempt.diffs
+        assert "native operation failed" in attempt.fallback_reason
+    else:
+        with pytest.raises(rust_core._NativeCAbiOperationFailure) as raised:
+            if route == "commit":
+                rust_core.try_rust_core_commit_json(
+                    files=files, old_ref="HEAD", new_ref="", config=config,
+                )
+            else:
+                rust_core.try_rust_core_working_tree_commit_json(
+                    repo_path=".", old_ref="HEAD", config=config,
+                )
+        assert isinstance(raised.value, expected_error)
+        assert "native operation failed" in str(raised.value)
+
+
+def test_ctypes_explicit_rust_batch_decline_remains_routable(monkeypatch: Any) -> None:
+    """A valid Rust status='fallback' is distinct from any raised operation error."""
+    import ctypes
+
+    buffers = []
+
+    def native_call(name: bytes, *_args: Any) -> int:
+        handler = name.decode("utf-8")
+        if handler == "version":
+            wire = {"ok": True, "result": "0.4.0"}
+        elif handler == "supports_language":
+            wire = {"ok": True, "result": True}
+        else:
+            wire = {"ok": True, "result": {
+                "engine": rust_core._BATCH_ENGINE, "status": "fallback",
+                "diffs": [{"index": 0, "status": "fallback",
+                           "reason": "explicit native decline"}],
+                "metadata": {},
+            }}
+        buffer = ctypes.create_string_buffer(json.dumps(wire).encode("utf-8"))
+        buffers.append(buffer)
+        return ctypes.addressof(buffer)
+
+    monkeypatch.setattr(
+        rust_core, "_c_abi_lib",
+        lambda: SimpleNamespace(
+            intentumdiff_call=native_call,
+            intentumdiff_free=lambda *_args: None,
+        ),
+    )
+    monkeypatch.setattr(rust_core, "_load_backend", rust_core._CtypesBackend)
+    monkeypatch.setattr(rust_core, "rust_core_enabled", lambda _config: True)
+    attempt = rust_core.try_rust_core_batch_diffs(
+        files=[{
+            "old_source": "x = 1", "new_source": "x = 2",
+            "old_filename": "a.py", "new_filename": "a.py",
+            "language": "python", "parser_plugin_id": "python",
+            "parser_wasm_path": "python_parser.wasm",
+        }],
+        config=DiffConfig(experimental_rust_core=True),
+    )
+    assert attempt.invalid_output is False
+    assert attempt.fallback_reasons == {0: "explicit native decline"}
+    assert not attempt.diffs

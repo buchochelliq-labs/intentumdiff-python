@@ -22,6 +22,8 @@ import importlib.metadata as _importlib_metadata
 import json
 import logging
 import os
+import platform
+import re
 import ssl
 import threading
 import time as _time
@@ -56,8 +58,16 @@ _MAX_TELEMETRY_RECORDS = 128
 # fast offline check.  For a live OSV scan run: ``intentumdiff security-check``.
 _VULNERABLE_WASMTIME_VERSIONS: frozenset[str] = frozenset({
     "44.0.0",   # CVE-2026-44216 / GHSA-p8xm-42r7-89xg — host panic via memory64
+    # GHSA-mghf-wjfp-p5xm — aarch64 br_table sandbox escape (critical).
+    # GHSA-9pvw-hwfg-92h5 — host panic through component streams/futures.
+    # Pre-patch Python bindings listed below contain affected native Wasmtime.
+    "45.0.0",
+    "46.0.1",
+    "47.0.1",
+    "48.0.0",
+    "49.0.0",
 })
-_WASMTIME_ADVISORY = "CVE-2026-44216 / GHSA-p8xm-42r7-89xg"
+_WASMTIME_ADVISORY = "GHSA-p8xm-42r7-89xg / GHSA-mghf-wjfp-p5xm / GHSA-9pvw-hwfg-92h5"
 _WASMTIME_ADVISORY_URL = (
     "https://github.com/bytecodealliance/wasmtime/security/advisories/"
     "GHSA-p8xm-42r7-89xg"
@@ -76,50 +86,112 @@ def _is_trusted_wasm_path(wasm_path: str | Path | None) -> bool:
         return False
 
 
-#: The #89 provenance manifest shipped alongside the bundled parsers (filename -> SHA-256).
+#: First-party bundled Wasm is always verified before execution. There is no
+#: release runtime waiver: absent, malformed or divergent provenance is unsafe.
 _PROVENANCE_MANIFEST = _BUILTIN_WASM_DIR / "wasm_provenance.json"
-#: Opt-in to make a bundled-wasm provenance mismatch a hard load failure (release/CI). Off by
-#: default so a dev tree without the manifest — or with a stale one after a manual wasm copy —
-#: is not broken; the mismatch is still logged.
-_ENFORCE_PROVENANCE_ENV = "INTENTUMDIFF_ENFORCE_WASM_PROVENANCE"
 
 
-def _verify_builtin_provenance(path: Path) -> None:
-    """Verify a bundled first-party Wasm against the #89 provenance manifest, when present.
+def _verify_builtin_provenance(path: Path) -> bytes | None:
+    """Check bundled Wasm against the shipping manifest and return those bytes.
 
-    Parallels hub.py's third-party checksum path, but for the first-party bundled parsers: a
-    mismatch — or an artifact the manifest never saw (the #87 stale-artifact case) — is a
-    supply-chain red flag. It is logged as a warning, and raised as a ``PluginSecurityError`` (a ``PluginLoadError`` subtype) when
-    ``INTENTUMDIFF_ENFORCE_WASM_PROVENANCE=1``. A missing/unreadable manifest (a dev build without
-    the package-time provenance step) is skipped — verification is optional by design (#89).
+    Read and hash the same buffer that will be passed to Wasmtime; checking a
+    path and reopening it later permits replacement between the two operations.
+    Third-party plugin provenance is checked independently by the plugin hub.
     """
-    if not _is_trusted_wasm_path(path) or not _PROVENANCE_MANIFEST.is_file():
-        return
+    if not _is_trusted_wasm_path(path):
+        return None
     try:
         manifest = json.loads(_PROVENANCE_MANIFEST.read_text(encoding="utf-8"))
-        artifacts = manifest.get("artifacts", {})
-    except (OSError, ValueError):
-        return  # unreadable manifest — do not block on a broken dev artifact
+    except (OSError, ValueError, UnicodeError) as exc:
+        raise PluginSecurityError(
+            str(path), f"bundled Wasm provenance manifest is missing or invalid: {exc}"
+        ) from exc
+    if not isinstance(manifest, dict) or manifest.get("schema_version") != 1:
+        raise PluginSecurityError(str(path), "bundled Wasm provenance has invalid schema")
+    artifacts = manifest.get("artifacts")
     if not isinstance(artifacts, dict):
-        return
-    name = Path(path).name
+        raise PluginSecurityError(str(path), "bundled Wasm provenance lacks artifacts map")
+    name = path.name
     expected = artifacts.get(name)
-    problem: str | None = None
-    if expected is None:
-        problem = f"bundled Wasm {name!r} is not listed in the provenance manifest"
-    else:
-        digest = hashlib.sha256(Path(path).read_bytes()).hexdigest()
-        if digest != expected.get("sha256"):
-            problem = f"bundled Wasm {name!r} does not match its provenance SHA-256"
-    if problem is None:
+    if not isinstance(expected, dict):
+        raise PluginSecurityError(
+            str(path), f"bundled Wasm {name!r} is not listed in the provenance manifest"
+        )
+    digest = expected.get("sha256")
+    size = expected.get("size_bytes")
+    if (not isinstance(digest, str) or len(digest) != 64
+            or any(c not in "0123456789abcdef" for c in digest)
+            or not isinstance(size, int) or isinstance(size, bool) or size < 0):
+        raise PluginSecurityError(str(path), f"bundled Wasm {name!r} has invalid provenance metadata")
+    try:
+        payload = path.read_bytes()
+    except OSError as exc:
+        raise PluginSecurityError(str(path), f"bundled Wasm cannot be read: {exc}") from exc
+    if len(payload) != size or hashlib.sha256(payload).hexdigest() != digest:
+        raise PluginSecurityError(str(path), f"bundled Wasm {name!r} does not match provenance SHA-256/size")
+    return payload
+
+
+def _check_rust_component_load_policy(path: Path) -> bytes | None:
+    """Ask Rust before compilation; return the exact approved bytes if guarded.
+
+    Python owns only host I/O and error translation; Rust decides whether the
+    digest is compatible. A protected component must compile from the *same*
+    bytes that were hashed, rather than reopening the file after validation.
+    An empty digest probes the restriction without reading unrelated plugins.
+    """
+    from intentumdiff.rust_core import _c_abi_call
+
+    name, system, machine = path.name, platform.system(), platform.machine()
+
+    def reason_for(digest: str) -> str | None:
+        status = _c_abi_call("parser_component_availability", name, system, machine, digest)
+        if not isinstance(status, dict) or "reason" not in status:
+            raise PluginLoadError(str(path), "malformed Rust component availability response")
+        reason = status["reason"]
+        if reason is not None and not isinstance(reason, str):
+            raise PluginLoadError(str(path), "invalid Rust component availability reason type")
+        return reason
+
+    if reason_for("") is None:
         return
-    if os.environ.get(_ENFORCE_PROVENANCE_ENV) == "1":
-        raise PluginSecurityError(str(path), problem)
-    logger.warning(
-        "Wasm provenance check: %s (set %s=1 to make this a hard failure).",
-        problem,
-        _ENFORCE_PROVENANCE_ENV,
-    )
+    try:
+        approved_bytes = path.read_bytes()
+    except OSError as exc:
+        raise PluginLoadError(str(path), f"cannot hash staged Wasm component: {exc}") from exc
+    reason = reason_for(hashlib.sha256(approved_bytes).hexdigest())
+    if reason is not None:
+        raise PluginLoadError(str(path), reason)
+    return approved_bytes
+
+
+
+def _is_known_vulnerable_wasmtime(version: str) -> bool:
+    """Reject vulnerable Wasmtime release *ranges*, not just sampled versions.
+
+    GHSA-mghf-wjfp-p5xm affects every release below 36.0.19,
+    37.0.0 through 48.0.6, and 49.0.0 through 49.0.3.
+    GHSA-9pvw-hwfg-92h5 also affects 46.0.0 through 48.0.6 and
+    49.0.0 through 49.0.3. An unparseable/prerelease version cannot
+    establish the patched runtime identity and must fail closed.
+    """
+    if version in _VULNERABLE_WASMTIME_VERSIONS:
+        return True
+    match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", version)
+    if match is None:
+        return True
+    major, _minor, patch = (int(part) for part in match.groups())
+    if major < 36:
+        return True
+    if major == 36:
+        return patch < 19
+    if 37 <= major < 48:
+        return True
+    if major == 48:
+        return patch < 7
+    if major == 49:
+        return patch < 4
+    return False
 
 
 def _check_wasmtime_version(
@@ -133,19 +205,22 @@ def _check_wasmtime_version(
     Wasm module to panic the host process by allocating an extremely large
     WebAssembly table under the default on-demand allocator with memory64.
 
-    The normal dependency path now requires a fixed Python binding
-    (wasmtime>=45.0).  This offline runtime gate remains as defense-in-depth
-    for stale or manually pinned environments.
+    The release-candidate Python dependency pins wasmtime==50.0.1, the
+    available Python binding after the 2026 ARM64 Wasmtime advisories.
+    This offline runtime gate remains as defense-in-depth for stale or
+    manually pinned environments. Rust Core independently pins 48.0.7.
 
-    See: https://github.com/bytecodealliance/wasmtime/security/advisories/GHSA-p8xm-42r7-89xg
+    See: https://github.com/bytecodealliance/wasmtime/security/advisories/GHSA-mghf-wjfp-p5xm
     """
     try:
         version = _importlib_metadata.version("wasmtime")
-    except _importlib_metadata.PackageNotFoundError:
-        # wasmtime not installed as a proper package — skip version gate.
-        return
+    except _importlib_metadata.PackageNotFoundError as exc:
+        raise PluginSecurityError(
+            "<wasmtime-version-check>",
+            "wasmtime distribution metadata is absent; cannot verify a patched native runtime",
+        ) from exc
 
-    if version not in _VULNERABLE_WASMTIME_VERSIONS:
+    if not _is_known_vulnerable_wasmtime(version):
         return
 
     override = os.environ.get("INTENTUMDIFF_ALLOW_VULNERABLE_WASMTIME", "").strip()
@@ -162,9 +237,10 @@ def _check_wasmtime_version(
 
     raise PluginSecurityError(
         "<wasmtime-version-check>",
-        f"wasmtime=={version} is in the known-vulnerable blocklist "
-        f"({_WASMTIME_ADVISORY} — host-process panic on large table allocation "
-        f"with memory64). Upgrade wasmtime or set INTENTUMDIFF_ALLOW_VULNERABLE_WASMTIME=1 "
+        f"wasmtime=={version} is in the known-vulnerable blocklist or its " 
+        f"version cannot be verified as patched "
+        f"({_WASMTIME_ADVISORY} — unsafe host behaviour including aarch64 "
+        f"sandbox escape or process panic). Upgrade wasmtime or set INTENTUMDIFF_ALLOW_VULNERABLE_WASMTIME=1 "
         f"to override (not recommended). Run 'intentumdiff security-check' for a live "
         f"OSV scan. See: {_WASMTIME_ADVISORY_URL}",
     )
@@ -657,6 +733,7 @@ class LoadedPlugin:
         fuel: int,
         iface_name: str,
         trusted: bool = False,
+        compiled_wasm_sha256: str | None = None,
     ) -> None:
         self._wasm_path = wasm_path
         self._instance = instance
@@ -664,6 +741,8 @@ class LoadedPlugin:
         self._fuel = fuel
         self._iface_name = iface_name
         self._trusted = trusted
+        # Digest of the *compiled* Wasm buffer, not a later filesystem snapshot.
+        self._compiled_wasm_sha256 = compiled_wasm_sha256
         # Cache the interface-level ExportIndex for nested function lookups
         self._iface_idx = instance.get_export_index(store, iface_name)
         # Wasm Store is not thread-safe; serialise all calls through this lock.
@@ -677,6 +756,11 @@ class LoadedPlugin:
     def wasm_path(self) -> str:
         """Path of the ``.wasm`` file that backs this plugin instance."""
         return self._wasm_path
+
+    @property
+    def compiled_wasm_sha256(self) -> str | None:
+        """SHA-256 of the exact Wasm bytes compiled for this live instance."""
+        return self._compiled_wasm_sha256
 
     @property
     def trusted(self) -> bool:
@@ -821,6 +905,7 @@ class LoadedPlugin:
         fresh = load_plugin(self._wasm_path, self._fuel, trusted=self._trusted)
         self._instance = fresh._instance
         self._store = fresh._store
+        self._compiled_wasm_sha256 = fresh._compiled_wasm_sha256
         self._iface_idx = fresh._instance.get_export_index(fresh._store, self._iface_name)
         self._tainted = False
 
@@ -1027,13 +1112,26 @@ def load_plugin(
     _unlimited = fuel == -1
     path = Path(wasm_path)
     trusted = trusted or _is_trusted_wasm_path(path)
-    _verify_builtin_provenance(path)                     # #89 first-party provenance (optional)
+    verified_component_bytes = _verify_builtin_provenance(path)  # #89, always fail closed
     _check_wasmtime_version(path, trusted=trusted)       # fast sync blocklist
     _check_osv_cache_or_block(path, trusted=trusted)     # fast sync OSV gate
     _maybe_start_osv_check()                             # async refresh
 
     if not path.exists():
         raise PluginLoadError(str(path), "file not found")
+    approved_component_bytes = _check_rust_component_load_policy(path)
+    if (verified_component_bytes is not None and approved_component_bytes is not None
+            and verified_component_bytes != approved_component_bytes):
+        raise PluginSecurityError(str(path), "bundled Wasm changed between provenance and Rust approval")
+    component_bytes = (approved_component_bytes
+                       if approved_component_bytes is not None else verified_component_bytes)
+    if component_bytes is None:
+        # Third-party components also compile from an owned, hashed buffer;
+        # Component.from_file would hide which revision Wasmtime actually read.
+        try:
+            component_bytes = path.read_bytes()
+        except OSError as exc:
+            raise PluginLoadError(str(path), f"cannot read Wasm component: {exc}") from exc
 
     try:
         cfg = Config()
@@ -1070,7 +1168,9 @@ def load_plugin(
             )
         engine = Engine(cfg)
 
-        component = Component.from_file(engine, str(path))
+        # Compile precisely the bytes whose digest is bound to this instance.
+        # First-party protected components were approved by Rust above.
+        component = Component(engine, component_bytes)
 
         linker = Linker(engine)
         linker.add_wasip2()
@@ -1128,6 +1228,7 @@ def load_plugin(
             fuel,
             iface_name,
             trusted=trusted,
+            compiled_wasm_sha256=hashlib.sha256(component_bytes).hexdigest(),
         )
 
     except (PluginLoadError, PluginSandboxViolation):

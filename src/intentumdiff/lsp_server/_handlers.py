@@ -90,6 +90,33 @@ def uri_to_path(uri: str, workspace_root: Path | None = None) -> Path:
     return resolved
 
 
+
+def _invalidate_failed_review(server, state: _ServerState, uri: str) -> None:
+    """Fail closed at the LSP transport: old Rust results are no longer current."""
+    from lsprotocol import types as lsp_types
+
+    # Remove old CodeLens source before attempting I/O (publishing can itself fail).
+    state.diff_cache.pop(uri, None)
+    server.publish_diagnostics(uri, [
+        lsp_types.Diagnostic(
+            range=lsp_types.Range(
+                start=lsp_types.Position(line=0, character=0),
+                end=lsp_types.Position(line=0, character=0),
+            ),
+            severity=lsp_types.DiagnosticSeverity.Error,
+            message="IntentumDiff semantic review failed; previous results are invalid.",
+            source="intentumdiff",
+        )
+    ])
+    if state.supports_codelens_refresh:
+        try:
+            server.lsp.send_request("workspace/codeLens/refresh", None)
+        except Exception:  # noqa: BLE001 - result stays invalidated.
+            log.debug("intentumdiff: failed CodeLens invalidation refresh", exc_info=True)
+
+
+
+
 # ---------------------------------------------------------------------------
 # Async diff scheduling
 # ---------------------------------------------------------------------------
@@ -124,6 +151,9 @@ async def _compute_and_push(
             None, _do_diff, state, server, uri, content
         )
         if diff is None:
+            # A failed Rust/Wasm review must not leave previously cached semantic
+            # CodeLens or diagnostics visible as though the current edit passed.
+            _invalidate_failed_review(server, state, uri)
             return
 
         state.diff_cache[uri] = diff
@@ -148,6 +178,12 @@ async def _compute_and_push(
         raise  # propagate cancellation — do not swallow
     except Exception as exc:  # noqa: BLE001
         log.warning("intentumdiff: unhandled error during diff for %s: %s", uri, exc)
+        # Even transport/publishing faults invalidate old semantic data. Never
+        # expose a stale successful review after the current review failed.
+        try:
+            _invalidate_failed_review(server, state, uri)
+        except Exception:  # noqa: BLE001 - preserve the original failure log.
+            log.warning("intentumdiff: failed to publish review error for %s", uri, exc_info=True)
 
 
 # ---------------------------------------------------------------------------

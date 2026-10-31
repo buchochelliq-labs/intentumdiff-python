@@ -32,21 +32,6 @@
       "justification": "optional LSP server dep"
     },
     {
-      "pattern": "no rust support",
-      "class": "platform",
-      "justification": "language-gated engine capability"
-    },
-    {
-      "pattern": "backend unavailable",
-      "class": "platform",
-      "justification": "compiled core not present in minimal envs"
-    },
-    {
-      "pattern": "unavailable: test",
-      "class": "platform",
-      "justification": "availability-probed optional deps"
-    },
-    {
       "pattern": "intentumdiff not installed",
       "class": "platform",
       "justification": "entry-point tests need an installed dist"

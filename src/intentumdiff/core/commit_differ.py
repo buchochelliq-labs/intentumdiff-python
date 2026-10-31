@@ -299,7 +299,17 @@ class CommitDiffer:
             if error.kind == "pipeline_error"
         ]
 
-        self._raise_if_all_parsers_failed(changed_file_count, file_diffs, parse_errors)
+        self._raise_if_all_parsers_failed(
+            changed_file_count, file_diffs, parse_errors, file_errors=errors
+        )
+        if errors:
+            details = "; ".join(
+                f"{err.old_path}: {err.kind}: {err.reason}" for err in errors
+            )
+            raise RuntimeError(
+                f"Commit diff incomplete ({len(errors)} of {changed_file_count} text files failed): "
+                f"{details}"
+            )
 
         # Build semantic indexes for changed files only.
         old_file_contents = [
@@ -314,8 +324,14 @@ class CommitDiffer:
         if old_file_contents:
             old_index = self._build_index(old_file_contents)
             new_index = self._build_index(new_file_contents)
-            if old_index is not None and new_index is not None:
-                cross_file_changes = self._detect_cross_file(old_index, new_index)
+            # Both source sets are nonempty. An absent index means incomplete
+            # cross-file semantics, not an honest "no cross-file changes" result.
+            if old_index is None or new_index is None:
+                raise RuntimeError(
+                    "Commit semantic index incomplete: missing old or new index "
+                    "for changed text files"
+                )
+            cross_file_changes = self._detect_cross_file(old_index, new_index)
 
         return CommitDiff(
             old_ref=old_ref,
@@ -340,69 +356,27 @@ class CommitDiffer:
         old_ref: str,
         new_ref: str,
     ) -> CommitDiff:
-        """
-        Run a full semantic diff using an arbitrary :class:`VcsBackend`.
+        """Apply the same fail-closed Rust-backed per-file route to every VCS."""
 
-        Called by :meth:`diff_commit` when a *backend* is provided.  The
-        gitignore pre-pass is skipped because it is git-specific.
-        """
-        changed_files = backend.list_changed_files(old_ref, new_ref)
+        def changed_sources() -> Iterator[tuple[str, str, str, str, object]]:
+            for changed in backend.list_changed_files(old_ref, new_ref):
+                if changed.is_binary:
+                    continue
+                path = changed.old_path or changed.new_path
+                if path is None:
+                    raise ValueError("VCS backend returned a changed text file without a path")
+                new_path = changed.new_path or path
+                old = backend.get_blob(changed.old_path, old_ref) if changed.old_path else ""
+                new = backend.get_blob(changed.new_path, new_ref) if changed.new_path else ""
+                yield old, new, path, new_path, None
 
-        file_diffs = []
-        parse_errors: list[str] = []
-        old_file_contents: list[tuple[str, str, str]] = []
-        new_file_contents: list[tuple[str, str, str]] = []
-        changed_file_count = 0
-
-        for cf in changed_files:
-            if cf.is_binary:
-                continue
-            changed_file_count += 1
-
-            old_path = cf.old_path or cf.new_path
-            new_path = cf.new_path or cf.old_path
-
-            if old_path is None:
-                continue
-
-            old_content = backend.get_blob(old_path, old_ref) if cf.old_path else ""
-            new_content = backend.get_blob(new_path, new_ref) if cf.new_path else ""  # type: ignore[arg-type]
-
-            try:
-                file_diff = self._differ._run_pipeline(
-                    old_content, new_content, old_path, None, new_filename=new_path
-                )
-                file_diffs.append(file_diff)
-                old_file_contents.append((old_path, file_diff.language, old_content))
-                new_file_contents.append(
-                    (new_path or old_path, file_diff.language, new_content)
-                )
-            except PluginNotFoundError:
-                logger.debug("Skipping %r — no parser available", old_path)
-            except (PluginError, ValueError, RuntimeError) as exc:
-                logger.warning("Failed to diff %r: %s", old_path, exc)
-                parse_errors.append(f"{old_path}: {exc}")
-
-        self._raise_if_all_parsers_failed(changed_file_count, file_diffs, parse_errors)
-
-        cross_file_changes: list[CrossFileChange] = []
-        if old_file_contents:
-            old_index = self._build_index(old_file_contents)
-            new_index = self._build_index(new_file_contents)
-            if old_index is not None and new_index is not None:
-                cross_file_changes = self._detect_cross_file(old_index, new_index)
-
-        return CommitDiff(
+        results, errors, changed_file_count = self._collect_file_diffs(changed_sources())
+        return self._finalize_commit_diff(
+            results=results,
+            errors=errors,
+            changed_file_count=changed_file_count,
             old_ref=old_ref,
             new_ref=new_ref,
-            guardrail_violations=[
-                violation
-                for file_diff in file_diffs
-                for violation in file_diff.guardrail_violations
-            ],
-            file_diffs=file_diffs,
-            cross_file_changes=cross_file_changes,
-            parse_errors=parse_errors,
         )
 
     def _raise_if_all_parsers_failed(
@@ -410,6 +384,8 @@ class CommitDiffer:
         changed_file_count: int,
         file_diffs: list,
         parse_errors: list[str],
+        *,
+        file_errors: list[FileDiffError] | None = None,
     ) -> None:
         """Fail loudly when changed files exist but no parser plugin loaded."""
         if changed_file_count <= 0 or file_diffs or parse_errors:
@@ -420,6 +396,16 @@ class CommitDiffer:
         summary = summary_fn()
         if summary:
             raise RuntimeError(summary)
+        # Preserve concrete failing paths when the registry cannot supply a richer
+        # parser-load diagnostic. A generic error hides the failed file and masks
+        # actionable evidence from the fail-closed commit boundary.
+        details = (
+            ": " + "; ".join(f"{error.old_path}: {error.reason}" for error in file_errors)
+            if file_errors else ""
+        )
+        raise RuntimeError(
+            "Commit diff incomplete: no parser succeeded for changed text files" + details
+        )
 
     def _build_index(
         self, file_contents: list[tuple[str, str, str]]
@@ -429,17 +415,27 @@ class CommitDiffer:
         triples.
 
         The symbol/reference tables are built by the Rust core
-        (index-engine-lib) inside ``SemanticIndex.build()``. Returns ``None`` if
-        no files could be parsed.
+        (index-engine-lib) inside ``SemanticIndex.build()``. Every changed text
+        file must contribute a tree; skipping one would silently remove its
+        cross-file evidence. Only an intentionally empty input list has no index.
         """
+        if not file_contents:
+            return None
+
         index = SemanticIndex()
         for filename, language, content in file_contents:
-            tree = self._parse_to_tree(filename, language, content)
-            if tree is not None:
-                index.add_tree(filename, language, tree)
-
-        if not index._files:  # type: ignore[attr-defined]  # pylint: disable=protected-access
-            return None
+            try:
+                tree = self._parse_to_tree(filename, language, content)
+            except (PluginNotFoundError, PluginError, ValueError, RuntimeError) as exc:
+                raise RuntimeError(
+                    f"Commit semantic index incomplete for {filename!r}: {exc}"
+                ) from exc
+            if tree is None:
+                raise RuntimeError(
+                    f"Commit semantic index incomplete for {filename!r}: "
+                    "parser returned no semantic tree"
+                )
+            index.add_tree(filename, language, tree)
 
         index.build()
         return index
@@ -456,20 +452,18 @@ class CommitDiffer:
         """
         Parse *content* to a SemanticNode tree.
 
-        Re-uses the ``SemanticDiffer`` parser pipeline so both FullParse and
-        host-CST parser plugins can participate in commit-wide symbol indexing.
+        Re-uses the ``SemanticDiffer`` FullParse parser pipeline for
+        commit-wide symbol indexing. Missing parsers must propagate to the
+        caller so a complete commit review cannot silently omit a text file.
         """
         # Match the existing source-diff and native Rust empty-side contract. Some
         # parsers reject empty input; that is not a missing symbol-table failure.
         if not content:
             from intentumdiff._differ_presentation import _empty_semantic_tree
             return _empty_semantic_tree(language)
-        try:
-            tree, _language = self._differ.parse(
-                content,
-                filename,
-                language_hint=language,
-            )
-            return tree
-        except PluginNotFoundError:
-            return None
+        tree, _language = self._differ.parse(
+            content,
+            filename,
+            language_hint=language,
+        )
+        return tree

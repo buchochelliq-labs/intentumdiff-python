@@ -54,7 +54,8 @@ def test_unchanged_invalid_source_is_not_style_only(diagnostics):
     ('a.py', 'def broken(:\n x="hello  world"\n', 'def broken(:\n x="hello world"\n'),
     ('a.js', 'function f( { return "hello  world";', 'function f( { return "hello world";'),
 ])
-def test_native_live_protocol_preserves_fallback(filename, old, new, tmp_path):
+def test_native_live_protocol_rejects_incomplete_syntax(filename, old, new, tmp_path):
+    """The Rust native live protocol must not certify a token fallback as a semantic diff."""
     import json
     from pathlib import Path
     import intentumdiff
@@ -62,8 +63,33 @@ def test_native_live_protocol_preserves_fallback(filename, old, new, tmp_path):
     wasm = str(Path(intentumdiff.__file__).parent / 'wasm')
     result = json.loads(_load_backend().live_diff_contents_json(
         str(tmp_path), filename, old, new, '{}', wasm))
+
+    # Rust's live_server::certified_live_diff_response deliberately declines
+    # incomplete parses, even though the separate, explicit source-fallback
+    # API can still describe raw changed bytes for editor recovery.
+    assert result['fallback_code'] == 'native_parse_incomplete'
+    assert 'diff' not in result, 'incomplete syntax cannot be certified as a semantic diff'
+    assert result['fallback'].startswith(f'{filename}: ')
+    assert result['fallback'][len(filename) + 2:].strip(), 'retain the Rust parser diagnostic'
+
+
+@pytest.mark.parametrize('filename,old,new', [
+    ('a.py', 'def value():\n    return 1\n', 'def value():\n    return 2\n'),
+    ('a.js', 'function value() { return 1; }', 'function value() { return 2; }'),
+])
+def test_native_live_protocol_certifies_valid_syntax(filename, old, new, tmp_path):
+    """A declined malformed parse must not turn all native semantic results into failures."""
+    import json
+    from pathlib import Path
+    import intentumdiff
+    from intentumdiff.rust_core import _load_backend
+    wasm = str(Path(intentumdiff.__file__).parent / 'wasm')
+    result = json.loads(_load_backend().live_diff_contents_json(
+        str(tmp_path), filename, old, new, '{}', wasm))
+
+    assert 'fallback' not in result
+    assert 'fallback_code' not in result
     diff = result['diff']
-    assert diff['is_fallback'] and not diff['is_style_only']
-    assert diff['has_semantic_changes'] and len(diff['changes']) == 1
-    assert diff['metadata']['semantic_contract'] == 'rust_source_fallback_v1'
-    assert diff['change_groups'][0]['metadata']['semantic_equivalence'] == 'unknown'
+    assert not diff['is_fallback'] and not diff['parse_errors']
+    assert diff['has_semantic_changes'] and diff['changes']
+    assert not diff['is_style_only']

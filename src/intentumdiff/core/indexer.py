@@ -30,17 +30,11 @@ Pass a no-op lambda to suppress events for a specific call::
 
 Caching
 -------
-When the :class:`~intentumdiff.differ.SemanticDiffer` was created with a
-``DiffConfig.cache_path``, two levels of caching apply automatically:
-
-* **Parse-tree cache** — each file's :class:`~intentumdiff.core.models.SemanticNode`
-  is cached keyed by content hash.  Re-indexing the same file content skips
-  the Wasm call entirely.
-
-* **Symbol-index cache** — after :meth:`Indexer.index_repo` finishes, the
-  resulting symbol and reference tables are stored in SQLite keyed by
-  ``(repo_root, commit_sha)``.  A subsequent call for the *same* commit returns
-  the cached index immediately (unless *force=True*).
+When ``DiffConfig.cache_path`` is set, the verified parser-level cache remains
+available through ``SemanticDiffer``. The historical repository symbol-index
+cache and LSP hover-map cache are bypassed in 0.0.2: their keys do not capture
+Rust/parser identity, indexing completeness, or LSP workspace/server state.
+Returning a stale index is worse than recomputing it. See Python #189-192.
 """
 
 from __future__ import annotations
@@ -53,6 +47,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 
 from intentumdiff.core.diffignore import load_diffignore
+from intentumdiff.rust_core import attach_lsp_type_map
 
 if TYPE_CHECKING:
     from intentumdiff.core.index import SemanticIndex
@@ -164,41 +159,48 @@ def _make_index_key(repo_root: str, commit_sha: str) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def _parse_catfile_output(
-    buf: bytes,
-    sha_to_path: "dict[str, str]",
-) -> "list[tuple[str, str]]":
-    """Parse ``git cat-file --batch`` stdout into ``(path, content)`` pairs."""
-    files: list[tuple[str, str]] = []
+def _parse_catfile_output(buf: bytes) -> dict[str, str | None]:
+    """Decode complete Git batch responses; None marks an intentionally skipped binary.
+
+    A missing object, bad header, or truncated content is not a binary file.
+    Such failures must abort indexing instead of silently dropping source files.
+    """
+    blobs: dict[str, str | None] = {}
     i = 0
     n = len(buf)
     while i < n:
         nl = buf.find(b"\n", i)
         if nl == -1:
-            break
-        header = buf[i:nl].decode("ascii", errors="replace")
+            raise RuntimeError("Incomplete git cat-file batch response header")
+        try:
+            header = buf[i:nl].decode("ascii", errors="strict")
+        except UnicodeDecodeError as exc:
+            raise RuntimeError("Invalid git cat-file batch response header") from exc
         i = nl + 1
         parts = header.split()
-        # Expected: "<sha> blob <size>"; skip "missing" / non-blob entries.
-        if len(parts) < 3 or parts[1] != "blob":
-            continue
+        if len(parts) == 2 and parts[1] == "missing":
+            raise RuntimeError(f"Git blob {parts[0]} is missing")
+        if len(parts) != 3 or parts[1] != "blob":
+            raise RuntimeError(f"Unexpected git cat-file batch response: {header!r}")
+        sha = parts[0]
+        if sha in blobs:
+            raise RuntimeError(f"Duplicate git cat-file batch response for {sha}")
         try:
             size = int(parts[2])
-        except ValueError:
-            continue
+        except ValueError as exc:
+            raise RuntimeError(f"Invalid git cat-file batch size for {sha}") from exc
+        if size < 0 or i + size >= n or buf[i + size] != 0x0A:
+            raise RuntimeError(f"Truncated git cat-file batch payload for {sha}")
         content_bytes = buf[i : i + size]
-        i += size + 1  # skip trailing \n
-        if b"\x00" in content_bytes[:8192]:  # binary heuristic
-            continue
-        path = sha_to_path.get(parts[0], "")
-        if not path:
+        i += size + 1  # consume the required trailing newline
+        if b"\x00" in content_bytes[:8192]:
+            blobs[sha] = None  # binary: intentionally excluded from text indexing
             continue
         try:
-            content = content_bytes.decode("utf-8", errors="strict")
+            blobs[sha] = content_bytes.decode("utf-8", errors="strict")
         except UnicodeDecodeError:
-            content = content_bytes.decode("utf-8", errors="replace")
-        files.append((path, content))
-    return files
+            blobs[sha] = content_bytes.decode("utf-8", errors="replace")
+    return blobs
 
 
 def _collect_blob_files(
@@ -206,61 +208,65 @@ def _collect_blob_files(
     ref: str,
     diffignore: Any,
 ) -> "tuple[list[tuple[str, str]], list[str]]":
-    """Return all text files at *ref* as ``(relative_path, decoded_content)``.
+    """Return every non-ignored text path at *ref*, including shared-content blobs.
 
-    Shells to the git CLI (#98, A2.4.3): ``git ls-tree -r`` lists every blob and a
-    single ``git cat-file --batch`` reads them through git's optimised pack reader.
-    Binary blobs (NUL-byte heuristic in :func:`_parse_catfile_output`) are skipped.
-
-    Returns ``(files, ignored_files)`` where *ignored_files* are the paths excluded
-    by *diffignore*.
+    Git stores identical file contents under one blob SHA. Batch-read each unique
+    SHA once, then expand that content against the original ls-tree path list;
+    collapsing SHA -> one path silently drops files from semantic indexing.
     """
     from intentumdiff.vcs.git_cli import run_git_bytes  # noqa: PLC0415
 
     ignored_files: list[str] = []
-    sha_to_path: dict[str, str] = {}
-    # ls-tree -r -z: "<mode> <type> <sha>\t<path>\0" per entry.
-    for entry in run_git_bytes(repo_root, ["ls-tree", "-r", "-z", ref]).split(b"\0"):
+    paths_in_tree_order: list[tuple[str, str]] = []
+    # Git's -z output always terminates every record with NUL. Validating
+    # the later cat-file blobs cannot discover paths lost from this inventory.
+    tree_bytes = run_git_bytes(repo_root, ["ls-tree", "-r", "-z", ref])
+    if tree_bytes and not tree_bytes.endswith(b"\x00"):
+        raise RuntimeError("Incomplete git ls-tree -z output: missing NUL delimiter")
+    for entry in tree_bytes.split(b"\x00"):
         if not entry:
             continue
-        meta, _tab, raw_path = entry.partition(b"\t")
+        meta, separator, raw_path = entry.partition(b"\t")
         parts = meta.split()
-        if len(parts) < 3 or parts[1] != b"blob":
+        if separator != b"\t" or not raw_path or len(parts) != 3:
+            raise RuntimeError(f"Malformed git ls-tree entry: {entry[:128]!r}")
+        if parts[1] == b"commit":
+            # Gitlinks are submodules, not readable blobs at this tree.
             continue
+        if parts[1] != b"blob":
+            raise RuntimeError(f"Unexpected git ls-tree object type: {parts[1]!r}")
         path = raw_path.decode("utf-8", errors="replace")
         if diffignore and diffignore.is_ignored(path):
             ignored_files.append(path)
             continue
-        sha_to_path[parts[2].decode("ascii", errors="replace")] = path
+        sha = parts[2].decode("ascii", errors="replace")
+        paths_in_tree_order.append((path, sha))
 
-    if not sha_to_path:
+    if not paths_in_tree_order:
         return [], ignored_files
 
-    shas_input = "\n".join(sha_to_path).encode()
+    # The caller needs all paths, but cat-file needs only one request per blob.
+    shas_input = "\n".join(dict.fromkeys(sha for _, sha in paths_in_tree_order)).encode()
     out = run_git_bytes(repo_root, ["cat-file", "--batch"], input_bytes=shas_input)
-    return _parse_catfile_output(out, sha_to_path), ignored_files
-
-
-def _attach_type_info(
-    node: "SemanticNode",
-    type_map: dict[str, str],
-) -> "SemanticNode":
-    """Return a copy of *node* tree with ``type_info`` set from *type_map*.
-
-    ``SemanticNode`` is frozen so we must rebuild changed nodes from the leaves
-    up.  Only nodes whose id appears in *type_map* are rebuilt.
-    """
-    from intentumdiff.core.models import SemanticNode  # noqa: PLC0415
-
-    new_children = [_attach_type_info(c, type_map) for c in node.children]
-    if node.id in type_map or new_children != list(node.children):
-        return node.model_copy(
-            update={
-                "children": new_children,
-                **({"type_info": type_map[node.id]} if node.id in type_map else {}),
-            }
+    decoded_by_sha = _parse_catfile_output(out)
+    requested = set(sha for _, sha in paths_in_tree_order)
+    missing = requested.difference(decoded_by_sha)
+    if missing:
+        raise RuntimeError(
+            "Incomplete git cat-file batch response: missing blob(s) "
+            + ", ".join(sorted(missing)[:5])
         )
-    return node
+    unexpected = set(decoded_by_sha).difference(requested)
+    if unexpected:
+        raise RuntimeError(
+            "Unexpected git cat-file batch blob(s): " + ", ".join(sorted(unexpected)[:5])
+        )
+    files: list[tuple[str, str]] = []
+    for path, sha in paths_in_tree_order:
+        content = decoded_by_sha[sha]
+        if content is not None:  # only known binary blobs may be omitted
+            files.append((path, content))
+    return files, ignored_files
 
 
 # ---------------------------------------------------------------------------
@@ -363,8 +369,8 @@ class Indexer:
             Progress callback for this call.  Falls back to the callback
             passed to ``__init__`` when ``None``.
         force:
-            Re-index even if a cached symbol index already exists for this
-            commit.  Useful after a plugin or wasm binary update.
+            Retained for API compatibility. Indexing always recomputes the
+            symbol index in 0.0.2 (the unproven cache is disabled).
 
         Returns
         -------
@@ -372,41 +378,13 @@ class Indexer:
             Fully built index.  Check :attr:`IndexResult.from_cache` to
             determine whether the symbol table was loaded from cache.
         """
-        from intentumdiff.vcs.git_cli import (  # noqa: PLC0415
-            resolve_repo_root,
-            run_git_bytes,
-        )
+        from intentumdiff.vcs.git_cli import resolve_repo_root  # noqa: PLC0415
 
         repo_root = resolve_repo_root(repo_path)
-        commit_sha = (
-            run_git_bytes(repo_root, ["rev-parse", "--verify", ref]).decode().strip()
-        )
         callback = on_progress or self._on_progress
 
-        # ── Fast path: cached symbol index ────────────────────────────────
-        if not force and self._differ._cache is not None:
-            index_key = _make_index_key(repo_root, commit_sha)
-            cached = self._differ._cache.get_symbol_index(index_key)
-            if cached is not None:
-                logger.debug(
-                    "Symbol index cache hit for %s @ %s",
-                    repo_root,
-                    commit_sha[:8],
-                )
-                from intentumdiff.core.index import SemanticIndex  # noqa: PLC0415
-
-                sem_index = SemanticIndex()
-                symbols_json, refs_json = cached
-                sem_index.load_symbol_table_json(symbols_json)
-                sem_index.load_reference_table_json(refs_json)
-                return IndexResult(
-                    files_indexed=0,
-                    files_skipped=0,
-                    errors=[],
-                    semantic_index=sem_index,
-                    from_cache=True,
-                )
-
+        # Always re-index: historical symbol-cache entries lack Rust/parser
+        # identity and failed-file provenance (#189, #190).
         # ── Collect all text files in commit tree ─────────────────────────
         diffignore = load_diffignore(repo_root)
         files, ignored_files = _collect_blob_files(repo_root, ref, diffignore)
@@ -415,13 +393,7 @@ class Indexer:
         result.files_ignored = len(ignored_files)
         result.ignored_files = ignored_files
 
-        # ── Persist symbol index ───────────────────────────────────────────
-        if self._differ._cache is not None:
-            index_key = _make_index_key(repo_root, commit_sha)
-            self._store_symbol_index(
-                result.semantic_index, index_key, result.files_indexed
-            )
-
+        # Do not persist an index whose provenance/completeness cannot be verified.
         return result
 
     def index_directory(
@@ -460,8 +432,13 @@ class Indexer:
                 continue
             try:
                 content = path.read_text(encoding="utf-8", errors="replace")
-            except OSError:
-                continue
+            except OSError as exc:
+                # Host-I/O failure is not an intentional ignore or unsupported
+                # parser. Returning a successful partial directory index would
+                # conceal source files from downstream semantic analysis (#203).
+                raise RuntimeError(
+                    f"Failed to read directory index source {rel_posix!r}: {exc}"
+                ) from exc
             files.append((rel_posix, content))
 
         result = self._index_files(files, on_progress=callback)
@@ -589,44 +566,13 @@ class Indexer:
             for fast local servers, lower for shared or rate-limited servers.
         """
         import asyncio
-        from intentumdiff.vcs.git_cli import (  # noqa: PLC0415
-            resolve_repo_root,
-            run_git_bytes,
-        )
+        from intentumdiff.vcs.git_cli import resolve_repo_root  # noqa: PLC0415
 
         repo_root = resolve_repo_root(repo_path)
-        commit_sha = (
-            run_git_bytes(repo_root, ["rev-parse", "--verify", ref]).decode().strip()
-        )
         callback = on_progress or self._on_progress
 
-        # LSP-enriched indexes are stored under a separate key so they don't
-        # collide with plain (non-enriched) index_repo cache entries.
-        lsp_index_key = _make_index_key(repo_root, "lsp:" + commit_sha)
-
-        # ── Fast path: cached LSP symbol index ────────────────────────────
-        if not force and self._differ._cache is not None:
-            cached = self._differ._cache.get_symbol_index(lsp_index_key)
-            if cached is not None:
-                logger.debug(
-                    "LSP symbol index cache hit for %s @ %s",
-                    repo_root,
-                    commit_sha[:8],
-                )
-                from intentumdiff.core.index import SemanticIndex  # noqa: PLC0415
-
-                sem_index = SemanticIndex()
-                symbols_json, refs_json = cached
-                sem_index.load_symbol_table_json(symbols_json)
-                sem_index.load_reference_table_json(refs_json)
-                return IndexResult(
-                    files_indexed=0,
-                    files_skipped=0,
-                    errors=[],
-                    semantic_index=sem_index,
-                    from_cache=True,
-                )
-
+        # Always re-index: LSP type state, parser identity and failed-file
+        # provenance are missing from historical cache keys (#189, #190).
         # Collect files (parallel blob reads; same filtering as index_repo)
         diffignore = load_diffignore(repo_root)
         files, ignored_files = await asyncio.to_thread(
@@ -642,9 +588,7 @@ class Indexer:
         result.files_ignored = len(ignored_files)
         result.ignored_files = ignored_files
 
-        if self._differ._cache is not None:
-            self._store_symbol_index(result.semantic_index, lsp_index_key, result.files_indexed)
-
+        # An LSP-enriched index is not reusable without server/workspace identity.
         return result
 
     async def _index_files_lsp(
@@ -684,7 +628,6 @@ class Indexer:
         # Error:   any other exception
 
         sem = asyncio.Semaphore(max(1, file_concurrency))
-        cache = self._differ._cache
         differ = self._differ  # captured for executor
 
         # Use a single-worker executor so Wasm parse calls are serialised.
@@ -725,22 +668,20 @@ class Indexer:
                 enricher = enrichers.get(language)
                 enriched_count = 0
                 if enricher is not None:
-                    # Check hover-map cache first.
-                    type_map: dict[str, str] | None = None
-                    hm_key: str | None = None
-                    if cache is not None:
-                        hm_key = cache.hover_map_key(content, language)
-                        type_map = cache.get_hover_map(hm_key)
-                    if type_map is None:
-                        try:
-                            type_map = await enricher.enrich(filename, content, node)
-                        except Exception:
-                            type_map = None
-                        if type_map and hm_key is not None and cache is not None:
-                            cache.put_hover_map(hm_key, type_map)
-                    if type_map:
-                        enriched_count = len(type_map)
-                        node = _attach_type_info(node, type_map)
+                    # Hover-map caching lacks file/workspace/server provenance
+                    # and cannot certify a type result (#191).
+                    try:
+                        type_map = await enricher.enrich(filename, content, node)
+                        if not isinstance(type_map, dict):
+                            raise TypeError("LSP enricher returned an invalid type-map DTO")
+                        if type_map:
+                            # Rust owns semantic-tree mutation and validation.
+                            node = attach_lsp_type_map(node, type_map)
+                            enriched_count = len(type_map)
+                    except Exception as exc:  # noqa: BLE001
+                        # Do not turn a requested enrichment failure into an
+                        # apparently successful bare semantic index (#192).
+                        return filename, "ERROR", exc, 0
                 return filename, language, node, enriched_count
 
         tasks = [asyncio.create_task(_process_one(f, c)) for f, c in files]

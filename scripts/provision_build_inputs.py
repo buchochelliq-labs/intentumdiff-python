@@ -27,11 +27,17 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CORE_REPO = "https://github.com/buchochelliq-labs/intentumdiff-core"
-# Immutable reviewed engine candidate for this binding. Override for an explicit
-# integration build; never let a moving branch silently change the engine under CI.
-CORE_REF = os.environ.get("INTENTUMDIFF_CORE_REF", "60237b1d9f820e8ebaffb718e8e4a5c752d9cda1")
-# Reviewed registry RC: source-span/SAS fixes plus earlier Svelte and JS/TS fixes.
-REGISTRY_REF = "59d7c91fa4e466b4130628202e6a126792b6f9d7"
+# Immutable Core #204 NodeFacts-lifecycle parity candidate based on Core #187: metered Wasmtime 48.0.7, verified
+# parser availability, Rust-owned semantic promotions and fail-closed live
+# diff/commit-review completeness and Rust-owned live provenance. Four-platform CI must independently pass.
+# Override only for deliberate integration builds, not a moving branch.
+# Core #187 now emits explicit guardrail_violations even for valid empty Rust
+# batch inventories; Python #202 rejects omitted fields rather than defaulting.
+CORE_REF = os.environ.get("INTENTUMDIFF_CORE_REF", "3995930d206c35758ba6525eebce49564c539fe1")
+# Reviewed registry RC candidate: source-anchored Astro, PO, PostScript, Proto, ReasonML, SAS, Svelte, Vue, VB.NET, M/Q#/PHP parser Wasm.
+# Registry PR #13 CI has vetted this immutable manifest; every staged byte
+# remains separately verified against its source artifact and SHA-256.
+REGISTRY_REF = "66792d264fbf27e444f40ea35614546dcca72886"
 
 
 def load_reviewed_registry(get, api: str, org: str):
@@ -79,6 +85,146 @@ def stage_wasm(wasm_dir: str | None) -> None:
     if manifest.exists():
         shutil.copy2(manifest, WASM_DEST / manifest.name)
     print(f"staged {count} components into {WASM_DEST}")
+
+
+
+# Release bundle provenance is separate from the user-facing parser plugin
+# registry. These are host packaging checks, not Python diff semantics.
+REQUIRED_RENDERER_FILES = frozenset({
+    "html_renderer.wasm", "llm_renderer.wasm",
+    "patch_renderer.wasm", "terminal_renderer.wasm",
+})
+
+
+def reviewed_renderer_bundle(registry: dict) -> tuple[str, str, str, dict[str, str]]:
+    """Fail closed unless all four renderers have immutable, reviewed identity."""
+    bundle = registry.get("renderer_components")
+    if not isinstance(bundle, dict):
+        raise ValueError("registry renderer_components bundle is missing")
+    if set(bundle) != {"repository", "ref", "artifact", "wasm_checksums"}:
+        raise ValueError("registry renderer_components fields differ from the reviewed contract")
+    repo, ref, artifact = (bundle["repository"], bundle["ref"], bundle["artifact"])
+    if repo != "intentumdiff-core" or artifact != "renderer-components":
+        raise ValueError("renderer artifact must come from the reviewed core repository")
+    if not isinstance(ref, str) or len(ref) != 40 or any(c not in "0123456789abcdef" for c in ref):
+        raise ValueError("renderer artifact source must be an immutable 40-digit git SHA")
+    pins = bundle["wasm_checksums"]
+    if not isinstance(pins, dict) or set(pins) != REQUIRED_RENDERER_FILES:
+        raise ValueError("renderer bundle must pin exactly html, llm, patch and terminal")
+    for name, digest in pins.items():
+        if not isinstance(digest, str) or len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
+            raise ValueError(f"renderer {name} has no valid SHA-256 pin")
+    return repo, ref, artifact, pins
+
+
+def verified_renderer_archive(blob: bytes, pins: dict[str, str]) -> dict[str, bytes]:
+    """Verify the exact CI artifact bytes before staging any renderer.
+
+    No 'newest successful' fallback, missing checksum bypass, partial rendering
+    set, unexpected Wasm file or duplicate member may enter a release wheel.
+    """
+    import hashlib
+    import io
+    import zipfile
+
+    if set(pins) != REQUIRED_RENDERER_FILES:
+        raise ValueError("renderer artifact has an incomplete pin inventory")
+    checked: dict[str, bytes] = {}
+    with zipfile.ZipFile(io.BytesIO(blob)) as archive:
+        for info in archive.infolist():
+            if info.is_dir() or not info.filename.endswith(".wasm"):
+                continue
+            # The reviewed Core artifact publishes four flat exact names.
+            # Do not normalize an ambiguous/path-traversing ZIP member into a pin.
+            name = info.filename
+            if "/" in name or "\\" in name or name not in REQUIRED_RENDERER_FILES:
+                raise ValueError(f"unexpected renderer component {name!r}")
+            if name in checked:
+                raise ValueError(f"duplicate renderer component {name}")
+            payload = archive.read(info)
+            actual = hashlib.sha256(payload).hexdigest()
+            if pins[name] != actual:
+                raise ValueError(f"{name} CHECKSUM MISMATCH (registry {pins[name]}, artifact {actual})")
+            checked[name] = payload
+    missing = REQUIRED_RENDERER_FILES - checked.keys()
+    if missing:
+        raise ValueError(f"renderer-components artifact missing {sorted(missing)}")
+    return checked
+
+
+
+def write_reviewed_wasm_manifest(
+    wasm_dir: Path,
+    parser_pins: dict[str, str],
+    renderer_pins: dict[str, str],
+    sources: dict[str, dict],
+) -> Path:
+    """Attest registry-approved Wasm bytes AND the CI artifact that supplied each.
+
+    A locally generated digest is never accepted as an independent source pin.
+    Every staged component needs an immutable registry checksum, source commit,
+    CI artifact identity and exact downloaded archive checksum before packaging.
+    """
+    script_dir = str(Path(__file__).resolve().parent)
+    if script_dir not in sys.path:
+        sys.path.insert(0, script_dir)
+    from wasm_provenance import MANIFEST_FILENAME, generate_manifest, verify_manifest, write_manifest
+
+    overlap = set(parser_pins) & set(renderer_pins)
+    if overlap:
+        raise ValueError(f"parser/renderer registry pins overlap: {sorted(overlap)}")
+    expected = {**parser_pins, **renderer_pins}
+    if not expected:
+        raise ValueError("no immutable Wasm pins available for provenance")
+    manifest = generate_manifest(wasm_dir)
+    staged = manifest["artifacts"]
+    extra = set(staged) - set(expected)
+    missing = set(expected) - set(staged)
+    if extra or missing:
+        raise ValueError(
+            "staged Wasm inventory differs from reviewed registry: "
+            f"extra={sorted(extra)}, missing={sorted(missing)}"
+        )
+    if set(sources) != set(expected):
+        raise ValueError(
+            "component source inventory differs from reviewed registry: "
+            f"extra={sorted(set(sources) - set(expected))}, "
+            f"missing={sorted(set(expected) - set(sources))}"
+        )
+    for name, pin in expected.items():
+        if staged[name]["sha256"] != pin:
+            raise ValueError(f"staged Wasm {name} does not match reviewed registry SHA-256")
+        source = sources[name]
+        if not isinstance(source, dict) or set(source) != {
+            "repository", "commit", "artifact", "artifact_id",
+            "artifact_archive_sha256", "abi_target",
+        }:
+            raise ValueError(f"staged Wasm {name} has incomplete source attribution")
+        repo, commit = source["repository"], source["commit"]
+        if (not isinstance(repo, str)
+                or not repo.startswith("https://github.com/buchochelliq-labs/intentumdiff-")
+                or not isinstance(commit, str) or len(commit) != 40
+                or any(c not in "0123456789abcdef" for c in commit)):
+            raise ValueError(f"staged Wasm {name} lacks immutable source repository/commit")
+        archive_sha = source["artifact_archive_sha256"]
+        if (not isinstance(archive_sha, str) or len(archive_sha) != 64
+                or any(c not in "0123456789abcdef" for c in archive_sha)
+                or not isinstance(source["artifact_id"], int)
+                or isinstance(source["artifact_id"], bool)
+                or source["artifact_id"] < 1
+                or source["artifact"] not in ("parser-wasm", "renderer-components")
+                or (source["artifact"] == "renderer-components") != (name in renderer_pins)
+                or (source["abi_target"] is not None
+                    and not isinstance(source["abi_target"], str))):
+            raise ValueError(f"staged Wasm {name} has invalid CI artifact attribution")
+        staged[name]["source"] = dict(source)
+    # This is the immutable *registry* commit, never mislabelled as a component
+    # build commit; each component records its own actual source commit above.
+    manifest["registry_commit"] = REGISTRY_REF
+    verify_manifest(wasm_dir, manifest)
+    output = wasm_dir / MANIFEST_FILENAME
+    write_manifest(manifest, output)
+    return output
 
 
 # ── Parser components from sibling-repo CI artifacts (Phase D) ────────────────
@@ -201,8 +347,11 @@ def stage_wasm_from_artifacts(token: str, org: str = "buchochelliq-labs") -> int
     # registry PR through the vet gate — never a bypass here.
     registry = load_reviewed_registry(get, api, org)
     print(f"registry commit: {REGISTRY_REF}")
+    renderer_repo, renderer_ref, renderer_artifact, renderer_pins = reviewed_renderer_bundle(registry)
+    print(f"renderer bundle: {renderer_repo}@{renderer_ref} ({len(renderer_pins)} SHA-256 pins)")
     pins: dict[str, str] = {}
     refs: dict[str, str] = {}
+    provenance_sources: dict[str, dict] = {}
     for plugin, entry in (registry.get("plugins") or {}).items():
         pins.update(entry.get("wasm_checksums") or {})
         if entry.get("ref"):
@@ -234,6 +383,10 @@ def stage_wasm_from_artifacts(token: str, org: str = "buchochelliq-labs") -> int
             # at a different build, and the checksum gate then fires for the wrong
             # reason, reporting "the component changed" when only the commit did.
             ref = refs.get(name)
+            if (not isinstance(ref, str) or len(ref) != 40
+                    or any(c not in "0123456789abcdef" for c in ref)):
+                missing.append((name, "registry has no immutable parser source commit"))
+                continue
             wr = _successful_artifact_runs(get, api, org, name, ref)
             if not wr:
                 missing.append((name, f"no successful run at pinned ref {ref[:8]}" if ref
@@ -280,97 +433,77 @@ def stage_wasm_from_artifacts(token: str, org: str = "buchochelliq-labs") -> int
                             missing.append((name, f"{out} CHECKSUM MISMATCH (registry pins "
                                                   f"{pinned[:16]}..., artifact is {digest[:16]}...)"))
                             continue
+                        if out in provenance_sources:
+                            missing.append((name, f"duplicate staged component {out}"))
+                            continue
+                        metadata = (registry.get("plugins") or {}).get(name, {})
+                        abi_target = metadata.get("abi_target")
+                        if not isinstance(abi_target, str) or not abi_target:
+                            missing.append((name, f"{out} has no registry WIT/ABI target"))
+                            continue
+                        provenance_sources[out] = {
+                            "repository": f"https://github.com/{org}/{name}",
+                            "commit": ref,
+                            "artifact": "parser-wasm",
+                            "artifact_id": art["id"],
+                            "artifact_archive_sha256": _hashlib.sha256(blob).hexdigest(),
+                            "abi_target": abi_target,
+                        }
                         (WASM_DEST / out).write_bytes(payload)
                         staged += 1
         except urllib.error.HTTPError as exc:
             missing.append((name, f"HTTP {exc.code} at {stage} ({exc.reason})"))
     # ---- renderers -------------------------------------------------------------------
-    # Renderers are NOT parser repos - they are crates in intentumdiff-core, published as
-    # the `renderer-components` artifact since core#26. Nothing fetched them before, so the
-    # suite ran with ZERO renderers loaded and still reported green: every test touching
-    # --format html|patch|llm|terminal was skipping, hitting a Python fallback, or asserting
-    # on degraded output, with nothing distinguishing those from real coverage (#22).
+    # A renderer bundle is an immutable core artifact, not one of the parser
+    # repos. The exact core commit and *each* of its four payload digests are
+    # independently reviewed in registry.yaml. Never choose the newest
+    # successful core build or stage an unpinned/mismatched component.
     stage = "renderers"
     try:
-        runs = _successful_artifact_runs(get, api, org, "intentumdiff-core")
+        runs = _successful_artifact_runs(get, api, org, renderer_repo, renderer_ref)
         art = None
         for run in runs:
             arts = _json.loads(get(run["artifacts_url"]))
             art = next((a for a in arts.get("artifacts", [])
-                        if a["name"] == "renderer-components" and not a.get("expired")), None)
+                        if a["name"] == renderer_artifact and not a.get("expired")), None)
             if art:
                 break
         if art is None:
-            missing.append(("intentumdiff-core", "no renderer-components artifact"))
+            missing.append((renderer_repo, f"no {renderer_artifact} artifact at reviewed ref {renderer_ref}"))
         else:
             blob = get(art["archive_download_url"])
-            found = 0
-            with zipfile.ZipFile(io.BytesIO(blob)) as z:
-                for member in z.namelist():
-                    if not member.endswith(".wasm"):
-                        continue
-                    out = Path(member).name
-                    for _prefix in ("intentumdiff_", "intentdiff_"):
-                        if out.startswith(_prefix):
-                            out = out[len(_prefix):]
-                            break
-                    payload = z.read(member)
-                    digest = _hashlib.sha256(payload).hexdigest()
-                    pinned = pins.get(out)
-                    # Renderers are not all pinned in the registry today. Where a pin EXISTS
-                    # it is enforced exactly as for parsers; where it does not, the component
-                    # is staged and the fact is printed rather than silently accepted, so an
-                    # unpinned component is visible instead of indistinguishable from a
-                    # verified one.
-                    if pinned is not None and pinned != digest:
-                        missing.append(("intentumdiff-core",
-                                        f"{out} CHECKSUM MISMATCH (registry pins "
-                                        f"{pinned[:16]}..., artifact is {digest[:16]}...)"))
-                        continue
-                    if pinned is None:
-                        print(f"  note: {out} is not pinned in the registry (staged unverified)")
-                    (WASM_DEST / out).write_bytes(payload)
+            try:
+                checked = verified_renderer_archive(blob, renderer_pins)
+            except (ValueError, zipfile.BadZipFile) as exc:
+                missing.append((renderer_repo, str(exc)))
+            else:
+                for name, payload in checked.items():
+                    provenance_sources[name] = {
+                        "repository": f"https://github.com/{org}/{renderer_repo}",
+                        "commit": renderer_ref,
+                        "artifact": renderer_artifact,
+                        "artifact_id": art["id"],
+                        "artifact_archive_sha256": _hashlib.sha256(blob).hexdigest(),
+                        "abi_target": None,
+                    }
+                    (WASM_DEST / name).write_bytes(payload)
                     staged += 1
-                    found += 1
-            # Fail closed on a partial set. A consumer that stages 3 of 4 renderers loses one
-            # silently and reports green - the exact failure this exists to end.
-            _EXPECTED_RENDERERS = 4
-            if found < _EXPECTED_RENDERERS:
-                missing.append(("intentumdiff-core",
-                                f"only {found}/{_EXPECTED_RENDERERS} renderer components in "
-                                f"the artifact"))
+                print(f"  verified and staged {len(checked)}/{len(REQUIRED_RENDERER_FILES)} renderer components")
     except urllib.error.HTTPError as exc:
-        missing.append(("intentumdiff-core", f"HTTP {exc.code} at {stage} ({exc.reason})"))
+        missing.append((renderer_repo, f"HTTP {exc.code} at {stage} ({exc.reason})"))
 
-    # Regenerate the provenance manifest for what was ACTUALLY staged.
-    #
-    # `stage_wasm()` copies a manifest if one happens to sit beside the source components;
-    # this artifact path had none, so after an artifact-based staging the manifest was stale
-    # or absent and the loader's provenance check either compared against the previous
-    # build's hashes or could not run at all. That check is the last line between a
-    # substituted component and the engine, so leaving it toothless in the path CI actually
-    # uses defeats it.
-    #
-    # The manifest is a per-build artifact and gitignored, so it is generated here rather
-    # than committed anywhere.
-    try:
-        sys.path.insert(0, str(Path(__file__).resolve().parent))
-        from wasm_provenance import MANIFEST_FILENAME, generate_manifest, write_manifest
-
-        write_manifest(generate_manifest(WASM_DEST), WASM_DEST / MANIFEST_FILENAME)
-        print(f"wrote {MANIFEST_FILENAME} for {staged} staged component(s)")
-    except Exception as exc:  # noqa: BLE001
-        # Do not fail provisioning over the manifest: the components are staged and usable,
-        # and a hard failure here would block a build for a diagnostic aid. Say so loudly
-        # instead - a silent absence is what made this worth fixing.
-        print(f"WARNING: could not write {MANIFEST_FILENAME}: {type(exc).__name__}: {exc}")
-
-    print(f"staged {staged} components into {WASM_DEST}")
+    # Never invent source attestation by hashing whatever was staged. Verify the
+    # exact reviewed 69-parser/four-renderer registry inventory before generating
+    # a shipping manifest. Any provenance failure aborts provisioning.
     if missing:
         print(f"MISSING ({len(missing)}):")
         for m in missing:
             print("  ", m)
-    return len(missing)
+        return len(missing)
+    manifest_path = write_reviewed_wasm_manifest(WASM_DEST, pins, renderer_pins, provenance_sources)
+    print(f"wrote {manifest_path.name} for {staged} registry-approved component(s)")
+    print(f"staged {staged} components into {WASM_DEST}")
+    return 0
 
 
 def main() -> None:

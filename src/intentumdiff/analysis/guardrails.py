@@ -108,17 +108,18 @@ def apply_guardrails_to_diff(
         return diff
 
     from dataclasses import asdict
-    from intentumdiff.rust_core import _c_abi_call
+    from intentumdiff.rust_core import _c_abi_call, _require_complete_batch_diff_dto
 
     policy = load_guardrail_policy(diff.new_filename or diff.old_filename,
                                    explicit_path=config.guardrail_policy_path)
-    result = SemanticDiff.model_validate(_c_abi_call("apply_guardrail_policy", json.dumps({
+    response = _c_abi_call("apply_guardrail_policy", json.dumps({
         "diff": diff.model_dump(mode="json"),
         "old_tree": old_tree.model_dump(mode="json") if old_tree else None,
         "new_tree": new_tree.model_dump(mode="json") if new_tree else None,
         "old_source": old_source, "new_source": new_source,
         "rules": [asdict(rule) for rule in policy.rules],
-    })))
+    }))
+    result = SemanticDiff.model_validate(_require_complete_batch_diff_dto(response))
     violations = result.guardrail_violations[len(diff.guardrail_violations):]
 
     if diagnostics is not None and diagnostics.enabled:

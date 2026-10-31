@@ -1,0 +1,370 @@
+"""Rust-owned incompleteness must be forwarded by the Python live transport.
+
+These tests intentionally mock the Rust ABI *response*, not any semantic
+classifier. They reject Python recovery after an explicitly typed Rust decline.
+"""
+
+from __future__ import annotations
+
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from intentumdiff.core.models import SemanticDiff
+from intentumdiff.live_server import LiveServer, _ParsedRequest, _RustLiveDecline
+from intentumdiff.sources.live_buffer_source import LiveBufferSource
+
+
+def _server(tmp_path):
+    differ = MagicMock()
+    differ._config.diagnostics = False
+    differ._config.plugin_fuel = 100_000_000
+    differ._config.model_dump_json.return_value = "{}"
+    differ._config.model_copy.return_value = differ._config
+    return LiveServer(differ, repo_path=tmp_path, debounce=0), differ
+
+
+def _error(seq, code, message, op):
+    return {"op": op, "seq": seq, "ok": False, "error": {"code": code, "message": message}}
+
+
+@pytest.mark.parametrize("name,content", [
+    ("edit.py", "def g("),
+    ("edit.js", "function g("),
+])
+@pytest.mark.parametrize("stream", [False, True])
+def test_typed_rust_direct_diff_decline_never_falls_back_to_python(
+    tmp_path, name, content, stream,
+):
+    server, differ = _server(tmp_path)
+    request = _ParsedRequest(
+        op="diff", seq=17, path=name, content=content, ref="HEAD",
+        edit_deltas=None, stream=stream,
+    )
+    source = LiveBufferSource(tmp_path, name, content, ref="HEAD")
+    sent = []
+    rust_decline = {
+        "fallback_code": "native_parse_incomplete",
+        "fallback": f"{name}: Incomplete or invalid syntax",
+    }
+    with patch("intentumdiff.rust_core.live_handle_diff", return_value=rust_decline), (
+        patch("intentumdiff.rust_core.live_error_response", side_effect=_error)
+    ):
+        server._process_request_with_source(source, request, sent.append)
+
+    assert sent == [_error(17, rust_decline["fallback_code"],
+                           rust_decline["fallback"], "diff")]
+    differ.diff.assert_not_called()
+
+
+def test_valid_rust_diff_remains_successful_without_python_recomputation(tmp_path):
+    server, differ = _server(tmp_path)
+    request = _ParsedRequest(
+        op="diff", seq=18, path="edit.py", content="def g():\n    return 2\n",
+        ref="HEAD", edit_deltas=None, stream=False,
+    )
+    source = LiveBufferSource(tmp_path, "edit.py", request.content, ref="HEAD")
+    valid = SemanticDiff(
+        old_filename="edit.py", new_filename="edit.py", language="python",
+        is_fallback=False, parse_errors=[],
+    ).model_dump(mode="json")
+    sent = []
+    with patch("intentumdiff.rust_core.live_handle_diff", return_value={"diff": valid}):
+        server._process_request_with_source(source, request, sent.append)
+
+    assert len(sent) == 1 and sent[0]["op"] == "diff" and sent[0]["ok"] is True
+    assert sent[0]["diff"]["is_fallback"] is False
+    assert sent[0]["diff"]["parse_errors"] == []
+    differ.diff.assert_not_called()
+
+
+def test_valid_streaming_emits_only_rust_certified_final_changes(tmp_path):
+    from intentumdiff.core.models import Change, ChangeType
+
+    server, differ = _server(tmp_path)
+    request = _ParsedRequest(
+        op="diff", seq=20, path="edit.py", content="def g():\n    return 2\n",
+        ref="HEAD", edit_deltas=None, stream=True,
+    )
+    source = LiveBufferSource(tmp_path, "edit.py", request.content, ref="HEAD")
+    valid = SemanticDiff(
+        old_filename="edit.py", new_filename="edit.py", language="python",
+        is_fallback=False, parse_errors=[], has_semantic_changes=True,
+        changes=[Change(change_type=ChangeType.MODIFICATION, description="real edit")],
+    ).model_dump(mode="json")
+    sent = []
+    with patch("intentumdiff.rust_core.live_handle_diff", return_value={"diff": valid}):
+        server._process_request_with_source(source, request, sent.append)
+
+    assert len(sent) == 2
+    assert sent[0]["op"] == "diff" and sent[0]["ok"] is True
+    assert sent[0]["event"]["phase"] == 3  # FINAL, not a Python synthetic stage
+    assert sent[0]["event"]["change"]["change_type"] == "MODIFICATION"
+    assert sent[1] == {"op": "diff", "seq": 20, "ok": True, "done": True}
+    differ.diff.assert_not_called()
+    differ.diff_stream_progressive.assert_not_called()
+
+
+def test_valid_unchanged_stream_has_only_successful_done(tmp_path):
+    server, differ = _server(tmp_path)
+    request = _ParsedRequest(
+        op="diff", seq=21, path="edit.py", content="x = 1\n",
+        ref="HEAD", edit_deltas=None, stream=True,
+    )
+    source = LiveBufferSource(tmp_path, "edit.py", request.content, ref="HEAD")
+    valid = SemanticDiff(
+        old_filename="edit.py", new_filename="edit.py", language="python",
+        is_fallback=False, parse_errors=[],
+    ).model_dump(mode="json")
+    sent = []
+    with patch("intentumdiff.rust_core.live_handle_diff", return_value={"diff": valid}):
+        server._process_request_with_source(source, request, sent.append)
+
+    assert sent == [{"op": "diff", "seq": 21, "ok": True, "done": True}]
+    differ.diff.assert_not_called()
+    differ.diff_stream_progressive.assert_not_called()
+
+
+def test_typed_rust_commit_decline_propagates_without_python_commit_fallback(tmp_path):
+    server, _ = _server(tmp_path)
+    commit_differ = MagicMock()
+    decline = {
+        "fallback_code": "native_parse_incomplete",
+        "fallback": "broken.js: Invalid syntax in commit",
+    }
+    with patch("intentumdiff.rust_core.live_handle_review", return_value=decline):
+        with pytest.raises(_RustLiveDecline) as exc:
+            server._compute_review(server._differ._config, commit_differ, "HEAD~1", "HEAD")
+    assert exc.value.code == decline["fallback_code"]
+    assert str(exc.value) == decline["fallback"]
+    commit_differ.diff_commit.assert_not_called()
+
+
+def test_typed_rust_commit_decline_reports_typed_review_error(tmp_path):
+    server, _ = _server(tmp_path)
+    decline = {
+        "fallback_code": "native_parse_incomplete",
+        "fallback": "broken.js: Invalid syntax in commit",
+    }
+    sent = []
+    with (
+        patch(
+            "intentumdiff.rust_core.live_parse_review_request",
+            return_value={"parsed": {"old_ref": "HEAD~1", "new_ref": "HEAD", "stream": False}},
+        ),
+        patch("intentumdiff.core.commit_differ.CommitDiffer") as differ_cls,
+        patch("intentumdiff.rust_core.live_handle_review", return_value=decline),
+        patch("intentumdiff.rust_core.live_error_response", side_effect=_error),
+    ):
+        server._process_review_request({"op": "review"}, 19, sent.append)
+
+    assert sent == [_error(19, decline["fallback_code"], decline["fallback"], "review")]
+    differ_cls.return_value.diff_commit.assert_not_called()
+
+
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("native_response", [
+    {"fallback": "Rust Core cannot certify this file"},
+    {},
+], ids=["legacy-untyped-decline", "missing-native-result"])
+def test_untyped_native_diff_decline_cannot_fall_through_to_python(
+    tmp_path, stream, native_response,
+):
+    server, differ = _server(tmp_path)
+    request = _ParsedRequest(
+        op="diff", seq=31, path="edit.py", content="def broken(",
+        ref="HEAD", edit_deltas=None, stream=stream,
+    )
+    source = LiveBufferSource(tmp_path, "edit.py", request.content, ref="HEAD")
+    sent = []
+    with (
+        patch("intentumdiff.rust_core.live_handle_diff", return_value=native_response),
+        patch("intentumdiff.rust_core.live_error_response", side_effect=_error),
+    ):
+        server._process_request_with_source(source, request, sent.append)
+
+    assert len(sent) == 1
+    assert sent[0]["op"] == "diff" and sent[0]["seq"] == 31
+    assert sent[0]["ok"] is False
+    assert sent[0]["error"]["code"] == "native_diff_uncertified"
+    assert sent[0]["error"]["message"].startswith("edit.py: ")
+    differ.diff.assert_not_called()
+    differ.diff_stream_progressive.assert_not_called()
+
+
+@pytest.mark.parametrize("fallback,parse_errors", [
+    (True, []),
+    (False, ["Invalid syntax near '('"]),
+], ids=["rust-source-fallback", "rust-parse-errors"])
+@pytest.mark.parametrize("stream", [False, True])
+def test_native_diff_with_incomplete_dto_is_not_advertised_as_success(
+    tmp_path, fallback, parse_errors, stream,
+):
+    server, differ = _server(tmp_path)
+    request = _ParsedRequest(
+        op="diff", seq=32, path="edit.py", content="def broken(",
+        ref="HEAD", edit_deltas=None, stream=stream,
+    )
+    source = LiveBufferSource(tmp_path, "edit.py", request.content, ref="HEAD")
+    invalid = SemanticDiff(
+        old_filename="edit.py", new_filename="edit.py", language="python",
+        is_fallback=fallback, parse_errors=parse_errors,
+    ).model_dump(mode="json")
+    sent = []
+    with (
+        patch("intentumdiff.rust_core.live_handle_diff", return_value={"diff": invalid}),
+        patch("intentumdiff.rust_core.live_error_response", side_effect=_error),
+    ):
+        server._process_request_with_source(source, request, sent.append)
+
+    assert len(sent) == 1 and sent[0]["ok"] is False
+    assert sent[0]["error"]["code"] == "native_parse_incomplete"
+    assert sent[0]["error"]["message"].startswith("edit.py: ")
+    differ.diff.assert_not_called()
+    differ.diff_stream_progressive.assert_not_called()
+
+
+def test_untyped_native_commit_decline_does_not_invoke_python_commit_path(tmp_path):
+    server, _ = _server(tmp_path)
+    commit_differ = MagicMock()
+    with patch(
+        "intentumdiff.rust_core.live_handle_review",
+        return_value={"fallback": "Rust Core cannot certify mixed-language review"},
+    ):
+        with pytest.raises(_RustLiveDecline) as exc:
+            server._compute_review(server._differ._config, commit_differ, "HEAD", "")
+    assert exc.value.code == "native_review_uncertified"
+    assert "Rust Core cannot certify" in str(exc.value)
+    commit_differ.diff_commit.assert_not_called()
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_incomplete_commit_dto_fails_closed_in_both_review_transports(tmp_path, stream):
+    from intentumdiff.core.models import CommitDiff
+
+    server, _ = _server(tmp_path)
+    bad_file = SemanticDiff(
+        old_filename="broken.js", new_filename="broken.js", language="javascript",
+        is_fallback=True, parse_errors=["Syntax error in broken.js"],
+        metadata={"engine_owner": "rust"},
+    )
+    invalid_review = CommitDiff(
+        old_ref="HEAD", new_ref="", file_diffs=[bad_file],
+    )
+    sent = []
+    with (
+        patch(
+            "intentumdiff.rust_core.live_parse_review_request",
+            return_value={"parsed": {"old_ref": "HEAD", "new_ref": "", "stream": stream}},
+        ),
+        patch("intentumdiff.core.commit_differ.CommitDiffer") as differ_cls,
+        patch("intentumdiff.rust_core.live_error_response", side_effect=_error),
+        patch.object(server, "_run_streaming_review", return_value=invalid_review),
+        patch("intentumdiff.rust_core.live_handle_review",
+              return_value={"commit_diff": invalid_review.model_dump(mode="json")}),
+    ):
+        server._process_review_request({"op": "review"}, 33, sent.append)
+
+    assert len(sent) == 1 and sent[0]["ok"] is False
+    assert sent[0]["error"]["code"] == "native_parse_incomplete"
+    assert "broken.js" in sent[0]["error"]["message"]
+    assert "Syntax error" in sent[0]["error"]["message"]
+    differ_cls.return_value.diff_commit.assert_not_called()
+
+
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("corruption", [
+    "missing_changes", "missing_change_groups", "missing_parse_errors",
+    "missing_guardrail_violations", "invalid_changes",
+    "invalid_has_semantic_changes", "invalid_is_style_only",
+    "invalid_is_fallback", "invalid_metadata",
+])
+def test_truncated_rust_live_diff_never_becomes_empty_success(
+    tmp_path, stream, corruption,
+):
+    server, differ = _server(tmp_path)
+    request = _ParsedRequest(
+        op="diff", seq=71, path="edit.py", content="x = 2\n",
+        ref="HEAD", edit_deltas=None, stream=stream,
+    )
+    source = LiveBufferSource(tmp_path, "edit.py", request.content, ref="HEAD")
+    valid = SemanticDiff(
+        old_filename="edit.py", new_filename="edit.py", language="python",
+        metadata={"engine_owner": "rust"},
+    ).model_dump(mode="json")
+    if corruption.startswith("missing_"):
+        valid.pop(corruption.removeprefix("missing_"))
+    elif corruption == "invalid_changes":
+        valid["changes"] = None
+    elif corruption == "invalid_metadata":
+        valid["metadata"] = [["engine_owner", "rust"]]
+    else:
+        valid[corruption.removeprefix("invalid_")] = "false"
+
+    sent = []
+    with (
+        patch("intentumdiff.rust_core.live_handle_diff", return_value={"diff": valid}),
+        patch("intentumdiff.rust_core.live_error_response", side_effect=_error),
+    ):
+        server._process_request_with_source(source, request, sent.append)
+
+    assert len(sent) == 1
+    assert sent[0]["ok"] is False
+    assert sent[0]["error"]["code"] == "native_diff_uncertified"
+    assert "malformed Rust Core live diff" in sent[0]["error"]["message"]
+    assert not any(msg.get("done") for msg in sent)
+    differ.diff.assert_not_called()
+    differ.diff_stream_progressive.assert_not_called()
+
+
+@pytest.mark.parametrize("corruption", [
+    "missing_file_diffs", "missing_cross_file_changes",
+    "missing_parse_errors", "missing_guardrail_violations",
+    "invalid_file_diffs", "missing_file_changes",
+    "missing_file_metadata", "invalid_file_is_style_only",
+    "invalid_file_metadata",
+])
+def test_truncated_rust_live_review_never_becomes_empty_success(
+    tmp_path, corruption,
+):
+    from intentumdiff.core.models import CommitDiff
+
+    server, _ = _server(tmp_path)
+    commit_differ = MagicMock()
+    valid = CommitDiff(
+        old_ref="HEAD", new_ref="",
+        file_diffs=[SemanticDiff(
+            old_filename="edit.py", new_filename="edit.py", language="python",
+            metadata={"engine_owner": "rust"},
+        )],
+    ).model_dump(mode="json")
+    if corruption.startswith("missing_file_") and corruption != "missing_file_diffs":
+        valid["file_diffs"][0].pop(corruption.removeprefix("missing_file_"))
+    elif corruption == "invalid_file_diffs":
+        valid["file_diffs"] = None
+    elif corruption == "invalid_file_is_style_only":
+        valid["file_diffs"][0]["is_style_only"] = "false"
+    elif corruption == "invalid_file_metadata":
+        valid["file_diffs"][0]["metadata"] = [["engine_owner", "rust"]]
+    else:
+        valid.pop(corruption.removeprefix("missing_"))
+
+    with patch("intentumdiff.rust_core.live_handle_review", return_value={"commit_diff": valid}):
+        with pytest.raises(_RustLiveDecline) as exc:
+            server._compute_review(server._differ._config, commit_differ, "HEAD", "")
+
+    assert exc.value.code == "native_review_uncertified"
+    assert "malformed Rust Core live review" in str(exc.value)
+    commit_differ.diff_commit.assert_not_called()
+
+
+def test_explicit_rust_empty_commit_inventory_remains_valid(tmp_path):
+    from intentumdiff.core.models import CommitDiff
+
+    server, _ = _server(tmp_path)
+    commit_differ = MagicMock()
+    raw = CommitDiff(old_ref="HEAD", new_ref="", file_diffs=[]).model_dump(mode="json")
+    with patch("intentumdiff.rust_core.live_handle_review", return_value={"commit_diff": raw}):
+        result = server._compute_review(server._differ._config, commit_differ, "HEAD", "")
+    assert result.file_diffs == []
+    commit_differ.diff_commit.assert_not_called()

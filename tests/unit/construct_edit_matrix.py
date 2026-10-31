@@ -263,7 +263,17 @@ def find_literals(differ, language, filename, source) -> list[Construct]:
 
 
 def _entity_name(construct: Construct) -> str | None:
-    match = re.search(_WORD, construct.label)
+    # Lua's parser preserves the semantic `local` declaration modifier in
+    # function labels ("local greet"). It is not the identifier to mutate:
+    # renaming "local" to "localCopy" creates invalid Lua and tests a parser
+    # error rather than a duplicate declaration. Keep the modifier unchanged.
+    label = construct.label
+    if (
+        construct.node_type in {"function_declaration", "local_function"}
+        and label.startswith("local ")
+    ):
+        label = label[len("local "):]
+    match = re.search(_WORD, label)
     return match.group(0) if match else None
 
 

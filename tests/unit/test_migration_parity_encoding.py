@@ -36,10 +36,13 @@ def test_parity_harness_uses_utf8_for_files_and_native_transport(tmp_path, monke
         request = json.loads(input)
         assert request['old'] == case['old']
         diff = review_text(request['old'], request['new'], filename=request['filename'])
-        return SimpleNamespace(stdout=diff.model_dump_json())
+        return SimpleNamespace(stdout=diff.model_dump_json(), stderr='', returncode=0)
 
     class Differ:
-        def diff_strings(self, old, new, filename):
+        def __init__(self, config):
+            assert config.strict_plugins is True
+
+        def diff_strings(self, old, new, filename, language_hint=None):
             return review_text(old, new, filename=filename)
 
         def close(self):
@@ -49,6 +52,10 @@ def test_parity_harness_uses_utf8_for_files_and_native_transport(tmp_path, monke
     monkeypatch.setattr(Path, 'write_text', windows_locale_write)
     monkeypatch.setattr(harness['subprocess'], 'run', native_transport)
     harness['main'].__globals__['SemanticDiffer'] = Differ
+    # Keep this UTF-8 transport regression scoped to its two synthetic cases;
+    # the 74-language integration suite has its own dedicated acceptance gate.
+    harness['main'].__globals__['full_corpus_cases'] = lambda: []
+    harness['main'].__globals__['dedicated_source_cases'] = lambda: []
     monkeypatch.setattr('sys.argv', [str(script), '--core-dir', str(core), '--native', 'probe',
                                     '--wasm-dir', str(tmp_path), '--evidence', str(evidence)])
     harness['main']()
@@ -61,3 +68,15 @@ def test_parity_harness_uses_utf8_for_files_and_native_transport(tmp_path, monke
     assert records[0]["exact_changes"] == 1
     assert records[0]["required_labels"] == case["required_labels"]
     assert records[1]["descriptor"] == {}
+
+
+def test_dedicated_source_review_cases_are_retained_in_release_harness():
+    script = Path(__file__).resolve().parents[2] / 'scripts/check_migration_parity.py'
+    cases = runpy.run_path(str(script))['dedicated_source_cases']()
+    ids = {case['id'] for case in cases}
+    assert 'corpus-tsx-jsx-text' in ids
+    assert 'corpus-astro-interpolation-lexical-brace' in ids
+    for case in cases:
+        assert case['forbid_ignored_style'] is True
+        assert case['corpus_language'] in {'tsx', 'astro'}
+        assert case['mutation_source_extent']

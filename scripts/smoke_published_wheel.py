@@ -65,6 +65,9 @@ root = files('intentumdiff').joinpath('wasm')
 manifest = json.loads(root.joinpath('wasm_provenance.json').read_text(encoding='utf-8'))
 if manifest.get('schema_version') != 1:
     raise ValueError('unsupported Wasm provenance schema')
+registry = manifest.get('registry_commit')
+if not isinstance(registry, str) or len(registry) != 40 or any(c not in '0123456789abcdef' for c in registry):
+    raise ValueError('missing immutable registry source commit')
 artifacts = manifest['artifacts']
 actual = {p.name: p for p in root.iterdir() if p.name.endswith('.wasm')}
 if not actual or set(actual) != set(artifacts):
@@ -76,6 +79,22 @@ for name, path in actual.items():
     expected = artifacts[name]
     if len(data) != expected['size_bytes'] or hashlib.sha256(data).hexdigest() != expected['sha256']:
         raise ValueError('installed Wasm provenance mismatch: ' + name)
+    source = expected.get('source')
+    required = {'repository', 'commit', 'artifact', 'artifact_id', 'artifact_archive_sha256', 'abi_target'}
+    if not isinstance(source, dict) or set(source) != required:
+        raise ValueError('installed Wasm missing source attribution: ' + name)
+    commit, archive = source['commit'], source['artifact_archive_sha256']
+    if (not isinstance(source['repository'], str)
+            or not source['repository'].startswith('https://github.com/buchochelliq-labs/intentumdiff-')
+            or not isinstance(commit, str) or len(commit) != 40
+            or any(c not in '0123456789abcdef' for c in commit)
+            or not isinstance(archive, str) or len(archive) != 64
+            or any(c not in '0123456789abcdef' for c in archive)
+            or not isinstance(source['artifact_id'], int)
+            or isinstance(source['artifact_id'], bool) or source['artifact_id'] < 1
+            or source['artifact'] not in ('parser-wasm', 'renderer-components')
+            or (source['artifact'] == 'renderer-components') != name.endswith('_renderer.wasm')):
+        raise ValueError('installed Wasm invalid source attribution: ' + name)
 print('VERIFIED', len(actual), 'installed Wasm components')
 """
 

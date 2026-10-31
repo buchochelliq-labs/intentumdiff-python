@@ -476,3 +476,57 @@ def test_concurrent_index_files():
 
     assert errors == []
     assert len(results) == 6
+
+
+# ---------------------------------------------------------------------------
+# Git batch source I/O completeness (#172)
+# ---------------------------------------------------------------------------
+
+
+def test_collect_blob_files_retains_all_paths_for_shared_blob(tmp_path: Path) -> None:
+    """Two or more files with the same Git SHA must all reach the indexer."""
+    import subprocess
+
+    from intentumdiff.core.indexer import _collect_blob_files
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    def git(*args: str) -> None:
+        subprocess.run(
+            ["git", "-C", str(repo), *args],
+            check=True, capture_output=True, text=True,
+        )
+
+    git("init")
+    git("config", "user.name", "IntentumDiff CI")
+    git("config", "user.email", "test@example.invalid")
+
+    for filename, content in (
+        ("a.py", "same = 42\n"),
+        ("b.py", "different = 7\n"),
+        ("c.py", "same = 42\n"),
+    ):
+        (repo / filename).write_text(content, encoding="utf-8")
+    (repo / "opaque.bin").write_bytes(b"a\x00b")
+    git("add", ".")
+    git("commit", "-m", "shared content regression")
+
+    files, ignored = _collect_blob_files(str(repo), "HEAD", None)
+    assert files == [
+        ("a.py", "same = 42\n"),
+        ("b.py", "different = 7\n"),
+        ("c.py", "same = 42\n"),
+    ]
+    assert ignored == []
+
+    class IgnoreMiddle:
+        def is_ignored(self, path: str) -> bool:
+            return path == "b.py"
+
+    files, ignored = _collect_blob_files(str(repo), "HEAD", IgnoreMiddle())
+    assert files == [
+        ("a.py", "same = 42\n"),
+        ("c.py", "same = 42\n"),
+    ]
+    assert ignored == ["b.py"]
