@@ -2110,8 +2110,8 @@ def test_ctypes_outer_abi_envelopes_reject_corruption(
         intentumdiff_free=lambda *_args: None,
     )
     monkeypatch.setattr(rust_core, "_c_abi_lib", lambda: lib)
-    if b'"ok":false' in wire:
-        # Rust-authored failures remain failures, not corrupted-success DTOs.
+    if wire == b'{"ok":false,"error_type":"value_error","error":"declined"}':
+        # Only an explicitly well-formed Rust error is a legitimate engine decline.
         with pytest.raises(ValueError, match="declined"):
             rust_core._c_abi_call("diff_batch", "{}")
     else:
