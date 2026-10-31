@@ -38,6 +38,45 @@ def _diff(node):
     }
 
 
+def test_corpus_parity_rejects_lost_rust_node_facts():
+    """A C ABI/native result that drops Rust facts cannot match public Python."""
+    complete = _diff(_node("module", children=[_node("key", children=[_node("value")])]))
+    nested = complete["changes"][0]["new_node"]["children"][0]
+    nested["facts"] = {"shape": "pair", "child_count": 2, "is_leaf": False,
+                       "nested_block_count": 0, "value_kind": "scalar"}
+    lost = json.loads(json.dumps(complete))
+    del lost["changes"][0]["new_node"]["children"][0]["facts"]
+    assert _projection(complete) != _projection(lost)
+    for key, replacement in (("shape", "container"), ("child_count", 3),
+                             ("is_leaf", True), ("nested_block_count", 1)):
+        corrupted = json.loads(json.dumps(complete))
+        corrupted["changes"][0]["new_node"]["children"][0]["facts"][key] = replacement
+        assert _projection(complete) != _projection(corrupted), key
+
+
+def test_corpus_parity_normalizes_only_absent_and_null_optional_facts():
+    """DTOs may include null defaults, but zero/false and actual facts survive."""
+    full = _diff(_node("value"))
+    root = full["changes"][0]["new_node"]
+    root["facts"] = {"returns": None, "nested_block_count": 0,
+                     "has_nested_block": False}
+    omitted_nulls = json.loads(json.dumps(full))
+    del omitted_nulls["changes"][0]["new_node"]["facts"]["returns"]
+    assert _projection(full) == _projection(omitted_nulls)
+
+    missing = json.loads(json.dumps(full))
+    del missing["changes"][0]["new_node"]["facts"]
+    assert _projection(full) != _projection(missing)
+    empty_object = json.loads(json.dumps(full))
+    empty_object["changes"][0]["new_node"]["facts"] = {}
+    assert _projection(full) != _projection(empty_object)
+
+    without_facts = _diff(_node("value"))
+    with_null_facts = json.loads(json.dumps(without_facts))
+    with_null_facts["changes"][0]["new_node"]["facts"] = None
+    assert _projection(without_facts) == _projection(with_null_facts)
+
+
 def test_corpus_parity_rejects_dropped_descendants():
     full = _diff(_node("module", children=[_node("count")]))
     truncated = _diff(_node("module"))
