@@ -386,6 +386,46 @@ class TestSemanticDifferParallelCommit:
             assert adapter_phase_names[0] == "rust_core_commit_source_filtering"
             assert "rust_core_request_json_encode" in adapter_phase_names
 
+    @pytest.mark.parametrize("parallel", [False, True, 3])
+    def test_commit_rejects_malformed_rust_batch_without_rerouting(self, parallel):
+        """A corrupted native batch must abort the public commit API (#215, #216)."""
+        differ = SemanticDiffer(DiffConfig(experimental_rust_core=True, parallel=parallel))
+        changed_files = [
+            ("old a", "new a", "a.py", "a.py", None),
+            ("old b", "new b", "b.py", "b.py", None),
+        ]
+        batch_calls = []
+
+        def malformed_batch(**kwargs):
+            batch_calls.append(kwargs)
+            return RustCoreBatchDiffsAttempt(
+                invalid_output=True,
+                fallback_reason="invalid native transport: corrupt C ABI envelope",
+            )
+
+        def fail_pipeline(*_args, **_kwargs):
+            raise AssertionError("corrupt native batch must not reroute to the pipeline")
+
+        repo_patch, sources_patch = self._patch_git_inputs(changed_files)
+        with (
+            repo_patch,
+            sources_patch,
+            patch(
+                "intentumdiff.plugins.builtins.python_parser_entry",
+                return_value="python_parser.wasm",
+            ),
+            patch(
+                "intentumdiff.differ.try_rust_core_batch_diffs",
+                side_effect=malformed_batch,
+            ),
+            patch.object(SemanticDiffer, "_run_pipeline", fail_pipeline),
+        ):
+            with pytest.raises(RuntimeError, match="Malformed Rust commit batch result"):
+                differ.diff_commit(".")
+
+        assert len(batch_calls) == 1
+        assert len(batch_calls[0]["files"]) == 2
+
     def test_commit_rust_batch_fallback_reruns_with_rust_core_enabled(self):
         # Reformulated for the transitional-layer retirement (issue #57 payoff, stage
         # 4b): batch-declined files used to re-run through a python-pipeline differ
