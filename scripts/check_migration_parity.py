@@ -219,6 +219,15 @@ def full_corpus_cases() -> list[dict]:
         assert not manifest.get("mutation_xfail"), (
             f"{language}: no 0.0.2 content-mutation exemptions permitted"
         )
+        # Every language's addition needs an independent source-content oracle.
+        # An empty list silently allows mutually agreeing fabricated Rust/C ABI/
+        # Python labels to pass the visible-token gate (SAS, #230).
+        visible_tokens = manifest.get("visible_tokens")
+        assert (isinstance(visible_tokens, list) and visible_tokens
+                and all(isinstance(token, str) and token.strip()
+                        for token in visible_tokens)), (
+            f"{language}: missing nonempty source-judged visible_tokens ratchet"
+        )
         sources = [
             path for path in language_dir.glob("playground.*")
             if not path.name.endswith(".expect.json")
@@ -234,7 +243,7 @@ def full_corpus_cases() -> list[dict]:
             "mode": "sources",
             "corpus_language": language,
             "forbid_ignored_style": True,
-            "required_visible_tokens": list(manifest.get("visible_tokens") or []),
+            "required_visible_tokens": list(visible_tokens),
         })
         for mutation_name, edited in corpus_mutations(source, manifest):
             assert edited != source, (language, mutation_name)
