@@ -470,6 +470,37 @@ def check_tsx_literal_exact(case: dict, diff: dict) -> None:
     )
 
 
+def check_tsx_jsx_text_exact(case: dict, diff: dict) -> None:
+    """Source-judge rendered JSX text itself, not adjacent TS string literals.
+
+    This independently checks the known UTF-8 byte location of Alïcë -> AlïcëX
+    on every Rust-native, C ABI and public Python route.
+    """
+    if case["id"] != "corpus-tsx-jsx-text":
+        return
+    for side, label, end_col in (("old", "Alïcë", 22), ("new", "AlïcëX", 23)):
+        expected_position = {
+            "start_line": 1, "start_col": 15, "end_line": 1, "end_col": end_col,
+        }
+        stack = [
+            c[f"{side}_node"] for c in diff["changes"]
+            if c.get(f"{side}_node") is not None
+        ]
+        found = False
+        while stack:
+            node = stack.pop()
+            if (node["node_type"] == "jsx_text"
+                    and node["label"] == label
+                    and node["position"] == expected_position):
+                found = True
+                break
+            stack.extend(node.get("children") or [])
+        assert found, (
+            case["id"], side, "missing edited source-anchored JSX text node",
+            label, expected_position, diff,
+        )
+
+
 def run_direct_c_abi_source_review(case: dict, repo: Path, wasm: Path) -> dict:
     """Exercise the six-argument exported Rust C ABI independently of the public Python API.
 
@@ -531,6 +562,21 @@ def main():
     cases.append(dict(schema, id='schema-custom-identity', mode='sources'))
     corpus_cases = full_corpus_cases()
     cases.extend(corpus_cases)
+    # Dedicated TSX rendered-text case. The ordinary TSX corpus is a TypeScript
+    # string-literal example, so it does not exercise JSX text at all. A change
+    # inside <span> must remain Rust-owned semantic evidence, not IGNORED_STYLE.
+    jsx_old = "export function Hello() {\n  return <span>Alïcë</span>;\n}\n"
+    jsx_new = jsx_old.replace("Alïcë", "AlïcëX")
+    cases.append({
+        "id": "corpus-tsx-jsx-text",
+        "old": jsx_old,
+        "new": jsx_new,
+        "filename": "view.tsx",
+        "mode": "sources",
+        "corpus_language": "tsx",
+        "mutation_source_extent": _mutation_source_extent(jsx_old, jsx_new),
+        "forbid_ignored_style": True,
+    })
     # full_corpus_cases independently enforces the exact 74-language inventory.
     records = []
     original = Path.cwd()
@@ -576,14 +622,15 @@ def main():
                             check_visible_corpus_tokens(case, output)
                             check_vbnet_declaration_extent(case, output)
                             check_tsx_literal_exact(case, output)
+                            check_tsx_jsx_text_exact(case, output)
                     assert projection(rust) == projection(python), (case['id'], projection(rust), projection(python))
                     record = dict(case, rust=rust, python=python)
-                    # All 74 language additions and the curated TSX edit also pass
+                    # All 74 language additions and both TSX source edits also pass
                     # through the exported C ABI directly. Public Python's use of
                     # the C ABI is not itself an independent transport assertion.
                     if 'corpus_language' in case and (
                         case['id'].endswith('-addition')
-                        or case['id'] == 'corpus-tsx-edit_"_string'
+                        or case['id'] in ('corpus-tsx-edit_"_string', 'corpus-tsx-jsx-text')
                     ):
                         abi = run_direct_c_abi_source_review(case, root, wasm)
                         check_expectations(case, abi)
@@ -596,6 +643,7 @@ def main():
                         check_visible_corpus_tokens(case, abi)
                         check_vbnet_declaration_extent(case, abi)
                         check_tsx_literal_exact(case, abi)
+                        check_tsx_jsx_text_exact(case, abi)
                         assert projection(abi) == projection(rust) == projection(python), (
                             case['id'], 'direct C ABI / native / Python disagreement',
                             projection(abi), projection(rust), projection(python)
