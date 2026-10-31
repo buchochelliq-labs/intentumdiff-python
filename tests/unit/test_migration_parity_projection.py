@@ -182,7 +182,7 @@ def test_corpus_addition_rejects_equal_but_fabricated_native_python_content():
     # Presence must be inside the exposed new-tree descendants, not merely
     # in the input source or the other route's result.
     good = _diff(_node("module", children=[
-        _node("greet", children=[_node("name"), _node("Hello")]),
+        _node("greet", col=4, children=[_node("name", col=10), _node("Hello", col=25)]),
     ]))
     checker(case, good)
     dropped_child = _diff(_node("module", children=[_node("greet")]))
@@ -573,3 +573,84 @@ def test_corpus_curated_string_mutations_fail_closed_on_missing_or_ambiguous_tex
     assert ('edit_"_string', 'const label = "helloX";\n') in make(
         'const label = "hello";\n', {}
     )
+
+
+def test_mutation_rejects_fabricated_labels_even_at_exact_source_edit():
+    """Review P2: coordinate overlap is not evidence of changed Rust content."""
+    harness = runpy.run_path(str(SCRIPT))
+    old, new = "count = 1\n", "count = 2\n"
+    case = {"id": "corpus-python-bump_numeric_literal", "old": old, "new": new,
+            "mutation_source_extent": harness["_mutation_source_extent"](old, new)}
+    valid = _diff(_node("2", col=8))
+    valid["changes"][0].update(change_type="MODIFICATION",
+                               old_node=_node("1", col=8))
+    harness["check_mutation_source_evidence"](case, valid)
+
+    invented = json.loads(json.dumps(valid))
+    for side in ("old_node", "new_node"):
+        node = invented["changes"][0][side]
+        node["label"] = "NOT IN SOURCE"
+        # Exactly the edited byte: passes the old overlap-only oracle.
+        node["position"] = {
+            "start_line": 0, "start_col": 8, "end_line": 0, "end_col": 9,
+        }
+    for which in ("old_node", "new_node"):
+        corrupt = json.loads(json.dumps(valid))
+        corrupt["changes"][0][which] = invented["changes"][0][which]
+        with pytest.raises(AssertionError, match="source-anchored edited content"):
+            harness["check_mutation_source_evidence"](case, corrupt)
+
+
+def test_mutation_accepts_normalized_source_labels_and_enclosing_spans():
+    """No literal AST-label equality requirement for normalized grammar labels."""
+    harness = runpy.run_path(str(SCRIPT))
+    old, new = 'charset="UTF-8"\n', 'charset="UTF-9"\n'
+    case = {"id": "corpus-html-bump_numeric_literal", "old": old, "new": new,
+            "mutation_source_extent": harness["_mutation_source_extent"](old, new)}
+    change = _diff(_node("charset=UTF-9"))
+    change["changes"][0].update(change_type="MODIFICATION",
+                                old_node=_node("charset=UTF-8"))
+    for side in ("old_node", "new_node"):
+        change["changes"][0][side]["position"] = {
+            "start_line": 0, "start_col": 0, "end_line": 0,
+            "end_col": len(old.strip()),
+        }
+    harness["check_mutation_source_evidence"](case, change)
+
+
+def test_corpus_token_evidence_rejects_zero_width_and_wrong_source_extents():
+    """Review P2: one fabricated SAS-like label cannot claim every token at EOF."""
+    harness = runpy.run_path(str(SCRIPT))
+    check = harness["check_visible_corpus_tokens"]
+    source = 'def greet(name): return "Hello"\n'
+    case = {"id": "corpus-python-addition", "old": "", "new": source,
+            "required_visible_tokens": ["greet", "name", "Hello"]}
+    valid = _diff(_node("greet", col=4, children=[
+        _node("name", col=10), _node("Hello", col=25),
+    ]))
+    check(case, valid)
+
+    fabricated = _diff(_node("greet name Hello"))
+    fabricated["changes"][0]["new_node"]["position"] = {
+        "start_line": 0, "start_col": 0, "end_line": 0, "end_col": 0,
+    }
+    with pytest.raises(AssertionError, match="source-anchored extents"):
+        check(case, fabricated)
+
+    misplaced = json.loads(json.dumps(valid))
+    misplaced["changes"][0]["new_node"]["position"] = {
+        "start_line": 0, "start_col": 0, "end_line": 0, "end_col": 5,
+    }
+    with pytest.raises(AssertionError, match="source-anchored extents"):
+        check(case, misplaced)
+
+
+def test_adf_string_mutation_preserves_schema_and_edits_pipeline_value():
+    """A key-name typo is not a source-judged ADF pipeline-name mutation."""
+    harness = runpy.run_path(str(SCRIPT))
+    case = next(c for c in harness["full_corpus_cases"]()
+                if c["id"] == 'corpus-adf-edit_"_string')
+    assert '"name": "CopyPipeline"' in case["old"]
+    assert '"name": "CopyPipelineX"' in case["new"]
+    assert '"nameX"' not in case["new"]
+    assert case["mutation_source_extent"]["new"]["token"] == "X"
