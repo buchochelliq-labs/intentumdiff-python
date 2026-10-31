@@ -1095,7 +1095,13 @@ class SemanticDiffer:
                     filename,
                     fuel=adaptive_fuel,
                 )
-                routed = SemanticDiff.model_validate_json(updated_json)
+                # A Wasm analyzer is a diff-to-diff transform, never permission
+                # to replace a Rust review with Pydantic's empty DTO defaults.
+                from intentumdiff.rust_core import _require_complete_batch_diff_dto
+
+                routed = SemanticDiff.model_validate(
+                    _require_complete_batch_diff_dto(json.loads(updated_json))
+                )
             except Exception as exc:
                 # Semantic analyzers are configured diff-to-diff processing.
                 # Omitting a failed one would return an incomplete review as
