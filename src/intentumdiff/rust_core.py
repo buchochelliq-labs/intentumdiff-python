@@ -262,6 +262,10 @@ def _c_abi_lib() -> Any:
     return _C_ABI_LIB
 
 
+class _InvalidNativeCAbiEnvelope(RuntimeError):
+    """Corrupted C ABI response: a different Rust route must not mask the failure."""
+
+
 def _c_abi_call(name: str, *args: Any) -> Any:
     """Invoke a C-ABI handler by name; return its ``result`` or re-raise the classified error.
 
@@ -284,14 +288,23 @@ def _c_abi_call(name: str, *args: Any) -> Any:
         raw = ctypes.cast(ptr, ctypes.c_char_p).value
     finally:
         lib.intentumdiff_free(ptr)
-    envelope = json.loads((raw or b"").decode("utf-8"))
+    try:
+        envelope = json.loads((raw or b"").decode("utf-8"))
+    except (UnicodeDecodeError, ValueError, TypeError) as exc:
+        raise _InvalidNativeCAbiEnvelope(
+            f"invalid C ABI envelope for {name!r}: malformed JSON: {exc}"
+        ) from exc
     # Only the Rust ABI can certify success. A malformed envelope must not
     # manufacture a None (or other truthy) result for a successful operation.
     if not isinstance(envelope, dict) or type(envelope.get("ok")) is not bool:
-        raise RuntimeError(f"invalid C ABI envelope for {name!r}: expected a boolean 'ok'")
+        raise _InvalidNativeCAbiEnvelope(
+            f"invalid C ABI envelope for {name!r}: expected a boolean 'ok'"
+        )
     if envelope["ok"]:
         if "result" not in envelope:
-            raise RuntimeError(f"invalid C ABI envelope for {name!r}: success missing 'result'")
+            raise _InvalidNativeCAbiEnvelope(
+                f"invalid C ABI envelope for {name!r}: success missing 'result'"
+            )
         return envelope["result"]
     message = envelope.get("error", "engine error")
     kind = envelope.get("error_type", "value_error")
@@ -1751,6 +1764,13 @@ def try_rust_core_batch_diffs(
             adapter_phase_timings=adapter_phase_timings,
             backend_version=backend_version,
         )
+    except _InvalidNativeCAbiEnvelope as exc:
+        logger.debug("Rust core batch ABI integrity failure: %s", exc)
+        return RustCoreBatchDiffsAttempt(
+            fallback_reason=f"invalid native transport: {exc}",
+            invalid_output=True,
+            adapter_phase_timings=adapter_phase_timings,
+        )
     except (ValidationError, ValueError, TypeError) as exc:
         logger.debug("Rust core batch output rejected: %s", exc)
         return RustCoreBatchDiffsAttempt(
@@ -1833,6 +1853,10 @@ def _require_native_commit_diff_json(payload: bytes, operation: str) -> None:
         for index, file_diff in enumerate(raw["file_diffs"]):
             if not isinstance(file_diff, dict):
                 raise ValueError(f"Rust commit JSON file_diffs[{index}] must be an object")
+            if not isinstance(file_diff.get("metadata"), dict):
+                raise ValueError(
+                    f"Rust commit JSON file_diffs[{index}] requires metadata object"
+                )
             for flag in ("has_semantic_changes", "is_style_only", "is_fallback"):
                 if type(file_diff.get(flag)) is not bool:
                     raise ValueError(
@@ -1983,7 +2007,7 @@ def try_rust_core_commit_json(
             adapter_phase_timings=adapter_phase_timings,
             backend_version=backend_version,
         )
-    except _InvalidNativeCommitDto:
+    except (_InvalidNativeCommitDto, _InvalidNativeCAbiEnvelope):
         raise
     except (ValidationError, ValueError, TypeError) as exc:
         logger.debug("Rust core certified commit JSON rejected: %s", exc)
@@ -2096,7 +2120,7 @@ def try_rust_core_working_tree_commit_json(
             adapter_phase_timings=adapter_phase_timings,
             backend_version=backend_version,
         )
-    except _InvalidNativeCommitDto:
+    except (_InvalidNativeCommitDto, _InvalidNativeCAbiEnvelope):
         raise
     except (ValidationError, ValueError, TypeError) as exc:
         logger.debug("Rust core working-tree commit JSON rejected: %s", exc)
