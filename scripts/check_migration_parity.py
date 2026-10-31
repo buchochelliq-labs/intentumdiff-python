@@ -583,20 +583,13 @@ def run_native_probe(native: Path, request: dict, case_id: str) -> dict:
         ) from exc
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--core-dir', type=Path, required=True)
-    parser.add_argument('--native', type=Path, required=True)
-    parser.add_argument('--wasm-dir', type=Path, required=True)
-    parser.add_argument('--evidence', type=Path)
-    args = parser.parse_args()
-    core, native, wasm = args.core_dir.resolve(), args.native.resolve(), args.wasm_dir.resolve()
-    cases = json.loads((core / 'tests/fixtures/migration/markdown.json').read_text(encoding='utf-8'))
-    cases = [dict(c, filename='doc.md', mode='text') for c in cases]
-    schema = json.loads((core / 'tests/corpus/schema_custom_identity.json').read_text(encoding='utf-8'))
-    cases.append(dict(schema, id='schema-custom-identity', mode='sources'))
-    corpus_cases = full_corpus_cases()
-    cases.extend(corpus_cases)
+def dedicated_source_cases() -> list[dict]:
+    """Additional source-judged Rust/C ABI/Python cases beyond the 74 languages.
+
+    Keep these mandatory in release acceptance. Unit tests that only exercise
+    locale transport may replace this explicit fixture factory, not the gate.
+    """
+    cases = []
     # Dedicated TSX rendered-text case. The ordinary TSX corpus is a TypeScript
     # string-literal example, so it does not exercise JSX text at all. A change
     # inside <span> must remain Rust-owned semantic evidence, not IGNORED_STYLE.
@@ -627,6 +620,24 @@ def main():
         "mutation_source_extent": _mutation_source_extent(astro_old, astro_new),
         "forbid_ignored_style": True,
     })
+    return cases
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--core-dir', type=Path, required=True)
+    parser.add_argument('--native', type=Path, required=True)
+    parser.add_argument('--wasm-dir', type=Path, required=True)
+    parser.add_argument('--evidence', type=Path)
+    args = parser.parse_args()
+    core, native, wasm = args.core_dir.resolve(), args.native.resolve(), args.wasm_dir.resolve()
+    cases = json.loads((core / 'tests/fixtures/migration/markdown.json').read_text(encoding='utf-8'))
+    cases = [dict(c, filename='doc.md', mode='text') for c in cases]
+    schema = json.loads((core / 'tests/corpus/schema_custom_identity.json').read_text(encoding='utf-8'))
+    cases.append(dict(schema, id='schema-custom-identity', mode='sources'))
+    corpus_cases = full_corpus_cases()
+    cases.extend(corpus_cases)
+    cases.extend(dedicated_source_cases())
     # full_corpus_cases independently enforces the exact 74-language inventory.
     records = []
     original = Path.cwd()
