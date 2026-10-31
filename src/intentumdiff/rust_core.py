@@ -283,7 +283,9 @@ def _c_abi_call(name: str, *args: Any) -> Any:
         name.encode("utf-8"), json.dumps(payload).encode("utf-8")
     )
     if not ptr:
-        raise RuntimeError(f"intentumdiff_call({name!r}) returned NULL (allocation failure)")
+        raise _InvalidNativeCAbiEnvelope(
+            f"intentumdiff_call({name!r}) returned NULL (allocation failure)"
+        )
     try:
         raw = ctypes.cast(ptr, ctypes.c_char_p).value
     finally:
@@ -306,8 +308,17 @@ def _c_abi_call(name: str, *args: Any) -> Any:
                 f"invalid C ABI envelope for {name!r}: success missing 'result'"
             )
         return envelope["result"]
-    message = envelope.get("error", "engine error")
-    kind = envelope.get("error_type", "value_error")
+    # The current Rust Core C ABI always emits both fields on a decline.
+    # Missing or incorrectly typed errors are corrupted transport, not an
+    # explicit decline that Python may route around.
+    message = envelope.get("error")
+    kind = envelope.get("error_type")
+    if not isinstance(message, str) or not isinstance(kind, str) or kind not in (
+        "not_found", "internal", "value_error", "bad_request"
+    ):
+        raise _InvalidNativeCAbiEnvelope(
+            f"invalid C ABI envelope for {name!r}: malformed error fields"
+        )
     if kind == "not_found":
         raise FileNotFoundError(message)
     if kind == "internal":
@@ -1853,9 +1864,14 @@ def _require_native_commit_diff_json(payload: bytes, operation: str) -> None:
         for index, file_diff in enumerate(raw["file_diffs"]):
             if not isinstance(file_diff, dict):
                 raise ValueError(f"Rust commit JSON file_diffs[{index}] must be an object")
-            if not isinstance(file_diff.get("metadata"), dict):
+            metadata = file_diff.get("metadata")
+            if not isinstance(metadata, dict):
                 raise ValueError(
                     f"Rust commit JSON file_diffs[{index}] requires metadata object"
+                )
+            if metadata.get("engine_owner") != "rust":
+                raise ValueError(
+                    f"Rust commit JSON file_diffs[{index}] requires Rust-owned metadata"
                 )
             for flag in ("has_semantic_changes", "is_style_only", "is_fallback"):
                 if type(file_diff.get(flag)) is not bool:
