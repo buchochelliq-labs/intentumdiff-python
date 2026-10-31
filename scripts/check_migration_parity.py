@@ -65,6 +65,13 @@ def check_expectations(case, diff):
     for group in diff['change_groups']:
         assert group['kind'] not in case.get('forbidden_group_kinds', []), (case['id'], diff)
     if case.get('forbid_ignored_style'):
+        # The Rust payload may emit a style-suppression group without mirroring
+        # it into metadata. Do not certify a partially suppressed content edit
+        # merely because another semantic change was also reported.
+        assert not any(group['kind'] == 'IGNORED_STYLE'
+                       for group in diff['change_groups']), (
+            case['id'], 'IGNORED_STYLE group in source-judged corpus', diff
+        )
         assert not diff['metadata'].get('ignored_style_changes'), (case['id'], diff)
     if 'expected' in case:
         expected = case['expected']
