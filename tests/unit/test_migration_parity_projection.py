@@ -432,3 +432,38 @@ def test_corpus_mutation_byte_anchor_handles_utf8_and_append_only():
     unrelated = _node("x", col=0)
     with pytest.raises(AssertionError, match="misses source-edited bytes"):
         check(appended, _diff(unrelated))
+
+def test_proto_corpus_string_mutation_uses_valid_version_and_exact_source_bytes():
+    """Do not ask the Rust semantic parser to certify an invalid 'proto3X' dialect."""
+    harness = runpy.run_path(str(SCRIPT))
+    case = next(
+        case for case in harness["full_corpus_cases"]()
+        if case["id"] == 'corpus-proto-edit_"_string'
+    )
+    assert case["old"].startswith('syntax = "proto3";')
+    assert case["new"].startswith('syntax = "proto2";')
+    assert case["new"] == case["old"].replace('"proto3"', '"proto2"', 1)
+    assert "proto3X" not in case["new"]
+    assert case["forbid_ignored_style"] is True
+    assert case["mutation_source_extent"] == {
+        "old": {"start": [0, 15], "end": [0, 16], "token": "3"},
+        "new": {"start": [0, 15], "end": [0, 16], "token": "2"},
+    }
+
+
+def test_corpus_curated_string_mutations_fail_closed_on_missing_or_ambiguous_text():
+    """Curated test inputs cannot silently drop a mutation or replace another site."""
+    make = runpy.run_path(str(SCRIPT))["corpus_mutations"]
+    options = {"string_mutation": {"old": '"proto3"', "new": '"proto2"'}}
+    with pytest.raises(AssertionError, match="one source occurrence"):
+        make('syntax = "proto3";\nsyntax = "proto3";\n', options)
+    with pytest.raises(AssertionError, match="one source occurrence"):
+        make('syntax = "proto2";\n', options)
+    with pytest.raises(AssertionError, match="invalid curated string mutation"):
+        make('syntax = "proto3";\n', {"string_mutation": {"old": '"proto3"', "new": 3}})
+    with pytest.raises(AssertionError, match="invalid curated string mutation"):
+        make('syntax = "proto3";\n', {"string_mutation": {"old": '"proto3"', "new": '"proto3"'}})
+    # Other languages continue using the ordinary content-mutation generator.
+    assert ('edit_"_string', 'const label = "helloX";\n') in make(
+        'const label = "hello";\n', {}
+    )
