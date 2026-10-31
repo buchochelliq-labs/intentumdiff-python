@@ -25,8 +25,16 @@ def projection(diff):
         # Preserve the full semantic subtree. Comparing only the change root
         # can accept a native route that drops descendants or corrupts their
         # positions while Python still returns the complete changed tree.
+        # Rust is the semantic oracle for NodeFacts as well as labels/spans.
+        # Pydantic serializes unpopulated optional DTO fields as explicit null;
+        # native Rust may omit them. Normalize only null-vs-absent, preserving
+        # explicit zero and false (Core #203 / Python #226).
+        facts = value.get('facts')
+        assert facts is None or isinstance(facts, dict), ('invalid Rust NodeFacts', facts)
         return {
             **{k: value[k] for k in ('node_type', 'label', 'position')},
+            'facts': {key: fact for key, fact in (facts or {}).items()
+                      if fact is not None},
             'children': [node(child) for child in (value.get('children') or [])],
         }
     return {
