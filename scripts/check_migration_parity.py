@@ -99,12 +99,31 @@ def corpus_mutations(source: str, manifest: dict) -> list[tuple[str, str]]:
     )
     if bumped != source:
         mutations.append(("bump_numeric_literal", bumped))
-    for quote in ("'", '"'):
-        pattern = re.compile(rf"{quote}([^{quote}\n]{{2,}}){quote}")
-        edited = pattern.sub(lambda match: f"{quote}{match.group(1)}X{quote}", source, count=1)
-        if edited != source:
-            mutations.append((f"edit_{quote}_string", edited))
-            break
+    # Some source grammars constrain particular quoted values. In Proto, the
+    # first quoted token is the syntax *version*, so blindly appending "X"
+    # creates invalid source and correctly triggers Rust's parse-incomplete
+    # response. A checked-in, unique, source-curated mutation keeps the same
+    # strict semantic/span/parity gate on valid source instead of waiving it.
+    explicit_string = manifest.get("string_mutation")
+    if explicit_string is not None:
+        assert isinstance(explicit_string, dict), "invalid curated string mutation"
+        before, after = explicit_string.get("old"), explicit_string.get("new")
+        assert (
+            isinstance(before, str) and len(before) >= 3
+            and before[0] in ("'", '"') and before.endswith(before[0])
+            and isinstance(after, str) and len(after) >= 3
+            and after.startswith(before[0]) and after.endswith(before[0])
+            and before != after
+        ), "invalid curated string mutation"
+        assert source.count(before) == 1, "curated string mutation must match one source occurrence"
+        mutations.append((f"edit_{before[0]}_string", source.replace(before, after, 1)))
+    else:
+        for quote in ("'", '"'):
+            pattern = re.compile(rf"{quote}([^{quote}\n]{{2,}}){quote}")
+            edited = pattern.sub(lambda match: f"{quote}{match.group(1)}X{quote}", source, count=1)
+            if edited != source:
+                mutations.append((f"edit_{quote}_string", edited))
+                break
     append = manifest.get("append_statement")
     if append:
         mutations.append(("append_statement", source.rstrip("\n") + "\n" + append + "\n"))
