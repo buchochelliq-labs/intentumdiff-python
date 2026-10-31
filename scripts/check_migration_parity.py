@@ -501,6 +501,41 @@ def check_tsx_jsx_text_exact(case: dict, diff: dict) -> None:
         )
 
 
+
+def check_astro_interpolation_exact(case: dict, diff: dict) -> None:
+    """Require the actual Rust interpolation, including comment/regex-sensitive braces.
+
+    The input edit and expected UTF-8 byte positions are source-judged, not
+    inferred from agreement between native, direct C ABI and public Python.
+    """
+    if case["id"] != "corpus-astro-interpolation-lexical-brace":
+        return
+    for side, label, end_col in (
+        ("old", "/* don't } remove */ café", 30),
+        ("new", "/* don't } remove */ caféX", 31),
+    ):
+        expected_position = {
+            "start_line": 0, "start_col": 4, "end_line": 0, "end_col": end_col,
+        }
+        stack = [
+            c[f"{side}_node"] for c in diff["changes"]
+            if c.get(f"{side}_node") is not None
+        ]
+        found = False
+        while stack:
+            node = stack.pop()
+            if (node["node_type"] == "interpolation"
+                    and node["label"] == label
+                    and node["position"] == expected_position):
+                found = True
+                break
+            stack.extend(node.get("children") or [])
+        assert found, (
+            case["id"], side, "missing complete source-anchored Astro expression",
+            label, expected_position, diff,
+        )
+
+
 def run_direct_c_abi_source_review(case: dict, repo: Path, wasm: Path) -> dict:
     """Exercise the six-argument exported Rust C ABI independently of the public Python API.
 
@@ -577,6 +612,21 @@ def main():
         "mutation_source_extent": _mutation_source_extent(jsx_old, jsx_new),
         "forbid_ignored_style": True,
     })
+    # The ordinary Astro fixture cannot establish whether a '}' inside a JS
+    # comment is erroneously treated as the end of the semantic interpolation.
+    # This single-byte change must have Rust-owned, complete UTF-8 source spans.
+    astro_old = "<p>{/* don't } remove */ café}</p><p id=\"after\"/>\n"
+    astro_new = astro_old.replace("café}", "caféX}", 1)
+    cases.append({
+        "id": "corpus-astro-interpolation-lexical-brace",
+        "old": astro_old,
+        "new": astro_new,
+        "filename": "Page.astro",
+        "mode": "sources",
+        "corpus_language": "astro",
+        "mutation_source_extent": _mutation_source_extent(astro_old, astro_new),
+        "forbid_ignored_style": True,
+    })
     # full_corpus_cases independently enforces the exact 74-language inventory.
     records = []
     original = Path.cwd()
@@ -623,6 +673,7 @@ def main():
                             check_vbnet_declaration_extent(case, output)
                             check_tsx_literal_exact(case, output)
                             check_tsx_jsx_text_exact(case, output)
+                            check_astro_interpolation_exact(case, output)
                     assert projection(rust) == projection(python), (case['id'], projection(rust), projection(python))
                     record = dict(case, rust=rust, python=python)
                     # All 74 language additions and both TSX source edits also pass
@@ -630,7 +681,8 @@ def main():
                     # the C ABI is not itself an independent transport assertion.
                     if 'corpus_language' in case and (
                         case['id'].endswith('-addition')
-                        or case['id'] in ('corpus-tsx-edit_"_string', 'corpus-tsx-jsx-text')
+                        or case['id'] in ('corpus-tsx-edit_"_string', 'corpus-tsx-jsx-text',
+                                          'corpus-astro-interpolation-lexical-brace')
                     ):
                         abi = run_direct_c_abi_source_review(case, root, wasm)
                         check_expectations(case, abi)
@@ -644,6 +696,7 @@ def main():
                         check_vbnet_declaration_extent(case, abi)
                         check_tsx_literal_exact(case, abi)
                         check_tsx_jsx_text_exact(case, abi)
+                        check_astro_interpolation_exact(case, abi)
                         assert projection(abi) == projection(rust) == projection(python), (
                             case['id'], 'direct C ABI / native / Python disagreement',
                             projection(abi), projection(rust), projection(python)
