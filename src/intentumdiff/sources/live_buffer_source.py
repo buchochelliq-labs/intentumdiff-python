@@ -62,6 +62,7 @@ class LiveBufferSource(Source):
         ref: str = "HEAD",
         language_hint: str | None = None,
         edit_deltas: "list[EditDelta] | None" = None,
+        cache_snapshot: bool = False,
     ) -> None:
         # Validate the file path before storing it.
         safe = PurePosixPath(file_path)
@@ -77,6 +78,8 @@ class LiveBufferSource(Source):
         self._ref = ref
         self._language_hint = language_hint
         self.edit_deltas: list[EditDelta] | None = edit_deltas
+        self._cache_snapshot = cache_snapshot
+        self._cached_old_content: str | None = None
 
     # ------------------------------------------------------------------
     # Source interface
@@ -88,7 +91,12 @@ class LiveBufferSource(Source):
         *old_content* is read from the committed blob at ``self._ref``.
         *new_content* is the in-memory buffer ``live_content``.
         """
-        old_content = self._read_committed()
+        if self._cache_snapshot:
+            if self._cached_old_content is None:
+                self._cached_old_content = self._read_committed()
+            old_content = self._cached_old_content
+        else:
+            old_content = self._read_committed()
         filename = Path(self._file_path).name
         return old_content, self._live_content, filename, self._language_hint
 

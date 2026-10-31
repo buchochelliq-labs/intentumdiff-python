@@ -118,6 +118,7 @@ def create_server(
     def _did_close(params: lsp_types.DidCloseTextDocumentParams) -> None:
         uri = params.text_document.uri
         state.diff_cache.pop(uri, None)
+        state.source_cache.pop(uri, None)
         task = state.pending_tasks.pop(uri, None)
         if task is not None and not task.done():
             task.cancel()
@@ -135,7 +136,20 @@ def create_server(
         diff = state.diff_cache.get(uri)
         if diff is None:
             return []
-        return semantic_diff_to_codelens(diff)
+        sources = state.source_cache.get(uri)
+        if sources is None:
+            from intentumdiff.lsp_server._handlers import _invalidate_failed_review
+            _invalidate_failed_review(server, state, uri)
+            return []
+        try:
+            return semantic_diff_to_codelens(
+                diff, old_source=sources[0], new_source=sources[1],
+            )
+        except Exception as exc:
+            log.warning("intentumdiff: Rust CodeLens mapping failed for %s: %s", uri, exc)
+            from intentumdiff.lsp_server._handlers import _invalidate_failed_review
+            _invalidate_failed_review(server, state, uri)
+            return []
 
     # ------------------------------------------------------------------
     # Custom request: intentumdiff/semanticDiff

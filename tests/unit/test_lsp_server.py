@@ -65,8 +65,14 @@ def _diff(*changes: Change, parse_errors: list[str] | None = None) -> SemanticDi
 
 from intentumdiff.lsp_server._diagnostics import (
     node_to_lsp_range,
-    semantic_diff_to_diagnostics,
+    semantic_diff_to_diagnostics as _rust_diagnostics,
 )
+
+_ASCII_SOURCE = (" " * 32 + "\n") * 32
+
+
+def semantic_diff_to_diagnostics(diff):
+    return _rust_diagnostics(diff, new_source=_ASCII_SOURCE)
 
 
 class TestDiagnosticsTranslation:
@@ -130,7 +136,13 @@ class TestDiagnosticsTranslation:
 # TestCodeLensTranslation
 # ===========================================================================
 
-from intentumdiff.lsp_server._codelens import semantic_diff_to_codelens
+from intentumdiff.lsp_server._codelens import (
+    semantic_diff_to_codelens as _rust_codelens,
+)
+
+
+def semantic_diff_to_codelens(diff):
+    return _rust_codelens(diff, old_source=_ASCII_SOURCE, new_source=_ASCII_SOURCE)
 
 
 class TestCodeLensTranslation:
@@ -203,6 +215,39 @@ class TestCodeLensTranslation:
         lenses = semantic_diff_to_codelens(_diff(change))
         assert len(lenses) == 1
         assert lenses[0].range.start.line == 2  # old_node fallback
+
+
+
+# Source-derived UTF-8 offsets must never be directly published as LSP UTF-16.
+class TestSourceJudgedUnicodeLspRanges:
+    def test_diagnostics_ete_byte_five_is_utf16_three(self):
+        change = Change(
+            change_type=ChangeType.STYLE_ONLY,
+            new_node=_node("été", 0, 0, 0, 5),
+        )
+        diagnostics = _rust_diagnostics(_diff(change), new_source="été\n")
+        assert diagnostics[0].range.end.character == 3
+
+    def test_codelens_old_emoji_and_new_accent_use_correct_sources(self):
+        old = _node("🦣", 0, 0, 0, 4)
+        new = _node("été", 0, 0, 0, 5)
+        old_only = Change(change_type=ChangeType.MOVE, old_node=old)
+        updated = Change(
+            change_type=ChangeType.REFACTORING, new_node=new,
+            refactoring_kind=RefactoringKind.RENAME_SYMBOL,
+        )
+        lenses = _rust_codelens(
+            _diff(old_only, updated), old_source="🦣\n", new_source="été\n",
+        )
+        assert [lens.range.end.character for lens in lenses] == [2, 3]
+
+    def test_interior_utf8_byte_span_fails_closed(self):
+        invalid = Change(
+            change_type=ChangeType.STYLE_ONLY,
+            new_node=_node("é", 0, 1, 0, 2),
+        )
+        with pytest.raises(ValueError, match="UTF-8 byte column"):
+            _rust_diagnostics(_diff(invalid), new_source="été\n")
 
 
 # ===========================================================================

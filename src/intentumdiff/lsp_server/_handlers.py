@@ -37,6 +37,7 @@ class _ServerState:
     ref: str
     debounce: float
     diff_cache: dict[str, SemanticDiff] = field(default_factory=dict)
+    source_cache: dict[str, tuple[str, str]] = field(default_factory=dict)
     pending_tasks: dict[str, asyncio.Task] = field(default_factory=dict)
     supports_codelens_refresh: bool = False
 
@@ -97,6 +98,7 @@ def _invalidate_failed_review(server, state: _ServerState, uri: str) -> None:
 
     # Remove old CodeLens source before attempting I/O (publishing can itself fail).
     state.diff_cache.pop(uri, None)
+    state.source_cache.pop(uri, None)
     server.publish_diagnostics(uri, [
         lsp_types.Diagnostic(
             range=lsp_types.Range(
@@ -147,21 +149,23 @@ async def _compute_and_push(
         await asyncio.sleep(state.debounce)
 
         loop = asyncio.get_running_loop()
-        diff = await loop.run_in_executor(
-            None, _do_diff, state, server, uri, content
+        result = await loop.run_in_executor(
+            None, _do_diff, state, server, uri, content, True
         )
-        if diff is None:
+        if result is None:
             # A failed Rust/Wasm review must not leave previously cached semantic
             # CodeLens or diagnostics visible as though the current edit passed.
             _invalidate_failed_review(server, state, uri)
             return
 
+        diff, old_source, new_source = result
         state.diff_cache[uri] = diff
+        state.source_cache[uri] = (old_source, new_source)
 
         # Publish diagnostics (push model — no client request needed).
         from intentumdiff.lsp_server._diagnostics import semantic_diff_to_diagnostics
 
-        diags = semantic_diff_to_diagnostics(diff)
+        diags = semantic_diff_to_diagnostics(diff, new_source=new_source)
         server.publish_diagnostics(uri, diags)
 
         # Ask the client to refresh code-lens decorations when supported.
@@ -195,7 +199,8 @@ def _do_diff(
     server,
     uri: str,
     content: str,
-) -> SemanticDiff | None:
+    include_sources: bool = False,
+) -> SemanticDiff | tuple[SemanticDiff, str, str] | None:
     """Compute a ``SemanticDiff`` synchronously.
 
     Intended to be called via ``loop.run_in_executor`` so the event loop is
@@ -214,8 +219,14 @@ def _do_diff(
             file_path=str(rel_path),
             live_content=content,
             ref=state.ref,
+            cache_snapshot=include_sources,
         )
-        return state.differ.diff(source)
+        diff = state.differ.diff(source)
+        if include_sources:
+            # The differ and LSP mapping must see the same old Git snapshot.
+            old_source, new_source, _, _ = source.get_content()
+            return diff, old_source, new_source
+        return diff
 
     except Exception as exc:  # noqa: BLE001
         log.warning("intentumdiff: diff failed for %s: %s", uri, exc)

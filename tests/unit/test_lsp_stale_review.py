@@ -25,6 +25,7 @@ def test_failed_live_review_invalidates_previous_cache_and_publishes_error(mode:
     state = _ServerState(differ=MagicMock(), ref="HEAD", debounce=0,
                          supports_codelens_refresh=True)
     state.diff_cache[uri] = _diff()  # previous successful review
+    state.source_cache[uri] = ("old", "stale")
 
     outcome = ({"return_value": None} if mode == "declined"
                else {"side_effect": RuntimeError("incomplete Rust result")})
@@ -32,6 +33,7 @@ def test_failed_live_review_invalidates_previous_cache_and_publishes_error(mode:
         asyncio.run(_compute_and_push(server, state, uri, "def broken("))
 
     assert uri not in state.diff_cache, "stale semantics must be invalidated"
+    assert uri not in state.source_cache, "stale source coordinates must be invalidated"
     server.publish_diagnostics.assert_called_once()
     actual_uri, diagnostics = server.publish_diagnostics.call_args.args
     assert actual_uri == uri
@@ -48,9 +50,11 @@ def test_successful_followup_replaces_cache_and_clears_error_diagnostic() -> Non
                          supports_codelens_refresh=True)
     state.diff_cache[uri] = _diff()
     fresh = _diff()
-    with patch("intentumdiff.lsp_server._handlers._do_diff", return_value=fresh):
+    with patch("intentumdiff.lsp_server._handlers._do_diff",
+               return_value=(fresh, "def old(): pass", "def repaired(): pass")):
         asyncio.run(_compute_and_push(server, state, uri, "def repaired(): pass"))
 
     assert state.diff_cache[uri] is fresh
+    assert state.source_cache[uri] == ("def old(): pass", "def repaired(): pass")
     server.publish_diagnostics.assert_called_once_with(uri, [])
     server.lsp.send_request.assert_called_once_with("workspace/codeLens/refresh", None)
