@@ -87,14 +87,15 @@ def _empty_semantic_tree(language: str) -> SemanticNode:
 def _markdown_presentation(presented: PresentationResult, *, old_source: str, new_source: str,
                            old_filename: str, new_filename: str, phase: str) -> PresentationResult:
     """DTO adapter for complete Rust reconciliation; core errors propagate."""
-    from intentumdiff.rust_core import _c_abi_call
+    from intentumdiff.rust_core import _c_abi_call, _require_source_anchored_changes
     result = _c_abi_call("reconcile_markdown", {
         "changes": [change.model_dump(mode="json") for change in presented.changes],
         "change_groups": [group.model_dump(mode="json") for group in presented.change_groups],
         "ignored_style_changes": presented.ignored_style_changes,
     }, old_source, new_source, old_filename, new_filename, phase)
     return PresentationResult(
-        changes=[Change.model_validate(value) for value in result["changes"]],
+        changes=[Change.model_validate(value) for value in
+                 _require_source_anchored_changes(result["changes"], "Rust Markdown reconciliation")],
         change_groups=[ChangeGroup.model_validate(value) for value in result["change_groups"]],
         ignored_style_changes=result["ignored_style_changes"],
     )

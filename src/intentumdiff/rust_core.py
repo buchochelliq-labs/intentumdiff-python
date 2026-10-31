@@ -600,7 +600,8 @@ def try_rust_generic_text_review(
         group = data["group"]
         if group is not None and not isinstance(group, dict):
             raise ValueError("Rust generic-text review group must be an object or null")
-        changes = [Change.model_validate(item) for item in data["changes"]]
+        changes = [Change.model_validate(item) for item in
+                   _require_source_anchored_changes(data["changes"], "Rust generic-text review")]
         groups = [ChangeGroup.model_validate(group)] if group is not None else []
         return changes, groups
     except Exception as exc:  # noqa: BLE001 - fail closed on native/DTO failures.
@@ -640,13 +641,15 @@ def try_rust_markdown_section_review(
             if key not in data or (data[key] is not None and not isinstance(data[key], dict)):
                 raise ValueError(f"Rust markdown section review requires {key} object or null")
         return {
-            "moves": [Change.model_validate(item) for item in data["moves"]],
+            "moves": [Change.model_validate(item) for item in
+                      _require_source_anchored_changes(data["moves"], "Rust Markdown moves")],
             "moved_labels": set(data["moved_labels"]),
             "move_group": (
                 ChangeGroup.model_validate(data["move_group"])
                 if data["move_group"] is not None else None
             ),
-            "renames": [Change.model_validate(item) for item in data["renames"]],
+            "renames": [Change.model_validate(item) for item in
+                        _require_source_anchored_changes(data["renames"], "Rust Markdown renames")],
             "old_heading_lines": set(data["old_heading_lines"]),
             "new_heading_lines": set(data["new_heading_lines"]),
             "rename_group": (
@@ -777,7 +780,8 @@ def try_rust_finalize_review(
                 SemanticDiff.model_validate(_require_complete_batch_diff_dto(fallback_diff))
                 if fallback_diff is not None else None
             ),
-            "changes": [Change.model_validate(item) for item in data["changes"]],
+            "changes": [Change.model_validate(item) for item in
+                        _require_source_anchored_changes(data["changes"], "Rust finalize review")],
             "change_groups": [ChangeGroup.model_validate(item) for item in data["change_groups"]],
             "is_style_only": data["is_style_only"],
             "no_surviving_changes": data["no_surviving_changes"],
@@ -1484,7 +1488,8 @@ def _run_invariance_request(request: dict[str, Any]) -> RustInvarianceResult:
             "invalid Rust invariance result: ignored_style_changes entries must be objects"
         )
     return RustInvarianceResult(
-        changes=[Change.model_validate(item) for item in data["changes"]],
+        changes=[Change.model_validate(item) for item in
+                 _require_source_anchored_changes(data["changes"], "Rust invariance review")],
         change_groups=[ChangeGroup.model_validate(item) for item in data["change_groups"]],
         ignored_style_changes=[dict(item) for item in data["ignored_style_changes"]],
     )
@@ -1566,6 +1571,38 @@ def _normalize_builtin_change_type_enums(diff: SemanticDiff) -> SemanticDiff:
     return diff.model_copy(update={"changes": normalized_changes})
 
 
+_REQUIRED_RUST_CHANGE_NODES: dict[str, tuple[str, ...]] = {
+    # Structural DTO invariants only: never infer changes, spans or style in Python.
+    "ADDITION": ("new_node",),
+    "DELETION": ("old_node",),
+    "MODIFICATION": ("old_node", "new_node"),
+    "MOVE": ("old_node", "new_node"),
+    "REORDER": ("old_node", "new_node"),
+}
+
+
+def _require_source_anchored_changes(changes: Any, context: str) -> list[dict[str, Any]]:
+    """Reject truncated Rust change DTOs before Pydantic supplies nullable nodes.
+
+    Rust omits the *inapplicable* side of additions and deletions. The source
+    side that proves the reported change is mandatory. STYLE_ONLY and other
+    extension kinds retain their existing DTO contract; no semantic decision
+    or source-span inference takes place in this adapter (#228).
+    """
+    if not isinstance(changes, list):
+        raise ValueError(f"{context} requires changes array")
+    for index, change in enumerate(changes):
+        if not isinstance(change, dict):
+            raise ValueError(f"{context} change[{index}] must be an object")
+        for node_field in _REQUIRED_RUST_CHANGE_NODES.get(change.get("change_type"), ()):
+            if not isinstance(change.get(node_field), dict):
+                raise ValueError(
+                    f"{context} change[{index}] {change.get('change_type')!r} "
+                    f"requires {node_field} source-node object"
+                )
+    return changes
+
+
 def _require_complete_batch_diff_dto(payload: Any) -> dict[str, Any]:
     """Reject incomplete Rust success before Python DTO defaults can hide omissions.
 
@@ -1577,6 +1614,7 @@ def _require_complete_batch_diff_dto(payload: Any) -> dict[str, Any]:
     for field in ("changes", "change_groups", "parse_errors", "guardrail_violations"):
         if not isinstance(payload.get(field), list):
             raise ValueError(f"Rust complete batch diff requires {field} array")
+    _require_source_anchored_changes(payload["changes"], "Rust complete batch diff")
     for field in ("has_semantic_changes", "is_style_only", "is_fallback"):
         if type(payload.get(field)) is not bool:
             raise ValueError(f"Rust complete batch diff requires {field} boolean")
