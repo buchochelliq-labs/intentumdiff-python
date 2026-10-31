@@ -267,14 +267,35 @@ def full_corpus_cases() -> list[dict]:
 
 
 
-def check_mutation_source_evidence(case: dict, diff: dict) -> None:
-    """Require changed-tree evidence at the actual edited bytes on each route.
+def _node_source_text(source: str, position: dict) -> str:
+    """Read exactly the supplied source bytes at a Rust SourceSpan.
 
-    Bound-valid coordinates elsewhere in the file are insufficient, as are
-    agreeing fabricated zero-width trees. A pure insertion need not fabricate
-    an old-side change; replacements must expose both sides of the edit.
-    Parser semantics and change classification remain entirely Rust-owned.
+    This is test-only source evidence, not a Python semantic parser. The
+    separate UTF-8 boundary validator runs before these content assertions.
     """
+    lines = source.splitlines(keepends=True)
+    offsets = [0]
+    for line in lines:
+        offsets.append(offsets[-1] + len(line.encode("utf-8")))
+    start = offsets[position["start_line"]] + position["start_col"]
+    end = offsets[position["end_line"]] + position["end_col"]
+    raw = source.encode("utf-8")
+    assert 0 <= start <= end <= len(raw), ("non-source byte extent", position)
+    return raw[start:end].decode("utf-8")
+
+
+def check_mutation_source_evidence(case: dict, diff: dict) -> None:
+    """Require source-bearing changed labels at independently edited bytes.
+
+    Overlap alone lets all three Rust/C ABI/Python routes agree on invented
+    labels. Permit enclosing and normalized parser labels (e.g.
+    charset=UTF-9 for charset="UTF-9"), but require every lexical atom of a
+    witnessing label to occur in that node's own UTF-8 source extent and
+    require changed source content to be represented in the label. These
+    assertions judge the Rust output, never synthesize semantic nodes.
+    """
+    import re
+
     expected = case.get("mutation_source_extent")
     if expected is None:
         return
@@ -282,55 +303,83 @@ def check_mutation_source_evidence(case: dict, diff: dict) -> None:
         region = expected[side]
         start, end = region["start"], region["end"]
         if start == end:
-            continue  # No bytes on this side, e.g. append-only insertion.
+            continue  # No edited bytes on this side (pure insertion).
+        source = case[side]
         nodes = [
             change.get(f"{side}_node") for change in diff["changes"]
             if change.get(f"{side}_node") is not None
         ]
         stack = nodes[:]
-        found = False
+        found_overlap = False
+        found_content = False
         while stack:
             node = stack.pop()
             span = node["position"]
             node_start = [span["start_line"], span["start_col"]]
             node_end = [span["end_line"], span["end_col"]]
-            # Both spans are half-open UTF-8 byte positions, independently
-            # validated by check_source_spans before this release assertion.
             if node_start < end and start < node_end and node_start < node_end:
-                found = True
-                break
+                found_overlap = True
+                label = node.get("label") or ""
+                source_text = _node_source_text(source, span).casefold()
+                lexical_atoms = re.findall(r"\w+", label.casefold())
+                edit = region["token"].casefold()
+                # Append-only statements contain several changed tokens,
+                # not one monolithic AST label. A content-bearing descendant
+                # may represent a concrete subset of the changed statement.
+                edit_atoms = re.findall(r"[\w.\-]{2,}", edit)
+                edit_in_label = edit in label.casefold() or any(
+                    atom in label.casefold() for atom in edit_atoms
+                )
+                if (lexical_atoms and all(atom in source_text for atom in lexical_atoms)
+                        and edit_in_label):
+                    found_content = True
+                    break
             stack.extend(node.get("children") or [])
-        assert found, (
+        assert found_overlap, (
             case["id"], side, "changed subtree misses source-edited bytes",
+            region, [(node["label"], node["position"]) for node in nodes],
+        )
+        assert found_content, (
+            case["id"], side, "changed subtree lacks source-anchored edited content",
             region, [(node["label"], node["position"]) for node in nodes],
         )
 
 
 def check_visible_corpus_tokens(case: dict, diff: dict) -> None:
-    """Validate manifest-ratcheted semantic content independently for each API.
+    """Require real, nonempty source-anchored token evidence for every addition.
 
-    Agreement alone can hide shared parser regressions. Inspect the entire
-    changed subtree and require all previously visible source tokens.
+    Token presence in labels without a byte extent is vacuous: a fabricated
+    single zero-width node can concatenate all manifest tokens and pass route
+    parity. Bounds are checked separately; the source slice must also contain
+    the represented token (case-insensitive for case-normalizing grammars).
     """
     expected = case.get("required_visible_tokens")
     if expected is None:
         return
+    roots = [
+        change["new_node"] for change in diff["changes"]
+        if change.get("new_node") is not None
+    ]
     labels: list[str] = []
-    for change in diff["changes"]:
-        root = change.get("new_node")
-        if root is None:
-            continue
-        stack = [root]
-        while stack:
-            node = stack.pop()
-            if node.get("label"):
-                labels.append(node["label"])
-            stack.extend(node.get("children") or [])
-    visible = "\n".join(labels)
-    missing = [token for token in expected if token not in visible]
+    anchored: set[str] = set()
+    stack = roots[:]
+    while stack:
+        node = stack.pop()
+        label = node.get("label") or ""
+        if label:
+            labels.append(label)
+            span = node["position"]
+            if ((span["start_line"], span["start_col"])
+                    < (span["end_line"], span["end_col"])):
+                slice_text = _node_source_text(case["new"], span).casefold()
+                for token in expected:
+                    if token in label and token.casefold() in slice_text:
+                        anchored.add(token)
+        stack.extend(node.get("children") or [])
+    missing = [token for token in expected if token not in anchored]
     assert not missing, (
-        case["id"], "missing source-ratcheted semantic tokens", missing,
-        "labels seen", visible[:2000],
+        case["id"], "missing source-ratcheted semantic tokens or source-anchored extents",
+        missing, "labels seen", "\n".join(labels)[:2000],
     )
 
 
