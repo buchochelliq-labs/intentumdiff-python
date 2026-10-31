@@ -27,13 +27,13 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CORE_REPO = "https://github.com/buchochelliq-labs/intentumdiff-core"
-# Immutable candidate from Core #187: metered Wasmtime 48.0.7, verified
+# Immutable Core #204 NodeFacts-lifecycle parity candidate based on Core #187: metered Wasmtime 48.0.7, verified
 # parser availability, Rust-owned semantic promotions and fail-closed live
 # diff/commit-review completeness and Rust-owned live provenance. Four-platform CI must independently pass.
 # Override only for deliberate integration builds, not a moving branch.
 # Core #187 now emits explicit guardrail_violations even for valid empty Rust
 # batch inventories; Python #202 rejects omitted fields rather than defaulting.
-CORE_REF = os.environ.get("INTENTUMDIFF_CORE_REF", "076c382b9fc1eae1d68bfdbc78e58187fdfd1a83")
+CORE_REF = os.environ.get("INTENTUMDIFF_CORE_REF", "3995930d206c35758ba6525eebce49564c539fe1")
 # Reviewed registry RC candidate: source-anchored Astro, PO, PostScript, Proto, ReasonML, SAS, Svelte, Vue, VB.NET, M/Q#/PHP parser Wasm.
 # Registry PR #13 CI has vetted this immutable manifest; every staged byte
 # remains separately verified against its source artifact and SHA-256.
