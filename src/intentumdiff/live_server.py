@@ -1032,6 +1032,17 @@ class LiveServer:
                     str(native.get("fallback") or "Rust Core declined an incomplete diff"),
                 )
             if "diff" in native:
+                # Validate raw Rust inventories and flags before Pydantic can
+                # default omitted arrays/booleans into manufactured success.
+                # This is the existing batch transport validator, not a
+                # second Python semantic evaluator.
+                try:
+                    rust_core._require_complete_batch_diff_dto(native["diff"])
+                except (TypeError, ValueError) as exc:
+                    raise _RustLiveDecline(
+                        "native_diff_uncertified",
+                        f"{request.path}: malformed Rust Core live diff: {exc}",
+                    ) from exc
                 diff = SemanticDiff.model_validate(native["diff"])
                 if diff.is_fallback or diff.parse_errors:
                     raise _RustLiveDecline(
@@ -1086,6 +1097,19 @@ class LiveServer:
                     str(native.get("fallback") or "Rust Core declined an incomplete commit review"),
                 )
             if "commit_diff" in native:
+                # Reuse the certified commit-byte contract. Validation happens
+                # on the raw native object, before Pydantic can supply empty
+                # file inventories or coerce malformed semantic flags.
+                try:
+                    raw_commit = json.dumps(
+                        native["commit_diff"], separators=(",", ":")
+                    ).encode("utf-8")
+                    rust_core._require_native_commit_diff_json(raw_commit, "live review")
+                except (rust_core._InvalidNativeCommitDto, TypeError, ValueError) as exc:
+                    raise _RustLiveDecline(
+                        "native_review_uncertified",
+                        f"{new_ref or 'working tree'}: malformed Rust Core live review: {exc}",
+                    ) from exc
                 return CommitDiff.model_validate(native["commit_diff"])
             # A native refusal must not become a fabricated successful review
             # through a second, routed Python orchestration path.
