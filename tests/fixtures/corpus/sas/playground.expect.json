@@ -1,7 +1,16 @@
 {
  "language": "sas",
  "filename": "code.sas",
- "visible_tokens": [],
+ "visible_tokens": [
+  "%let target = World",
+  "WORK.GREETING",
+  "message = cats(\"Hello, \", name, suffix)",
+  "WORK.SCRATCH",
+  "attempts = 4",
+  "WORK.AUDIT",
+  "checked = 9",
+  "PRINT (DATA=WORK.GREETING)"
+ ],
  "append_statement": null,
  "mutation_xfail": {},
  "invisible_tokens_at_generation": []
