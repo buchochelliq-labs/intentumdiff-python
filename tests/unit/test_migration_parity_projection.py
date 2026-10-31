@@ -233,6 +233,25 @@ def test_all_corpus_semantic_mutations_reject_false_style_reduction():
     fabricated["metadata"]["ignored_style_changes"] = 0
     harness["check_expectations"](case, fabricated)
 
+    # A Rust IGNORED_STYLE group can be present without a matching metadata
+    # counter. Two routes agreeing on this false reduction must still fail.
+    fabricated["change_groups"] = [{"kind": "IGNORED_STYLE", "rule_id": "rust.style.reduction"}]
+    for evidence in ({}, {"ignored_style_changes": 0}):
+        fabricated["metadata"] = evidence
+        with pytest.raises(AssertionError, match="IGNORED_STYLE group"):
+            harness["check_expectations"](case, fabricated)
+        # Every addition is also source-judged; none may hide content as style.
+        addition = next(item for item in cases if item["id"].endswith("-addition"))
+        with pytest.raises(AssertionError, match="IGNORED_STYLE group"):
+            harness["check_expectations"](addition, fabricated)
+
+    # NOISE_SUPPRESSED is an audit-only category, not an IGNORED_STYLE edit.
+    fabricated["change_groups"] = [{"kind": "NOISE_SUPPRESSED", "rule_id": "rust.audit"}]
+    fabricated["metadata"] = {}
+    harness["check_expectations"](case, fabricated)
+    fabricated["change_groups"] = []
+    harness["check_expectations"](case, fabricated)
+
 
 def test_corpus_fallback_is_rejected_even_when_both_routes_have_changes():
     """Parser availability and route equality cannot certify a generic fallback."""
