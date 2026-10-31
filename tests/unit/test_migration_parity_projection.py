@@ -200,6 +200,40 @@ def test_manifest_visible_tokens_are_carried_into_every_addition_case():
                     / case["corpus_language"] / "playground.expect.json")
         expected = json.loads(manifest.read_text(encoding="utf-8"))
         assert case["required_visible_tokens"] == expected["visible_tokens"], case["id"]
+        assert case["required_visible_tokens"], (
+            case["id"], "vacuous source-content oracle"
+        )
+
+
+def test_sas_corpus_addition_rejects_fabricated_matching_semantic_labels():
+    """SAS previously carried [] and accepted any nonempty, mutually equal tree."""
+    harness = runpy.run_path(str(SCRIPT))
+    sas = next(case for case in harness["full_corpus_cases"]()
+               if case["id"] == "corpus-sas-addition")
+    assert {"WORK.GREETING", "attempts = 4", "checked = 9"} <= set(
+        sas["required_visible_tokens"]
+    )
+    fabricated = _diff(_node("not a SAS token from the supplied source"))
+    with pytest.raises(AssertionError, match="missing source-ratcheted semantic tokens"):
+        harness["check_visible_corpus_tokens"](sas, fabricated)
+
+
+def test_release_corpus_rejects_an_empty_sas_source_oracle(monkeypatch):
+    """A future manifest regression must stop acceptance before any parity checks."""
+    harness = runpy.run_path(str(SCRIPT))
+    original = Path.read_text
+
+    def empty_sas_ratchet(path, *args, **kwargs):
+        text = original(path, *args, **kwargs)
+        if path.name == "playground.expect.json" and path.parent.name == "sas":
+            manifest = json.loads(text)
+            manifest["visible_tokens"] = []
+            return json.dumps(manifest)
+        return text
+
+    monkeypatch.setattr(Path, "read_text", empty_sas_ratchet)
+    with pytest.raises(AssertionError, match="sas: missing nonempty source-judged visible_tokens"):
+        harness["full_corpus_cases"]()
 
 
 def test_corpus_spans_require_utf8_character_boundaries_and_exclude_newlines():
