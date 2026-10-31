@@ -1890,6 +1890,29 @@ def _malformed_native_semantic_flag_payloads() -> list[bytes]:
     return payloads
 
 
+def _malformed_native_metadata_payloads() -> list[bytes]:
+    """Reject raw JSON metadata arrays before Pydantic turns pair arrays into dicts (#217)."""
+    valid_diff = SemanticDiff(
+        old_filename="a.py", new_filename="a.py", language="python",
+        metadata={"engine_owner": "rust"},
+    ).model_dump(mode="json")
+    return [
+        json.dumps({
+            "old_ref": "HEAD", "new_ref": "",
+            "file_diffs": [{**valid_diff, "metadata": malformed}],
+            "cross_file_changes": [], "parse_errors": [],
+            "guardrail_violations": [],
+        }).encode()
+        for malformed in ([["engine_owner", "rust"]], [], None, "rust")
+    ]
+
+
+@pytest.mark.parametrize("payload", _malformed_native_metadata_payloads())
+def test_native_commit_dto_rejects_raw_non_object_metadata(payload: bytes) -> None:
+    with pytest.raises(RuntimeError, match="requires metadata object"):
+        rust_core._require_native_commit_diff_json(payload, "test")
+
+
 @pytest.mark.parametrize("payload", _malformed_native_semantic_flag_payloads())
 def test_native_commit_dto_rejects_coerced_semantic_flags(payload: bytes) -> None:
     with pytest.raises(RuntimeError, match="requires .* boolean"):
@@ -1899,6 +1922,7 @@ def test_native_commit_dto_rejects_coerced_semantic_flags(payload: bytes) -> Non
 @pytest.mark.parametrize("payload", [
     b"not-json", b"{}", b"null", b"[]", b"",
     *_malformed_native_semantic_flag_payloads(),
+    *_malformed_native_metadata_payloads(),
     b'{"old_ref":"HEAD","new_ref":""}',
     b'{"old_ref":"HEAD","new_ref":"","cross_file_changes":[],"parse_errors":[],"guardrail_violations":[]}',
     b'{"old_ref":"HEAD","new_ref":"","file_diffs":[{"old_filename":"a.py","new_filename":"a.py","language":"python"}],"cross_file_changes":[],"parse_errors":[],"guardrail_violations":[]}',
@@ -1933,6 +1957,7 @@ def test_native_commit_adapter_rejects_malformed_complete_dto(
 @pytest.mark.parametrize("payload", [
     b"not-json", b"{}", b"null", b"[]", b"",
     *_malformed_native_semantic_flag_payloads(),
+    *_malformed_native_metadata_payloads(),
     b'{"old_ref":"HEAD","new_ref":""}',
     b'{"old_ref":"HEAD","new_ref":"","cross_file_changes":[],"parse_errors":[],"guardrail_violations":[]}',
     b'{"old_ref":"HEAD","new_ref":"","file_diffs":[{"old_filename":"a.py","new_filename":"a.py","language":"python"}],"cross_file_changes":[],"parse_errors":[],"guardrail_violations":[]}',
@@ -2061,6 +2086,97 @@ def test_ctypes_certified_commit_accepts_explicit_rust_fallback(
     )
     assert not attempt.used
     assert attempt.fallback_reason == "unsupported parser"
+
+
+@pytest.mark.parametrize("wire", [
+    b'{"ok":"true","result":{}}',
+    b'{"ok":true}',
+    b'{"ok":false,"error_type":"value_error","error":"declined"}',
+    b'[]',
+    b'not-json',
+])
+def test_ctypes_outer_abi_envelopes_reject_corruption(
+    monkeypatch: Any, wire: bytes,
+) -> None:
+    """Test the real ctypes pointer/decoder boundary, not a tuple-returning fake (#216)."""
+    import ctypes
+
+    buffer = ctypes.create_string_buffer(wire)
+    lib = SimpleNamespace(
+        intentumdiff_call=lambda *_args, _buffer=buffer: ctypes.addressof(_buffer),
+        intentumdiff_free=lambda *_args: None,
+    )
+    monkeypatch.setattr(rust_core, "_c_abi_lib", lambda: lib)
+    if b'"ok":false' in wire:
+        # Rust-authored failures remain failures, not corrupted-success DTOs.
+        with pytest.raises(ValueError, match="declined"):
+            rust_core._c_abi_call("diff_batch", "{}")
+    else:
+        with pytest.raises(rust_core._InvalidNativeCAbiEnvelope):
+            rust_core._c_abi_call("diff_batch", "{}")
+
+
+def test_ctypes_batch_marks_outer_abi_corruption_invalid(
+    monkeypatch: Any,
+) -> None:
+    def fake_c_abi_call(name: str, *_args: Any) -> Any:
+        if name == "version":
+            return "0.4.0"
+        if name == "supports_language":
+            return True
+        raise rust_core._InvalidNativeCAbiEnvelope(
+            f"invalid C ABI envelope for {name!r}: expected a boolean 'ok'"
+        )
+
+    monkeypatch.setattr(rust_core, "_c_abi_call", fake_c_abi_call)
+    monkeypatch.setattr(rust_core, "_load_backend", rust_core._CtypesBackend)
+    monkeypatch.setattr(rust_core, "rust_core_enabled", lambda _config: True)
+    attempt = rust_core.try_rust_core_batch_diffs(
+        files=[{
+            "old_source": "x = 1", "new_source": "x = 2",
+            "old_filename": "a.py", "new_filename": "a.py",
+            "language": "python", "parser_plugin_id": "python",
+            "parser_wasm_path": "python_parser.wasm",
+        }],
+        config=DiffConfig(experimental_rust_core=True),
+    )
+    assert attempt.invalid_output
+    assert not attempt.diffs
+    assert "invalid native transport" in attempt.fallback_reason
+
+
+@pytest.mark.parametrize("entrypoint", ["batch", "working_tree"])
+def test_ctypes_commit_routes_propagate_outer_abi_corruption(
+    monkeypatch: Any, entrypoint: str,
+) -> None:
+    def fake_c_abi_call(name: str, *_args: Any) -> Any:
+        if name == "version":
+            return "0.4.0"
+        if name == "supports_language":
+            return True
+        raise rust_core._InvalidNativeCAbiEnvelope(
+            f"invalid C ABI envelope for {name!r}: expected a boolean 'ok'"
+        )
+
+    monkeypatch.setattr(rust_core, "_c_abi_call", fake_c_abi_call)
+    monkeypatch.setattr(rust_core, "_load_backend", rust_core._CtypesBackend)
+    monkeypatch.setattr(rust_core, "rust_core_enabled", lambda _config: True)
+    config = DiffConfig(experimental_rust_core=True)
+    with pytest.raises(rust_core._InvalidNativeCAbiEnvelope):
+        if entrypoint == "batch":
+            rust_core.try_rust_core_commit_json(
+                files=[{
+                    "old_source": "x = 1", "new_source": "x = 2",
+                    "old_filename": "a.py", "new_filename": "a.py",
+                    "language": "python", "parser_plugin_id": "python",
+                    "parser_wasm_path": "python_parser.wasm",
+                }],
+                old_ref="HEAD", new_ref="", config=config,
+            )
+        else:
+            rust_core.try_rust_core_working_tree_commit_json(
+                repo_path=".", old_ref="HEAD", config=config,
+            )
 
 
 def test_scope_trails_accepts_rust_certified_empty_arrays(monkeypatch: Any) -> None:
