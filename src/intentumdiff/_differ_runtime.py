@@ -25,10 +25,12 @@ def _infer_file_lifecycle(old_source: str, new_source: str, staging_status: str 
 
 def _apply_file_lifecycle_to_diff(diff: SemanticDiff, lifecycle: str) -> SemanticDiff:
     """Convert the shared Rust result back into the public Python DTO."""
-    from intentumdiff.rust_core import _c_abi_call
-    return SemanticDiff.model_validate(_c_abi_call(
+    from intentumdiff.rust_core import _c_abi_call, _require_complete_batch_diff_dto
+
+    response = _c_abi_call(
         "finalize_file_lifecycle", diff.model_dump(mode="json"), lifecycle,
-    ))
+    )
+    return SemanticDiff.model_validate(_require_complete_batch_diff_dto(response))
 
 
 class _PhaseProfiler:
