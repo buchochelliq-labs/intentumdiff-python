@@ -536,6 +536,11 @@ def check_astro_interpolation_exact(case: dict, diff: dict) -> None:
         )
 
 
+def requires_direct_c_abi_review(case: dict) -> bool:
+    """All 74 language additions and every source-derived mutation require C ABI parity."""
+    return 'corpus_language' in case
+
+
 def run_direct_c_abi_source_review(case: dict, repo: Path, wasm: Path) -> dict:
     """Exercise the six-argument exported Rust C ABI independently of the public Python API.
 
@@ -687,14 +692,10 @@ def main():
                             check_astro_interpolation_exact(case, output)
                     assert projection(rust) == projection(python), (case['id'], projection(rust), projection(python))
                     record = dict(case, rust=rust, python=python)
-                    # All 74 language additions and both TSX source edits also pass
-                    # through the exported C ABI directly. Public Python's use of
-                    # the C ABI is not itself an independent transport assertion.
-                    if 'corpus_language' in case and (
-                        case['id'].endswith('-addition')
-                        or case['id'] in ('corpus-tsx-edit_"_string', 'corpus-tsx-jsx-text',
-                                          'corpus-astro-interpolation-lexical-brace')
-                    ):
+                    # Every corpus addition AND source-derived content mutation
+                    # must independently exercise native Rust, direct C ABI and
+                    # public Python. No language, mutation, or style exemption.
+                    if requires_direct_c_abi_review(case):
                         abi = run_direct_c_abi_source_review(case, root, wasm)
                         check_expectations(case, abi)
                         assert abi['language'] == case['corpus_language'], (
