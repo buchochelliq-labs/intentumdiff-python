@@ -123,6 +123,10 @@ class LanguageInfoGroup(BaseModel, frozen=True):
 
 
 class NodeFacts(BaseModel, frozen=True):
+    # Unknown Rust-authored facts must fail validation rather than disappear
+    # through Pydantic's extra=ignore (0.0.2 thin-wrapper contract, #226).
+    model_config = ConfigDict(extra="forbid")
+
     """
     Privacy-safe structural facts about an entity or keyed/resource node,
     computed by the Rust parser from the full CST before pruning. Only counts,
