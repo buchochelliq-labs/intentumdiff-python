@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import subprocess
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 import pytest
 
@@ -129,12 +129,28 @@ class TestGetContent:
             ),
             patch(
                 "intentumdiff.sources.live_buffer_source.run_git_bytes",
-                side_effect=subprocess.CalledProcessError(1, "git"),
-            ),
+                # A cat-file failure alone is ambiguous: it must be followed by
+                # a successful, empty literal Git tree inspection to prove an
+                # untracked addition. A second failure must propagate (#229).
+                side_effect=[
+                    subprocess.CalledProcessError(1, ["git", "cat-file"]),
+                    b"",
+                ],
+            ) as git_bytes,
         ):
             old, new, _, _ = src.get_content()
         assert old == ""
         assert new == "new_content"
+        assert git_bytes.call_args_list == [
+            call("/repo", ["cat-file", "blob", "HEAD:new_file.py"]),
+            call(
+                "/repo",
+                [
+                    "ls-tree", "-r", "-z", "--full-tree",
+                    "HEAD", "--", ":(literal)new_file.py",
+                ],
+            ),
+        ]
 
 
 # ---------------------------------------------------------------------------
