@@ -115,7 +115,30 @@ class LiveBufferSource(Source):
             data = run_git_bytes(
                 root, ["cat-file", "blob", f"{self._ref}:{self._file_path}"]
             )
-        except subprocess.CalledProcessError:
-            # File not yet tracked at this ref — treat old side as empty.
+        except subprocess.CalledProcessError as exc:
+            # A missing file at a valid ref is a legitimate addition. An invalid
+            # ref or a missing/corrupted tracked blob is not: returning an empty
+            # baseline for either would manufacture a successful semantic diff
+            # against the wrong source (#229). Check the Git tree independently.
+            #
+            # Use a literal pathspec and -z output: glob characters, spaces and
+            # non-ASCII path bytes must not turn a tracked file into an addition.
+            entries = run_git_bytes(
+                root,
+                [
+                    "ls-tree", "-r", "-z", "--full-tree",
+                    self._ref, "--", f":(literal){self._file_path}",
+                ],
+            )
+            expected_path = self._file_path.encode("utf-8", errors="surrogateescape")
+            tracked = any(
+                entry.partition(b"\t")[2] == expected_path
+                for entry in entries.split(b"\0")
+                if entry
+            )
+            if tracked:
+                raise RuntimeError(
+                    f"Failed to read tracked Git blob {self._ref}:{self._file_path}"
+                ) from exc
             return ""
         return data.decode("utf-8", errors="replace")
