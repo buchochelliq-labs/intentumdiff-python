@@ -95,7 +95,7 @@ def test_rust_core_batch_complete_result_is_used(monkeypatch: Any) -> None:
         "schema_version": 1,
         "status": "complete",
         "engine": "rust_core_batch_v4",
-        "diffs": [{"status": "complete", "diff": diff.model_dump(mode="json")}],
+        "diffs": [{"index": 0, "status": "complete", "diff": diff.model_dump(mode="json")}],
         "metadata": {"rust_core_stage": "batch_boundary"},
     }
     backend = SimpleNamespace(
@@ -154,7 +154,7 @@ def test_rust_core_batch_accepts_canonical_python_parser_id(
         "schema_version": 1,
         "status": "complete",
         "engine": "rust_core_batch_v4",
-        "diffs": [{"status": "complete", "diff": diff.model_dump(mode="json")}],
+        "diffs": [{"index": 0, "status": "complete", "diff": diff.model_dump(mode="json")}],
         "metadata": {},
     }
 
@@ -189,7 +189,7 @@ def test_rust_core_batch_fallback_item_is_not_used(monkeypatch: Any) -> None:
         "schema_version": 1,
         "status": "fallback",
         "engine": "rust_core_batch_v4",
-        "diffs": [{"status": "fallback", "reason": "changed-file finalization pending"}],
+        "diffs": [{"index": 0, "status": "fallback", "reason": "changed-file finalization pending"}],
     }
     backend = SimpleNamespace(
         version=lambda: "0.4.0",
@@ -805,7 +805,7 @@ def test_rust_core_batch_candidate_item_is_not_used_by_product_adapter(
         "engine": "rust_core_batch_v4",
         "diffs": [
             {
-                "status": "candidate",
+                "index": 0, "status": "candidate",
                 "candidate_diff": diff.model_dump(mode="json"),
                 "fallback_reason": "candidate is not parity-certified",
             }
@@ -1259,7 +1259,7 @@ def test_semantic_differ_uses_rust_batch_metadata(monkeypatch: Any) -> None:
         "schema_version": 1,
         "status": "complete",
         "engine": "rust_core_batch_v4",
-        "diffs": [{"status": "complete", "diff": diff_payload}],
+        "diffs": [{"index": 0, "status": "complete", "diff": diff_payload}],
         "metadata": {
             "rust_core_stage": "batch_boundary",
             "phase_timings": [{"name": "rust_batch_request_decode", "duration_ms": 1.0}],
@@ -1313,7 +1313,7 @@ def test_semantic_differ_uses_rust_batch_for_changed_complete_output(
         "schema_version": 1,
         "status": "complete",
         "engine": "rust_core_batch_v4",
-        "diffs": [{"status": "complete", "diff": diff_payload}],
+        "diffs": [{"index": 0, "status": "complete", "diff": diff_payload}],
         "metadata": {
             "rust_core_stage": "batch_boundary",
             "phase_timings": [{"name": "rust_batch_request_decode", "duration_ms": 1.0}],
@@ -1651,7 +1651,7 @@ def test_semantic_differ_batch_decline_requires_native_finalize_handler(monkeypa
         "schema_version": 1,
         "status": "fallback",
         "engine": "rust_core_batch_v4",
-        "diffs": [{"status": "fallback", "reason": "changed-file finalization pending"}],
+        "diffs": [{"index": 0, "status": "fallback", "reason": "changed-file finalization pending"}],
     }
     real_backend = rust_core._load_backend()
     backend = SimpleNamespace(
