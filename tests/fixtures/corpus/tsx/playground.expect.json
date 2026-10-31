@@ -2,7 +2,7 @@
   "language": "tsx",
   "filename": "component.tsx",
   "visible_tokens": [
-    "interface",
+    "id",
     "User",
     "number",
     "name",
