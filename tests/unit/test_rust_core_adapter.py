@@ -2352,3 +2352,111 @@ def test_rust_source_fallback_requires_complete_response(monkeypatch: Any) -> No
     ).model_dump(mode="json"))
     empty = call()
     assert empty.is_fallback and not empty.has_semantic_changes and empty.changes == []
+
+@pytest.mark.parametrize("kind, expected_error", [
+    ("internal", RuntimeError),
+    ("not_found", FileNotFoundError),
+    ("value_error", ValueError),
+    ("bad_request", ValueError),
+])
+@pytest.mark.parametrize("route", ["batch", "commit", "working_tree"])
+def test_ctypes_native_operation_errors_fail_closed_in_every_commit_adapter(
+    monkeypatch: Any, kind: str, expected_error: type[Exception], route: str,
+) -> None:
+    """A real C ABI error must never be recast as a Rust-controlled decline (#219)."""
+    import ctypes
+
+    buffers = []
+
+    def native_call(name: bytes, *_args: Any) -> int:
+        handler = name.decode("utf-8")
+        if handler == "version":
+            wire = {"ok": True, "result": "0.4.0"}
+        elif handler == "supports_language":
+            wire = {"ok": True, "result": True}
+        else:
+            wire = {"ok": False, "error_type": kind, "error": "native operation failed"}
+        buffer = ctypes.create_string_buffer(json.dumps(wire).encode("utf-8"))
+        buffers.append(buffer)  # Preserve ownership through ctypes.cast/free.
+        return ctypes.addressof(buffer)
+
+    monkeypatch.setattr(
+        rust_core, "_c_abi_lib",
+        lambda: SimpleNamespace(
+            intentumdiff_call=native_call,
+            intentumdiff_free=lambda *_args: None,
+        ),
+    )
+    monkeypatch.setattr(rust_core, "_load_backend", rust_core._CtypesBackend)
+    monkeypatch.setattr(rust_core, "rust_core_enabled", lambda _config: True)
+
+    config = DiffConfig(experimental_rust_core=True)
+    files = [{
+        "old_source": "x = 1", "new_source": "x = 2",
+        "old_filename": "a.py", "new_filename": "a.py",
+        "language": "python", "parser_plugin_id": "python",
+        "parser_wasm_path": "python_parser.wasm",
+    }]
+    if route == "batch":
+        attempt = rust_core.try_rust_core_batch_diffs(files=files, config=config)
+        assert attempt.invalid_output
+        assert not attempt.diffs
+        assert "native operation failed" in attempt.fallback_reason
+    else:
+        with pytest.raises(rust_core._NativeCAbiOperationFailure) as raised:
+            if route == "commit":
+                rust_core.try_rust_core_commit_json(
+                    files=files, old_ref="HEAD", new_ref="", config=config,
+                )
+            else:
+                rust_core.try_rust_core_working_tree_commit_json(
+                    repo_path=".", old_ref="HEAD", config=config,
+                )
+        assert isinstance(raised.value, expected_error)
+        assert "native operation failed" in str(raised.value)
+
+
+def test_ctypes_explicit_rust_batch_decline_remains_routable(monkeypatch: Any) -> None:
+    """A valid Rust status='fallback' is distinct from any raised operation error."""
+    import ctypes
+
+    buffers = []
+
+    def native_call(name: bytes, *_args: Any) -> int:
+        handler = name.decode("utf-8")
+        if handler == "version":
+            wire = {"ok": True, "result": "0.4.0"}
+        elif handler == "supports_language":
+            wire = {"ok": True, "result": True}
+        else:
+            wire = {"ok": True, "result": {
+                "engine": rust_core._BATCH_ENGINE, "status": "fallback",
+                "diffs": [{"index": 0, "status": "fallback",
+                           "reason": "explicit native decline"}],
+                "metadata": {},
+            }}
+        buffer = ctypes.create_string_buffer(json.dumps(wire).encode("utf-8"))
+        buffers.append(buffer)
+        return ctypes.addressof(buffer)
+
+    monkeypatch.setattr(
+        rust_core, "_c_abi_lib",
+        lambda: SimpleNamespace(
+            intentumdiff_call=native_call,
+            intentumdiff_free=lambda *_args: None,
+        ),
+    )
+    monkeypatch.setattr(rust_core, "_load_backend", rust_core._CtypesBackend)
+    monkeypatch.setattr(rust_core, "rust_core_enabled", lambda _config: True)
+    attempt = rust_core.try_rust_core_batch_diffs(
+        files=[{
+            "old_source": "x = 1", "new_source": "x = 2",
+            "old_filename": "a.py", "new_filename": "a.py",
+            "language": "python", "parser_plugin_id": "python",
+            "parser_wasm_path": "python_parser.wasm",
+        }],
+        config=DiffConfig(experimental_rust_core=True),
+    )
+    assert attempt.invalid_output is False
+    assert attempt.fallback_reasons == {0: "explicit native decline"}
+    assert not attempt.diffs
