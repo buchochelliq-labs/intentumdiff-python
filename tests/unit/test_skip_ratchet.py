@@ -23,10 +23,20 @@ BASELINE = json.loads((TESTS_DIR / "skip_reasons_baseline.json").read_text(encod
 # construct-matrix helper's `return "skip", f"..."` tuple form — both quote styles,
 # f-strings included (dynamic parts stay literal in the pattern match).
 _REASON_RE = re.compile(
-    r'(?:reason\s*=\s*|pytest\.skip\(\s*|"skip",\s*)(?:f?)'
+    r'(?:(?<!\w)reason\s*=\s*|pytest\.skip\(\s*|"skip",\s*)(?:f?)'
     r'(?:"((?:[^"\\]|\\.){3,200})"|\'((?:[^\'\\]|\\.){3,200})\')'
 )
 
+
+ 
+def test_skip_reason_scanner_does_not_match_diagnostic_suffixes() -> None:
+    # These are ordinary transport-error fields, not pytest skip markers.
+    for field in ("fallback_reason", "diagnostic_reason", "not_a_skip_reason"):
+        assert _REASON_RE.search(
+            f'{field}="invalid native transport: corrupt C ABI envelope"'
+        ) is None
+    assert _REASON_RE.search('reason="legitimate skip"') is not None
+    assert _REASON_RE.search('pytest.skip("direct skip")') is not None
 
 def _collect_reasons() -> dict[str, list[str]]:
     reasons: dict[str, list[str]] = {}
