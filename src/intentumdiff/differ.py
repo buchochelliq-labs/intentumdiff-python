@@ -858,6 +858,15 @@ class SemanticDiffer:
                     parallel=rust_batch_parallel,
                     max_workers=rust_batch_workers,
                 )
+                # A corrupted Rust batch is an integrity failure, never an
+                # invitation to reroute files through a different finalizer.
+                # The single-file entrypoint already enforces this contract;
+                # public commit reviews must enforce it before merging results.
+                if rust_batch.invalid_output:
+                    raise RuntimeError(
+                        "Malformed Rust commit batch result: "
+                        f"{rust_batch.fallback_reason or 'invalid native output'}"
+                    )
                 rust_batch_ms = (time.perf_counter() - rust_batch_started) * 1000
                 rust_batch_fallback_count = int(
                     rust_batch.batch_metadata.get("fallback_count")
