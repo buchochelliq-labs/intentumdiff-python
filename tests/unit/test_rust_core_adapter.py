@@ -2091,6 +2091,9 @@ def test_ctypes_certified_commit_accepts_explicit_rust_fallback(
 @pytest.mark.parametrize("wire", [
     b'{"ok":"true","result":{}}',
     b'{"ok":true}',
+    b'{"ok":false,"error":"declined"}',
+    b'{"ok":false,"error":"declined","error_type":42}',
+    b'{"ok":false,"error_type":"unexpected_kind","error":"declined"}',
     b'{"ok":false,"error_type":"value_error","error":"declined"}',
     b'[]',
     b'not-json',
@@ -2114,6 +2117,16 @@ def test_ctypes_outer_abi_envelopes_reject_corruption(
     else:
         with pytest.raises(rust_core._InvalidNativeCAbiEnvelope):
             rust_core._c_abi_call("diff_batch", "{}")
+
+
+def test_ctypes_null_pointer_is_transport_integrity_error(monkeypatch: Any) -> None:
+    lib = SimpleNamespace(
+        intentumdiff_call=lambda *_args: None,
+        intentumdiff_free=lambda *_args: None,
+    )
+    monkeypatch.setattr(rust_core, "_c_abi_lib", lambda: lib)
+    with pytest.raises(rust_core._InvalidNativeCAbiEnvelope, match="returned NULL"):
+        rust_core._c_abi_call("diff_batch", "{}")
 
 
 def test_ctypes_batch_marks_outer_abi_corruption_invalid(
