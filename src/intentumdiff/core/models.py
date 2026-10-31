@@ -124,7 +124,7 @@ class LanguageInfoGroup(BaseModel, frozen=True):
 
 class NodeFacts(BaseModel, frozen=True):
     """
-    Privacy-safe structural facts about a definition node (function/method/class),
+    Privacy-safe structural facts about an entity or keyed/resource node,
     computed by the Rust parser from the full CST before pruning. Only counts,
     enums, and flags — never source text, identifiers, or literals — so they can
     describe a change's shape ("no parameters", "returns nothing", "no-op body")
@@ -213,6 +213,20 @@ class NodeFacts(BaseModel, frozen=True):
     #: function calls itself (recursion). Count/flag only.
     call_count: int | None = None
     recursive: bool | None = None
+
+    # Rust-owned keyed/collection/resource NodeFacts (#179, Core #203,
+    # Python #226). These are DTO fields only: the Python host must preserve
+    # Rust's privacy-safe counts, flags and shape categories without deriving
+    # them or silently dropping them through Pydantic's extra=ignore.
+    shape: str | None = None
+    child_count: int | None = None
+    value_kind: str | None = None
+    item_count: int | None = None
+    nesting: int | None = None
+    is_leaf: bool | None = None
+    attribute_count: int | None = None
+    nested_block_count: int | None = None
+    has_nested_block: bool | None = None
 
 
 class SemanticNode(BaseModel, frozen=True):
