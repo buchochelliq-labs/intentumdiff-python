@@ -266,6 +266,27 @@ class _InvalidNativeCAbiEnvelope(RuntimeError):
     """Corrupted C ABI response: a different Rust route must not mask the failure."""
 
 
+class _NativeCAbiOperationFailure(Exception):
+    """Rust returned an operation error, not a Rust-controlled fallback status.
+
+    This marker preserves each historical Python exception category via the
+    subclasses below while preventing the adapter from mistaking raised native
+    failures for an explicit status="fallback" result (#219).
+    """
+
+
+class _NativeCAbiNotFoundError(FileNotFoundError, _NativeCAbiOperationFailure):
+    """Native not_found error with its existing FileNotFoundError contract."""
+
+
+class _NativeCAbiValueError(ValueError, _NativeCAbiOperationFailure):
+    """Native input error with its existing ValueError contract."""
+
+
+class _NativeCAbiInternalError(RuntimeError, _NativeCAbiOperationFailure):
+    """Native internal/panic error with its existing RuntimeError contract."""
+
+
 def _c_abi_call(name: str, *args: Any) -> Any:
     """Invoke a C-ABI handler by name; return its ``result`` or re-raise the classified error.
 
@@ -320,10 +341,10 @@ def _c_abi_call(name: str, *args: Any) -> Any:
             f"invalid C ABI envelope for {name!r}: malformed error fields"
         )
     if kind == "not_found":
-        raise FileNotFoundError(message)
+        raise _NativeCAbiNotFoundError(message)
     if kind == "internal":
-        raise RuntimeError(message)
-    raise ValueError(message)
+        raise _NativeCAbiInternalError(message)
+    raise _NativeCAbiValueError(message)
 
 
 class _CtypesBackend:
@@ -1782,6 +1803,16 @@ def try_rust_core_batch_diffs(
             invalid_output=True,
             adapter_phase_timings=adapter_phase_timings,
         )
+    except _NativeCAbiOperationFailure as exc:
+        # A raised Rust error is not a Rust response with status="fallback".
+        # The public batch and commit callers must reject this result rather
+        # than executing another route and publishing manufactured success.
+        logger.debug("Rust core batch operation failed: %s", exc)
+        return RustCoreBatchDiffsAttempt(
+            fallback_reason=f"native operation failed: {exc}",
+            invalid_output=True,
+            adapter_phase_timings=adapter_phase_timings,
+        )
     except (ValidationError, ValueError, TypeError) as exc:
         logger.debug("Rust core batch output rejected: %s", exc)
         return RustCoreBatchDiffsAttempt(
@@ -2023,7 +2054,7 @@ def try_rust_core_commit_json(
             adapter_phase_timings=adapter_phase_timings,
             backend_version=backend_version,
         )
-    except (_InvalidNativeCommitDto, _InvalidNativeCAbiEnvelope):
+    except (_InvalidNativeCommitDto, _InvalidNativeCAbiEnvelope, _NativeCAbiOperationFailure):
         raise
     except (ValidationError, ValueError, TypeError) as exc:
         logger.debug("Rust core certified commit JSON rejected: %s", exc)
@@ -2136,7 +2167,7 @@ def try_rust_core_working_tree_commit_json(
             adapter_phase_timings=adapter_phase_timings,
             backend_version=backend_version,
         )
-    except (_InvalidNativeCommitDto, _InvalidNativeCAbiEnvelope):
+    except (_InvalidNativeCommitDto, _InvalidNativeCAbiEnvelope, _NativeCAbiOperationFailure):
         raise
     except (ValidationError, ValueError, TypeError) as exc:
         logger.debug("Rust core working-tree commit JSON rejected: %s", exc)
