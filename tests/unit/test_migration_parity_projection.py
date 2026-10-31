@@ -215,6 +215,20 @@ def test_corpus_gate_rejects_known_platform_parser_exclusion():
     check(case, system="Linux", machine="x86_64")
 
 
+def test_direct_c_abi_gate_covers_all_74_languages_and_every_mutation():
+    """Direct ABI evidence may not silently ratchet down to addition-only cases."""
+    harness = runpy.run_path(str(SCRIPT))
+    cases = harness["full_corpus_cases"]() + harness["dedicated_source_cases"]()
+    languages = {case["corpus_language"] for case in cases}
+    additions = [case for case in cases if case["id"].endswith("-addition")]
+    mutations = [case for case in cases if not case["id"].endswith("-addition")]
+    assert len(languages) == 74
+    assert len(additions) == 74
+    assert len(mutations) >= 74, "the release corpus lost source-derived mutations"
+    assert all(harness["requires_direct_c_abi_review"](case) for case in cases)
+    assert not harness["requires_direct_c_abi_review"]({"id": "ordinary-text-case"})
+
+
 def test_all_corpus_semantic_mutations_reject_false_style_reduction():
     """The 74-language gate must reject suppressed edits, not just additions."""
     harness = runpy.run_path(str(SCRIPT))
