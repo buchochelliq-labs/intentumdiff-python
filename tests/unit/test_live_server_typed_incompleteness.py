@@ -79,7 +79,9 @@ def test_valid_rust_diff_remains_successful_without_python_recomputation(tmp_pat
 
 
 def test_valid_streaming_emits_only_rust_certified_final_changes(tmp_path):
-    from intentumdiff.core.models import Change, ChangeType
+    from intentumdiff.core.models import (
+        Change, ChangeType, NodePosition, SemanticNode,
+    )
 
     server, differ = _server(tmp_path)
     request = _ParsedRequest(
@@ -90,7 +92,27 @@ def test_valid_streaming_emits_only_rust_certified_final_changes(tmp_path):
     valid = SemanticDiff(
         old_filename="edit.py", new_filename="edit.py", language="python",
         is_fallback=False, parse_errors=[], has_semantic_changes=True,
-        changes=[Change(change_type=ChangeType.MODIFICATION, description="real edit")],
+        # This mocked Rust success must contain source-anchored nodes, as an
+        # actual Rust MODIFICATION does. Missing-node success is rejected by
+        # #228 and separately covered by the negative transport regressions.
+        changes=[Change(
+            change_type=ChangeType.MODIFICATION,
+            description="real edit",
+            old_node=SemanticNode(
+                id="old-number", node_type="integer", label="1",
+                position=NodePosition(
+                    start_line=1, start_col=11, end_line=1, end_col=12,
+                ),
+                structural_hash="old-number-hash",
+            ),
+            new_node=SemanticNode(
+                id="new-number", node_type="integer", label="2",
+                position=NodePosition(
+                    start_line=1, start_col=11, end_line=1, end_col=12,
+                ),
+                structural_hash="new-number-hash",
+            ),
+        )],
     ).model_dump(mode="json")
     sent = []
     with patch("intentumdiff.rust_core.live_handle_diff", return_value={"diff": valid}):
@@ -100,6 +122,11 @@ def test_valid_streaming_emits_only_rust_certified_final_changes(tmp_path):
     assert sent[0]["op"] == "diff" and sent[0]["ok"] is True
     assert sent[0]["event"]["phase"] == 3  # FINAL, not a Python synthetic stage
     assert sent[0]["event"]["change"]["change_type"] == "MODIFICATION"
+    assert sent[0]["event"]["change"]["old_node"]["label"] == "1"
+    assert sent[0]["event"]["change"]["new_node"]["label"] == "2"
+    assert sent[0]["event"]["change"]["new_node"]["position"] == {
+        "start_line": 1, "start_col": 11, "end_line": 1, "end_col": 12,
+    }
     assert sent[1] == {"op": "diff", "seq": 20, "ok": True, "done": True}
     differ.diff.assert_not_called()
     differ.diff_stream_progressive.assert_not_called()
