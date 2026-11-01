@@ -1626,15 +1626,19 @@ class TestMalformedRequests:
 # The socket transport must never change request bytes before Rust sees them (#235).
 def test_socket_invalid_utf8_is_rejected_before_scheduling() -> None:
     server, _ = _make_server()
-    with socket.socketpair() as (server_conn, client_conn):
+    server_conn, client_conn = socket.socketpair()
+    try:
         client_conn.settimeout(5)
         client_conn.sendall(
-            b'{"op":"diff","seq":7,"path":"foo.py","content":"\\xff"}\\n'
+            b'{"op":"diff","seq":7,"path":"foo.py","content":"\xff"}\n'
         )
         client_conn.shutdown(socket.SHUT_WR)
         with patch.object(server, "_schedule_request") as schedule:
             server._handle_client(server_conn)
             schedule.assert_not_called()
         response = json.loads(client_conn.recv(4096).decode("ascii"))
+    finally:
+        server_conn.close()
+        client_conn.close()
     assert response["ok"] is False
     assert response["error"]["code"] == "invalid_utf8"
