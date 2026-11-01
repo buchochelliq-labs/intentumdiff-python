@@ -910,25 +910,40 @@ def _cmd_plugins_remove(args: argparse.Namespace) -> None:
 
     name = args.plugin_name
     spec = PluginSpec(name=name)
+    manifest_path = Path(args.file) if args.save else None
+    existing_manifest: list[PluginSpec] | None = None
+    # --save is a pinned provenance change, not best-effort decoration. Check
+    # the existing manifest before any irreversible pip side effects (#257).
+    if manifest_path is not None and (
+        manifest_path.exists() or manifest_path.is_symlink()
+    ):
+        try:
+            existing_manifest = load_plugins_file(manifest_path)
+        except Exception as exc:
+            raise RuntimeError(
+                f"Refusing to uninstall with invalid plugins manifest {manifest_path}: {exc}"
+            ) from exc
+
     _console.print(f"Uninstalling [cyan]{spec.package_name}[/cyan] ...")
     rc = pip_uninstall(spec.package_name)
     if rc != 0:
         _err.print(f"[red]pip uninstall failed (exit code {rc})[/red]")
         sys.exit(rc)
 
-    if args.save:
-        yaml_path = Path(args.file)
-        if yaml_path.exists():
-            try:
-                specs = load_plugins_file(yaml_path)
-                specs = [
-                    s for s in specs
-                    if s.name != name and s.name != spec.package_name
-                ]
-                save_plugins_file(yaml_path, specs)
-                _console.print(f"[green]Removed from {yaml_path}[/green]")
-            except Exception as exc:
-                _err.print(f"[yellow]Warning: could not update {yaml_path}: {exc}[/yellow]")
+    if manifest_path is not None and existing_manifest is not None:
+        specs = [
+            s for s in existing_manifest
+            if s.name != name and s.name != spec.package_name
+        ]
+        try:
+            save_plugins_file(manifest_path, specs)
+        except Exception as exc:
+            # pip has already succeeded, but the manifest is not reconciled.
+            # Propagate a partial failure rather than print a false success.
+            raise RuntimeError(
+                f"Plugin uninstalled but could not update {manifest_path}: {exc}"
+            ) from exc
+        _console.print(f"[green]Removed from {manifest_path}[/green]")
 
     _console.print(f"[green]Plugin '{spec.package_name}' uninstalled.[/green]")
 
