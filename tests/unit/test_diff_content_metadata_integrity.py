@@ -17,7 +17,7 @@ class _DiffDTO:
         return _DiffDTO(update["metadata"])
 
 
-@pytest.mark.parametrize("bad_codepoint", ["\\udcff", "\\udcfe"])
+@pytest.mark.parametrize("bad_codepoint", [chr(0xDCFF), chr(0xDCFE)])
 def test_content_type_metadata_rejects_undecodable_source_before_rust(
     monkeypatch, bad_codepoint
 ):
