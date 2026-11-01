@@ -407,7 +407,7 @@ def test_index_directory_skips_recognized_binary_png_without_losing_source(
 ) -> None:
     """Only Rust-confirmed binary assets are excluded, not valid source files."""
     source = "answer = 42\n"
-    (tmp_path / "main.py").write_text(source, encoding="utf-8")
+    (tmp_path / "main.py").write_bytes(source.encode("utf-8"))
     (tmp_path / "logo.png").write_bytes(
         b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
     )
