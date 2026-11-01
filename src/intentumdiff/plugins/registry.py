@@ -1101,7 +1101,12 @@ def _load_enrichers(fuel: int = 10_000_000) -> list[EnricherAdapter]:
             adapters.append(adapter)
             logger.debug("Loaded enricher plugin: %s (%s)", ep.name, wasm_path)
         except Exception as exc:
-            logger.warning("Failed to load enricher plugin %r: %s", ep.name, exc)
+            # An installed extension that fails to load is not equivalent to an
+            # absent extension. Continuing would certify incomplete semantics (#237).
+            raise PluginLoadError(
+                f"{_ENRICHER_GROUP}:{ep.name}",
+                f"registered enricher failed to load: {exc}",
+            ) from exc
     return adapters
 
 
@@ -1117,5 +1122,10 @@ def _load_diff_analyzers(fuel: int = 10_000_000) -> list[DiffAnalyzerAdapter]:
             adapters.append(adapter)
             logger.debug("Loaded diff-analyzer plugin: %s (%s)", ep.name, wasm_path)
         except Exception as exc:
-            logger.warning("Failed to load diff-analyzer plugin %r: %s", ep.name, exc)
+            # Do not silently remove a registered semantic pass from the review
+            # pipeline or treat a partial plugin set as a complete result (#236).
+            raise PluginLoadError(
+                f"{_DIFF_ANALYZER_GROUP}:{ep.name}",
+                f"registered diff analyzer failed to load: {exc}",
+            ) from exc
     return adapters
