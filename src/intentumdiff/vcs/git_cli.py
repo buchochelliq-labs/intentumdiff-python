@@ -72,29 +72,49 @@ def run_git_bytes(
 
 
 def parse_name_status_z(data: bytes) -> "list[tuple[str, str, str]]":
-    """Parse ``git diff --name-status -z`` output into ``(code, old_path, new_path)``.
+    """Decode a complete Git name-status -z stream without losing file identities.
 
-    For Add/Delete/Modify a single path follows the status; for Rename/Copy two
-    paths follow (old then new). Paths are NUL-separated (``-z``).
+    Git uses NUL terminators to delimit status tokens and raw pathname bytes.
+    A malformed stream or an undecodable path is an integrity failure, never a
+    successful partial change inventory (Python #240).
     """
-    tokens = [t for t in data.split(b"\0") if t]
+    if not data:
+        return []
+    if not data.endswith(b"\0"):
+        raise RuntimeError("Incomplete git name-status -z: missing NUL terminator")
+
+    tokens = data[:-1].split(b"\0")
     entries: list[tuple[str, str, str]] = []
     idx = 0
     while idx < len(tokens):
-        status = tokens[idx].decode("ascii", errors="replace")
+        try:
+            status = tokens[idx].decode("ascii", errors="strict")
+        except UnicodeDecodeError as exc:
+            raise UnicodeError("Invalid ASCII Git change status") from exc
         idx += 1
-        code = status[:1]
-        if code in {"R", "C"}:
-            if idx + 1 >= len(tokens):
-                break
-            old_path = tokens[idx].decode("utf-8", errors="replace")
-            new_path = tokens[idx + 1].decode("utf-8", errors="replace")
-            idx += 2
-        else:
-            if idx >= len(tokens):
-                break
-            old_path = tokens[idx].decode("utf-8", errors="replace")
-            new_path = old_path
-            idx += 1
+        if (
+            not status
+            or status[0] not in "ACDMRTUXB"
+            or (len(status) > 1 and (status[0] not in "RC" or not status[1:].isdigit()))
+        ):
+            raise RuntimeError(f"Invalid git name-status code: {status!r}")
+
+        code = status[0]
+        needed = 2 if code in {"R", "C"} else 1
+        if len(tokens) - idx < needed:
+            raise RuntimeError(
+                f"Truncated git name-status -z: {code!r} requires {needed} path(s)"
+            )
+
+        raw_paths = tokens[idx : idx + needed]
+        idx += needed
+        if any(not path for path in raw_paths):
+            raise RuntimeError("Empty filename in git name-status -z")
+        try:
+            paths = [path.decode("utf-8", errors="strict") for path in raw_paths]
+        except UnicodeDecodeError as exc:
+            raise UnicodeError("Invalid UTF-8 in Git change filename") from exc
+        old_path = paths[0]
+        new_path = paths[1] if needed == 2 else old_path
         entries.append((code, old_path, new_path))
     return entries
