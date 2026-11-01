@@ -141,4 +141,7 @@ class LiveBufferSource(Source):
                     f"Failed to read tracked Git blob {self._ref}:{self._file_path}"
                 ) from exc
             return ""
-        return data.decode("utf-8", errors="replace")
+        # Git can return a tracked blob whose bytes are not valid UTF-8.
+        # Replacing invalid bytes would invent an old source and falsely
+        # certify a semantic review against content Git never stored (#231).
+        return data.decode("utf-8")
