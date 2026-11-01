@@ -12,10 +12,8 @@ from intentumdiff import ChangeGroupKind, SemanticDiffer
 from intentumdiff.analysis.invariances import (
     InvarianceRuleDefinition,
     InvarianceRuleSet,
-    apply_invariances,
     load_builtin_invariance_rules,
 )
-from intentumdiff.core.models import Change, ChangeType, NodePosition, SemanticNode
 
 ROOT = Path(__file__).parents[2]
 
@@ -34,14 +32,26 @@ def _rules_schema() -> dict:
     return json.loads(schema_path.read_text(encoding="utf-8"))
 
 
-def _node(node_id: str, node_type: str, label: str, start: int, end: int) -> SemanticNode:
-    return SemanticNode(
-        id=node_id,
-        node_type=node_type,
-        label=label,
-        position=NodePosition(start_line=0, start_col=start, end_line=0, end_col=end),
-        structural_hash=f"hash-{node_id}",
-    )
+def test_python_invariance_module_is_catalogue_only():
+    import ast
+
+    path = ROOT / "src" / "intentumdiff" / "analysis" / "invariances.py"
+    module = ast.parse(path.read_text(encoding="utf-8"))
+    functions = {
+        node.name
+        for node in module.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    assert functions == {"load_builtin_invariance_rules", "builtin_invariance_rule"}
+
+
+def test_disabled_catalogue_rules_do_not_surface_from_rust():
+    disabled = {
+        rule.id for rule in load_builtin_invariance_rules() if not rule.enabled
+    }
+    assert disabled
+    diff = _diff_css(".button { color: blue; }", ".button { color: #0000ff; }")
+    assert not any(group.rule_id in disabled for group in diff.change_groups)
 
 
 def test_packaged_yaml_rules_load_from_package_resources():
@@ -237,87 +247,6 @@ def test_builtin_catalog_entries_have_review_metadata():
             assert rule.evaluator is None
 
 
-def test_disabled_rules_do_not_fire():
-    disabled = InvarianceRuleDefinition(
-        id="css.color.disabled",
-        languages=("css",),
-        evaluator="css_color_equivalence",
-        group_kind=ChangeGroupKind.IGNORED_STYLE,
-        enabled=False,
-        risk="green",
-        explanation="disabled test rule",
-    )
-    # White-box fixture (reformulated for the #57 python-pipeline retirement): the unit
-    # under test is apply_invariances with a custom rule set, not the pipeline — feed it a
-    # SYNTHETIC change that an ENABLED css color rule would fire on (blue -> #0000ff), so
-    # "does not fire" is proven against a matching input.
-    old_value = _node("old-color", "plain_value", "blue", 18, 22)
-    new_value = _node("new-color", "color_value", "#0000ff", 18, 25)
-    changes = [
-        Change(
-            change_type=ChangeType.MODIFICATION,
-            old_node=old_value,
-            new_node=new_value,
-            confidence=1.0,
-            description="Update plain_value('blue') -> color_value('#0000ff')",
-        )
-    ]
-
-    result = apply_invariances(
-        changes,
-        old_tree=old_value,
-        new_tree=new_value,
-        old_source=".button { color: blue; }",
-        new_source=".button { color: #0000ff; }",
-        language="css",
-        rules=(disabled,),
-    )
-
-    assert result.changes == changes
-    assert result.change_groups == []
-
-
-def test_catalog_only_rules_do_not_fire():
-    catalog = InvarianceRuleDefinition(
-        id="css.color.catalog.only",
-        languages=("css",),
-        status="catalog",
-        evaluator=None,
-        group_kind=ChangeGroupKind.IGNORED_STYLE,
-        enabled=False,
-        risk="green",
-        explanation="catalog rules document future behavior only",
-        notes="test",
-    )
-    # Same synthetic white-box fixture as test_disabled_rules_do_not_fire (reformulated
-    # for the #57 python-pipeline retirement): a matching css color change proves the
-    # catalog rule does not fire.
-    old_value = _node("old-color", "plain_value", "blue", 18, 22)
-    new_value = _node("new-color", "color_value", "#0000ff", 18, 25)
-    state_changes = [
-        Change(
-            change_type=ChangeType.MODIFICATION,
-            old_node=old_value,
-            new_node=new_value,
-            confidence=1.0,
-            description="Update plain_value('blue') -> color_value('#0000ff')",
-        )
-    ]
-
-    result = apply_invariances(
-        state_changes,
-        old_tree=old_value,
-        new_tree=new_value,
-        old_source=".button { color: blue; }",
-        new_source=".button { color: #0000ff; }",
-        language="css",
-        rules=(catalog,),
-    )
-
-    assert result.changes == state_changes
-    assert result.change_groups == []
-
-
 def test_css_blue_and_hex_blue_are_ignored_with_explainable_evidence():
     diff = _diff_css(".button { color: blue; }", ".button { color: #0000ff; }")
 
@@ -420,42 +349,6 @@ def test_integer_literal_equivalence_is_ignored_with_explainable_evidence():
     assert group.metadata["canonical_new"] == "int(1000)"
     assert group.metadata["old_label"] == "1_000"
     assert group.metadata["new_label"] == "1000"
-
-
-def test_string_literal_quote_equivalence_is_ignored_with_explainable_evidence():
-    old_source = "host = 'semanticdiff.com'\n"
-    new_source = 'host = "semanticdiff.com"\n'
-    old_node = _node("old-string", "string", "semanticdiff.com", 7, 25)
-    new_node = _node("new-string", "string", "semanticdiff.com", 7, 25)
-    rule = next(
-        rule
-        for rule in load_builtin_invariance_rules()
-        if rule.id == "core.string_literal.decoded_value.safe"
-    )
-
-    result = apply_invariances(
-        [
-            Change(
-                change_type=ChangeType.MODIFICATION,
-                old_node=old_node,
-                new_node=new_node,
-            )
-        ],
-        old_tree=old_node,
-        new_tree=new_node,
-        old_source=old_source,
-        new_source=new_source,
-        language="python",
-        rules=(rule,),
-    )
-
-    assert result.changes == []
-    group = result.change_groups[0]
-    assert group.kind == ChangeGroupKind.IGNORED_STYLE
-    assert group.metadata["canonical_old"] == "string(semanticdiff.com)"
-    assert group.metadata["canonical_new"] == "string(semanticdiff.com)"
-    assert group.old_node_ids == ["old-string"]
-    assert group.new_node_ids == ["new-string"]
 
 
 def test_python_quote_only_string_diff_has_source_span_literal_evidence():
