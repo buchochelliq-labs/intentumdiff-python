@@ -229,3 +229,28 @@ class TestCliGitRepoOptional:
         )
         _cmd_git(args)
         assert len(captured) == 1
+
+
+# Git host-I/O must never replace malformed source bytes with U+FFFD (#233/#234).
+def test_fast_commit_baseline_rejects_non_utf8_source(tmp_path):
+    from intentumdiff.sources.git_source import _read_commit_paths_batch
+
+    repo = _make_repo(tmp_path)
+    path = Path(repo.working_tree_dir) / "invalid.py"
+    path.write_bytes(b"\\xffx = 1\\n")
+    repo.index.add(["invalid.py"])
+    repo.index.commit("invalid tracked baseline")
+
+    with pytest.raises(UnicodeError, match="Invalid UTF-8 in tracked Git baseline"):
+        _read_commit_paths_batch(str(tmp_path), "HEAD", ["invalid.py"])
+
+
+def test_fast_worktree_collector_rejects_non_utf8_edits(tmp_path):
+    from intentumdiff.sources.git_source import collect_working_tree_python_sources_fast
+
+    repo = _make_repo(tmp_path)
+    _commit_file(repo, "invalid.py", "x = 1\\n", "valid baseline")
+    (Path(repo.working_tree_dir) / "invalid.py").write_bytes(b"x = 2\\xff\\n")
+
+    with pytest.raises(UnicodeDecodeError):
+        collect_working_tree_python_sources_fast(str(tmp_path), "HEAD")
