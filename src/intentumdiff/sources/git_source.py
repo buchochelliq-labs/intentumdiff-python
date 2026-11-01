@@ -123,7 +123,7 @@ def _read_commit_paths_batch(
     for path in unique_paths:
         header_end = output.find(b"\n", pos)
         if header_end < 0:
-            raise ValueError("malformed git cat-file batch output")
+            raise RuntimeError("malformed git cat-file batch output")
         header = output[pos:header_end]
         pos = header_end + 1
         if header.endswith(b" missing"):
