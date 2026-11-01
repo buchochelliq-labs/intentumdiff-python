@@ -12,6 +12,8 @@ from intentumdiff.analysis.guardrails import (
     load_guardrail_policy,
 )
 from intentumdiff.core.models import DiffConfig
+from intentumdiff.differ import SemanticDiffer
+from intentumdiff.sources.file_source import FileSource
 
 
 def _source_file(tmp_path: Path) -> Path:
@@ -111,3 +113,34 @@ def test_move_without_policy_retains_optional_guardrails(
     old_path.parent.mkdir()
     new_path.parent.mkdir()
     assert not guardrails_may_apply(str(old_path), str(new_path), DiffConfig())
+
+
+def test_missing_explicit_guardrail_policy_cannot_be_skipped_by_rust_batch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    old = tmp_path / "before.yaml"
+    new = tmp_path / "after.yaml"
+    old.write_text("api_key: before\n", encoding="utf-8")
+    new.write_text("api_key: after\n", encoding="utf-8")
+    missing = tmp_path / "explicit-missing-policy.yaml"
+    config = DiffConfig(guardrail_policy_path=missing)
+
+    # The successful native batch path must not skip an explicitly required
+    # policy just because _find_policy_path() reports it missing (#261).
+    with pytest.raises(FileNotFoundError, match="Guardrail policy not found"):
+        guardrails_may_apply(str(old), str(new), config)
+    with pytest.raises(FileNotFoundError, match="Guardrail policy not found"):
+        SemanticDiffer(config=config).diff(FileSource(old, new))
+
+
+def test_existing_empty_explicit_guardrail_policy_remains_valid(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    source = _source_file(tmp_path)
+    policy = tmp_path / "explicit-policy.yaml"
+    policy.write_text("guardrails:\n  protected: []\n", encoding="utf-8")
+    assert not guardrails_may_apply(
+        str(source), None, DiffConfig(guardrail_policy_path=policy)
+    )
