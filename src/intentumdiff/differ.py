@@ -444,12 +444,14 @@ class SemanticDiffer:
         # Retain its actual destination only for host-side policy discovery;
         # the Rust semantic diff must continue to receive the public labels.
         policy_source_filename = str(source._new_path) if isinstance(source, FileSource) else None
+        policy_old_filename = str(source._old_path) if isinstance(source, FileSource) else None
         diff = self._run_pipeline(
             old_content,
             new_content,
             filename,
             language_hint,
             _policy_source_filename=policy_source_filename,
+            _policy_old_filename=policy_old_filename,
             _profiler=profiler,
         )
         # The pipeline works from the single filename language detection needs. A source
@@ -1069,6 +1071,7 @@ class SemanticDiffer:
         new_filename: str | None = None,
         parser_plugin_id: str | None = None,
         _policy_source_filename: str | None = None,
+        _policy_old_filename: str | None = None,
         _profiler: _PhaseProfiler | None = None,
     ) -> SemanticDiff:
         profiler = _profiler or self._new_profiler()
@@ -1080,6 +1083,7 @@ class SemanticDiffer:
             new_filename=new_filename,
             parser_plugin_id=parser_plugin_id,
             policy_source_filename=_policy_source_filename,
+            policy_old_filename=_policy_old_filename,
             profiler=profiler,
         )
         # _run_stages_1_to_11 always returns a finished SemanticDiff since the python
@@ -1130,6 +1134,7 @@ class SemanticDiffer:
         new_filename: str | None = None,
         parser_plugin_id: str | None = None,
         policy_source_filename: str | None = None,
+        policy_old_filename: str | None = None,
         profiler: _PhaseProfiler | None = None,
     ) -> SemanticDiff:
         """Run pipeline stages 1–11 (parse → trivia-strip → Wasm → GumTree → moves).
@@ -1488,6 +1493,7 @@ class SemanticDiffer:
                 new_source=new_raw,
                 config=self._config,
                 policy_filename=policy_source_filename,
+                policy_old_filename=policy_old_filename,
                 diagnostics=diagnostics,
             )
         # ── 9. GumTree matching ────────────────────────────────────────────────
@@ -1561,7 +1567,8 @@ class SemanticDiffer:
                     fallback_diff = _apply_file_lifecycle_to_diff(fallback_diff, file_lifecycle)
                     return apply_guardrails_to_diff(fallback_diff, old_tree=None, new_tree=None,
                         old_source=old_raw, new_source=new_raw, config=self._config,
-                        policy_filename=policy_source_filename, diagnostics=diagnostics)
+                        policy_filename=policy_source_filename,
+                        policy_old_filename=policy_old_filename, diagnostics=diagnostics)
                 diagnostics.record(
                     stage="finalize",
                     action="rust_finalize_review",
@@ -1605,6 +1612,7 @@ class SemanticDiffer:
                     new_source=new_content,
                     config=self._config,
                     policy_filename=policy_source_filename,
+                    policy_old_filename=policy_old_filename,
                     diagnostics=diagnostics,
                 )
                 # Diff-analyzer pass on the routed diff (stage 13.5 mirror; issue #57
@@ -1655,6 +1663,7 @@ class SemanticDiffer:
                 new_source=new_raw,
                 config=self._config,
                 policy_filename=policy_source_filename,
+                policy_old_filename=policy_old_filename,
                 diagnostics=diagnostics,
             )
         if test_engine == "python":
@@ -1703,6 +1712,7 @@ class SemanticDiffer:
             new_source=new_raw,
             config=self._config,
             policy_filename=policy_source_filename,
+            policy_old_filename=policy_old_filename,
             diagnostics=diagnostics,
         )
 
