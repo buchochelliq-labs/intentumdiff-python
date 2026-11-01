@@ -108,6 +108,7 @@ def apply_guardrails_to_diff(
     new_source: str,
     config: DiffConfig,
     diagnostics: DiagnosticsRecorder | None = None,
+    policy_filename: str | None = None,
 ) -> SemanticDiff:
     if not config.guardrails_enabled:
         return diff
@@ -115,7 +116,9 @@ def apply_guardrails_to_diff(
     from dataclasses import asdict
     from intentumdiff.rust_core import _c_abi_call, _require_complete_batch_diff_dto
 
-    policy = load_guardrail_policy(diff.new_filename or diff.old_filename,
+    # FileSource retains its public display name, but a policy must be found
+    # next to the actual destination file, not in the caller's cwd (#259).
+    policy = load_guardrail_policy(policy_filename or diff.new_filename or diff.old_filename,
                                    explicit_path=config.guardrail_policy_path)
     response = _c_abi_call("apply_guardrail_policy", json.dumps({
         "diff": diff.model_dump(mode="json"),
