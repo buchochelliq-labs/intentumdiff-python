@@ -70,6 +70,22 @@ def test_unreadable_tracked_blob_refuses_review(committed_repo):
             source.get_content()
 
 
+def test_invalid_utf8_tracked_blob_is_not_silently_replaced(committed_repo):
+    """A successful Git blob read must preserve source bytes or fail closed."""
+    name = "legacy_encoding.py"
+    (committed_repo / name).write_bytes(b"\xffx = 1\n")
+    subprocess.run(
+        ["git", "-C", str(committed_repo), "add", "--", name],
+        check=True, capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(committed_repo), "commit", "-q", "-m", "Invalid UTF-8 baseline"],
+        check=True, capture_output=True,
+    )
+    with pytest.raises(UnicodeDecodeError):
+        _read(committed_repo, name)
+
+
 def test_failed_independent_tree_inspection_is_not_an_addition(committed_repo):
     def git_failure(repo, args, **kwargs):
         raise subprocess.CalledProcessError(128, args)
