@@ -237,11 +237,23 @@ def _collect_blob_files(
             continue
         if parts[1] != b"blob":
             raise RuntimeError(f"Unexpected git ls-tree object type: {parts[1]!r}")
-        path = raw_path.decode("utf-8", errors="replace")
+        # Git may store arbitrary filename bytes on Unix. Replacing undecodable
+        # bytes invents a different path and can collapse distinct files (#238).
+        try:
+            path = raw_path.decode("utf-8", errors="strict")
+        except UnicodeDecodeError as exc:
+            raise RuntimeError(
+                "Invalid UTF-8 in git ls-tree path: refusing lossy indexing"
+            ) from exc
+        try:
+            sha = parts[2].decode("ascii", errors="strict")
+        except UnicodeDecodeError as exc:
+            raise RuntimeError(
+                f"Invalid ASCII object ID in git ls-tree for {path!r}"
+            ) from exc
         if diffignore and diffignore.is_ignored(path):
             ignored_files.append(path)
             continue
-        sha = parts[2].decode("ascii", errors="replace")
         paths_in_tree_order.append((path, sha))
 
     if not paths_in_tree_order:
