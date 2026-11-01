@@ -48,6 +48,15 @@ def guardrails_may_apply(
 
     if not config.guardrails_enabled:
         return False
+    if config.guardrail_policy_path is not None:
+        # An explicitly configured policy is mandatory. Checking existence via
+        # _find_policy_path() and returning False on absence would allow the
+        # certified Rust batch shortcut to bypass load_guardrail_policy()'s
+        # required-file failure (#261). Validate it before any fast return.
+        policy = load_guardrail_policy(
+            new_filename or filename, explicit_path=config.guardrail_policy_path
+        )
+        return bool(policy.rules) or _is_policy_file(filename) or _is_policy_file(new_filename)
     if _is_policy_file(filename) or (new_filename is not None and _is_policy_file(new_filename)):
         return True
     # The Rust batch shortcut returns before apply_guardrails_to_diff(), which
