@@ -43,11 +43,14 @@ def load_diffignore(root: str | Path) -> "DiffIgnore | None":
     policy is treated as no exclusions.
     """
     path = Path(root) / DIFFIGNORE_FILENAME
-    if not path.is_file():
-        return None
-
     try:
         text = path.read_text(encoding="utf-8")
+    except FileNotFoundError as exc:
+        # A broken symlink is an explicitly configured but unusable policy,
+        # not evidence that no policy exists.
+        if path.is_symlink():
+            raise RuntimeError(f"Could not read configured .diffignore {path}: {exc}") from exc
+        return None
     except (OSError, UnicodeError) as exc:
         raise RuntimeError(f"Could not read configured .diffignore {path}: {exc}") from exc
 

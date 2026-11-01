@@ -95,6 +95,11 @@ class TestLoadDiffignore:
         with pytest.raises(RuntimeError, match=r"Could not read configured \.diffignore"):
             load_diffignore(tmp_path)
 
+    def test_policy_path_directory_fails_closed(self, tmp_path: Path) -> None:
+        (tmp_path / DIFFIGNORE_FILENAME).mkdir()
+        with pytest.raises(RuntimeError, match=r"Could not read configured \.diffignore"):
+            load_diffignore(tmp_path)
+
     def test_malformed_utf8_policy_fails_closed(self, tmp_path: Path) -> None:
         (tmp_path / DIFFIGNORE_FILENAME).write_bytes(b"\xff")
         with pytest.raises(RuntimeError, match=r"Could not read configured \.diffignore"):
