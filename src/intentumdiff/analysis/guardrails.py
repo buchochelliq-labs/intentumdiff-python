@@ -48,29 +48,18 @@ def guardrails_may_apply(
 
     if not config.guardrails_enabled:
         return False
-    if config.guardrail_policy_path is not None:
-        # An explicitly configured policy is mandatory. Checking existence via
-        # _find_policy_path() and returning False on absence would allow the
-        # certified Rust batch shortcut to bypass load_guardrail_policy()'s
-        # required-file failure (#261). Validate it before any fast return.
-        policy = load_guardrail_policy(
-            new_filename or filename, explicit_path=config.guardrail_policy_path
-        )
-        return bool(policy.rules) or _is_policy_file(filename) or _is_policy_file(new_filename)
-    if _is_policy_file(filename) or (new_filename is not None and _is_policy_file(new_filename)):
-        return True
-    # The Rust batch shortcut returns before apply_guardrails_to_diff(), which
-    # discovers policy from the destination path for a rename/move. Mirror
-    # that host-side policy location here or destination rules are bypassed
-    # by an otherwise valid batch result (#258).
-    policy_filename = new_filename or filename
-    policy_path = _find_policy_path(policy_filename, config.guardrail_policy_path)
-    if policy_path is None:
-        return False
-    try:
-        return bool(load_guardrail_policy(policy_filename, explicit_path=policy_path).rules)
-    except ValueError:
-        return True
+    # Both sides of a move can have a policy. Checking only the destination
+    # silently releases protection on moves out of a guarded directory (#262).
+    # An explicit policy is mandatory even before a certified Rust batch return
+    # (#261); all YAML semantics and rule evaluation remain Rust-owned.
+    policies = _load_relevant_guardrail_policies(
+        filename, new_filename, config.guardrail_policy_path
+    )
+    return (
+        _is_policy_file(filename)
+        or _is_policy_file(new_filename)
+        or any(policy.rules for policy in policies)
+    )
 
 
 def load_guardrail_policy(
@@ -108,6 +97,33 @@ def load_guardrail_policy(
                       files=tuple(rule["files"])) for rule in rules))
 
 
+def _load_relevant_guardrail_policies(
+    old_filename: str,
+    new_filename: str | None,
+    explicit_path: Path | None,
+) -> tuple[GuardrailPolicy, ...]:
+    """Discover distinct host policy files for both sides; Rust owns their meaning."""
+    if explicit_path is not None:
+        # An explicit policy overrides auto-discovery and is required to exist.
+        # load_guardrail_policy raises instead of manufacturing no rules (#261).
+        return (load_guardrail_policy(new_filename or old_filename,
+                                      explicit_path=explicit_path),)
+
+    found: list[GuardrailPolicy] = []
+    seen_paths: set[Path] = set()
+    for filename in (old_filename, new_filename):
+        if not filename:
+            continue
+        policy_path = _find_policy_path(filename, None)
+        if policy_path is None or policy_path in seen_paths:
+            continue
+        seen_paths.add(policy_path)
+        # Malformed, dangling or unreadable policies must fail closed even
+        # when the other side of the move contains a valid policy.
+        found.append(load_guardrail_policy(filename, explicit_path=policy_path))
+    return tuple(found)
+
+
 def apply_guardrails_to_diff(
     diff: SemanticDiff,
     *,
@@ -126,24 +142,27 @@ def apply_guardrails_to_diff(
     from dataclasses import asdict
     from intentumdiff.rust_core import _c_abi_call, _require_complete_batch_diff_dto
 
-    # FileSource retains its public display name, but a policy must be found
-    # next to the actual destination file, not in the caller's cwd (#259).
-    policy = load_guardrail_policy(policy_filename or diff.new_filename or diff.old_filename,
-                                   explicit_path=config.guardrail_policy_path)
+    # FileSource transports the physical identities for both sides, preserving
+    # user-facing aliases. For cross-directory moves include both applicable
+    # policy files; only Rust interprets and matches their rules (#262).
+    policies = _load_relevant_guardrail_policies(
+        policy_old_filename or diff.old_filename,
+        policy_filename or diff.new_filename,
+        config.guardrail_policy_path,
+    )
     request = {
         "diff": diff.model_dump(mode="json"),
         "old_tree": old_tree.model_dump(mode="json") if old_tree else None,
         "new_tree": new_tree.model_dump(mode="json") if new_tree else None,
         "old_source": old_source, "new_source": new_source,
-        "rules": [asdict(rule) for rule in policy.rules],
+        "rules": [asdict(rule) for policy in policies for rule in policy.rules],
     }
+    # Pure host-I/O provenance: Rust selects filename-scoped rules and
+    # immutable policy-file warnings; public labels remain untouched (#260).
     if policy_filename is not None:
-        # Pure host-I/O provenance: only Rust selects filename-scoped rules
-        # and the implicit immutable policy-file warning. Public display
-        # labels in the SemanticDiff remain unchanged (#260 / Core #210).
         request["guardrail_new_filename"] = policy_filename
-        if policy_old_filename is not None:
-            request["guardrail_old_filename"] = policy_old_filename
+    if policy_old_filename is not None:
+        request["guardrail_old_filename"] = policy_old_filename
     response = _c_abi_call("apply_guardrail_policy", json.dumps(request))
     result = SemanticDiff.model_validate(_require_complete_batch_diff_dto(response))
     violations = result.guardrail_violations[len(diff.guardrail_violations):]
