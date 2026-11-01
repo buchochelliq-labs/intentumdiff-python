@@ -246,7 +246,7 @@ def test_constructor_callback_used_as_default():
     with patch("intentumdiff.core.indexer.Path.rglob") as mock_rglob:
         mock_path = MagicMock()
         mock_path.is_file.return_value = True
-        mock_path.read_text.return_value = "x = 1"
+        mock_path.read_bytes.return_value = b"x = 1"
         mock_rglob.return_value = [mock_path]
         mock_path.relative_to.return_value = Path("x.py")
 
@@ -400,6 +400,42 @@ def test_index_directory(tmp_path: Path):
     assert result.files_indexed == 2
     assert result.files_skipped == 1
     assert result.errors == []
+
+
+def test_index_directory_skips_recognized_binary_png_without_losing_source(
+    tmp_path: Path,
+) -> None:
+    """Only Rust-confirmed binary assets are excluded, not valid source files."""
+    source = "answer = 42\n"
+    (tmp_path / "main.py").write_text(source, encoding="utf-8")
+    (tmp_path / "logo.png").write_bytes(
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
+    )
+    differ = _make_stub_differ_for_extensions(".py")
+    result = Indexer(differ).index_directory(tmp_path)
+
+    assert result.files_indexed == 1
+    assert result.errors == []
+    assert result.files_skipped == 0
+    differ.parse.assert_called_once_with(source, "main.py")
+
+
+def test_index_directory_fails_closed_when_rust_detector_unavailable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A missing Rust content detector cannot authorize silent source skipping."""
+    from intentumdiff import content_type
+
+    (tmp_path / "main.py").write_text("answer = 42\n", encoding="utf-8")
+    differ = _make_stub_differ_for_extensions(".py")
+
+    def missing_engine(_data: bytes):
+        raise RuntimeError("missing Rust content detector")
+
+    monkeypatch.setattr(content_type, "detect_content_type", missing_engine)
+    with pytest.raises(RuntimeError, match="missing Rust content detector"):
+        Indexer(differ).index_directory(tmp_path)
+    differ.parse.assert_not_called()
 
 
 @pytest.mark.parametrize("filename", ["broken.py", "img.png"])
