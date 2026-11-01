@@ -769,7 +769,16 @@ class LiveServer:
                             _write_line_bytes(conn, {"error": "request line too large"})
                             buf = b""
                             break
-                        line = line_bytes.decode("utf-8", errors="replace").strip()
+                        try:
+                            line = line_bytes.decode("utf-8", errors="strict").strip()
+                        except UnicodeDecodeError:
+                            _write_line_bytes(
+                                conn,
+                                self._error_response(
+                                    0, "invalid_utf8", "Request line must be valid UTF-8"
+                                ),
+                            )
+                            continue
                         if not line:
                             continue
                         try:
