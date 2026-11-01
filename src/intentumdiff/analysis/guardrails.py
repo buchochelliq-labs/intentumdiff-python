@@ -50,11 +50,16 @@ def guardrails_may_apply(
         return False
     if _is_policy_file(filename) or (new_filename is not None and _is_policy_file(new_filename)):
         return True
-    policy_path = _find_policy_path(filename, config.guardrail_policy_path)
+    # The Rust batch shortcut returns before apply_guardrails_to_diff(), which
+    # discovers policy from the destination path for a rename/move. Mirror
+    # that host-side policy location here or destination rules are bypassed
+    # by an otherwise valid batch result (#258).
+    policy_filename = new_filename or filename
+    policy_path = _find_policy_path(policy_filename, config.guardrail_policy_path)
     if policy_path is None:
         return False
     try:
-        return bool(load_guardrail_policy(filename, explicit_path=policy_path).rules)
+        return bool(load_guardrail_policy(policy_filename, explicit_path=policy_path).rules)
     except ValueError:
         return True
 
