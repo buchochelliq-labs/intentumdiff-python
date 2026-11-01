@@ -75,7 +75,7 @@ class TestLoadDiffignore:
         (tmp_path / DIFFIGNORE_FILENAME).write_text("")
         assert isinstance(load_diffignore(tmp_path), DiffIgnore)
 
-    def test_unreadable_file_returns_none(
+    def test_unreadable_file_fails_closed(
         self,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
@@ -92,8 +92,13 @@ class TestLoadDiffignore:
             return original_read_text(self, *args, **kwargs)
 
         monkeypatch.setattr(Path, "read_text", _raise)
-        result = load_diffignore(tmp_path)
-        assert result is None
+        with pytest.raises(RuntimeError, match=r"Could not read configured \.diffignore"):
+            load_diffignore(tmp_path)
+
+    def test_malformed_utf8_policy_fails_closed(self, tmp_path: Path) -> None:
+        (tmp_path / DIFFIGNORE_FILENAME).write_bytes(b"\xff")
+        with pytest.raises(RuntimeError, match=r"Could not read configured \.diffignore"):
+            load_diffignore(tmp_path)
 
 
 # ---------------------------------------------------------------------------
@@ -189,6 +194,27 @@ class TestIndexerDiffignoreIntegration:
         assert result.files_ignored == 2
         assert result.files_indexed == 1  # only src/main.py
         assert all("generated/" in p for p in result.ignored_files)
+
+    def test_unreadable_diffignore_aborts_index_instead_of_exposing_excluded_files(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from intentumdiff.core.indexer import Indexer
+
+        (tmp_path / "secret.py").write_text("token = 123\n", encoding="utf-8")
+        policy = tmp_path / DIFFIGNORE_FILENAME
+        policy.write_text("secret.py\n", encoding="utf-8")
+        original_read_text = Path.read_text
+
+        def _failed_policy_read(self: Path, *args, **kwargs):
+            if self == policy:
+                raise PermissionError("policy read denied")
+            return original_read_text(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "read_text", _failed_policy_read)
+        with pytest.raises(RuntimeError, match="policy read denied"):
+            Indexer(_make_stub_differ()).index_directory(tmp_path)
 
     def test_no_diffignore_file_leaves_result_unchanged(self, tmp_path: Path) -> None:
         from intentumdiff.core.indexer import Indexer
