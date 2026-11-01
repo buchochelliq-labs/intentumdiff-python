@@ -31,10 +31,10 @@ CORE_REPO = "https://github.com/buchochelliq-labs/intentumdiff-core"
 # parser availability, Rust-owned semantic promotions and fail-closed live
 # diff/commit-review completeness and Rust-owned live provenance. Core #204 exact-head Rust CI passed; four-platform Python acceptance must independently pass.
 # Override only for deliberate integration builds, not a moving branch.
-# Core #204 also owns physical FileSource filename-scoped guardrail matching (#210); this exact pin is under fresh CI verification.
+# Core #204 owns physical FileSource filename-scoped guardrail matching (#210) and malformed filename-filter rejection (#211); this exact pin is under fresh CI verification.
 # Core #187 now emits explicit guardrail_violations even for valid empty Rust
 # batch inventories; Python #202 rejects omitted fields rather than defaulting.
-CORE_REF = os.environ.get("INTENTUMDIFF_CORE_REF", "84a4bbc3f0fd4f7f5b120141f4d2c0d24e8d6a02")
+CORE_REF = os.environ.get("INTENTUMDIFF_CORE_REF", "80f9c5bf64ff42ef1b7ddf4124c6b19a7ca7695c")
 # Reviewed registry RC candidate: source-anchored ABAP, Astro, PO, PostScript, Proto, ReasonML, SAS, Svelte, Vue, VB.NET, M/Q#/PHP parser Wasm.
 # Registry PR #13 CI vetted these source-span repairs; every staged byte
 # remains separately verified against its source artifact and SHA-256.
