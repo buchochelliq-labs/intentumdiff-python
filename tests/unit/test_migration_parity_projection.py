@@ -211,7 +211,7 @@ def test_abap_report_declaration_requires_nonempty_source_anchored_span():
     case = next(case for case in harness["full_corpus_cases"]()
                 if case["id"] == "corpus-abap-addition")
     assert "Z_DEMO" in case["required_visible_tokens"]
-    assert case["new"].startswith("REPORT z_demo.\\n".replace("\\\\n", "\\n"))
+    assert case["new"].splitlines()[0] == "REPORT z_demo."
     check = harness["check_visible_corpus_tokens"]
 
     # The prior pinned ABAP Wasm emitted this fabricated zero-width REPORT span
