@@ -434,6 +434,8 @@ class Indexer:
         directory = Path(directory)
         callback = on_progress or self._on_progress
 
+        from intentumdiff.content_type import detect_content_type  # noqa: PLC0415
+
         diffignore = load_diffignore(directory)
         ignored_files: list[str] = []
         files: list[tuple[str, str]] = []
@@ -445,7 +447,18 @@ class Indexer:
                 ignored_files.append(rel_posix)
                 continue
             try:
-                content = path.read_text(encoding="utf-8", errors="strict")
+                raw = path.read_bytes()
+                # Rust owns content-type classification. A confirmed binary asset
+                # is not a source file and must not be UTF-8-decoded (#250).
+                content_type = detect_content_type(raw)
+                if not content_type["is_text"]:
+                    if content_type["mime"] == "application/octet-stream" and b"\x00" not in raw:
+                        # Opaque bytes without a recognized format are not proof
+                        # that a text source is absent. Reject invalid UTF-8 rather
+                        # than allowing corrupt source to disappear from the index.
+                        raw.decode("utf-8", errors="strict")
+                    continue
+                content = raw.decode("utf-8", errors="strict")
             except (OSError, UnicodeError) as exc:
                 # Host-I/O and decoding failures are not intentional ignores or unsupported
                 # parser. Returning a successful partial directory index would
