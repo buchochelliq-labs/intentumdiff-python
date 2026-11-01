@@ -16,14 +16,16 @@ def test_directory_read_failure_never_returns_a_partial_success(
 ) -> None:
     (tmp_path / "a.py").write_text("answer = 42\n", encoding="utf-8")
     (tmp_path / "blocked.py").write_text("changed = True\n", encoding="utf-8")
-    original_read_text = Path.read_text
+    # The host-I/O implementation reads raw bytes before invoking Rust's
+    # content classifier. Intercept that actual boundary, not Path.read_text.
+    original_read_bytes = Path.read_bytes
 
-    def controlled_read(path: Path, *args: object, **kwargs: object) -> str:
+    def controlled_read(path: Path, *args: object, **kwargs: object) -> bytes:
         if path.name == "blocked.py":
             raise PermissionError("controlled read denial")
-        return original_read_text(path, *args, **kwargs)
+        return original_read_bytes(path, *args, **kwargs)
 
-    monkeypatch.setattr(Path, "read_text", controlled_read)
+    monkeypatch.setattr(Path, "read_bytes", controlled_read)
     differ = MagicMock()
     indexer = Indexer(differ)
     with (
