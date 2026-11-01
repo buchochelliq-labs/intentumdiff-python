@@ -35,9 +35,9 @@ CORE_REPO = "https://github.com/buchochelliq-labs/intentumdiff-core"
 # batch inventories; Python #202 rejects omitted fields rather than defaulting.
 CORE_REF = os.environ.get("INTENTUMDIFF_CORE_REF", "7ca3a5f11d7dbeabb910ded19243eb36a2f63c30")
 # Reviewed registry RC candidate: source-anchored Astro, PO, PostScript, Proto, ReasonML, SAS, Svelte, Vue, VB.NET, M/Q#/PHP parser Wasm.
-# Registry PR #13 CI vetted this immutable seven-component source-span update; every staged byte
+# Registry PR #13 CI vetted these source-span repairs; every staged byte
 # remains separately verified against its source artifact and SHA-256.
-REGISTRY_REF = "cc1521e960c543096fab3b862a4fcbd49cbba1d4"
+REGISTRY_REF = "a8eec58519da6748a5d002aff072f1503ee3636d"
 
 
 def load_reviewed_registry(get, api: str, org: str):
