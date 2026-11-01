@@ -576,6 +576,20 @@ def _cmd_plugins_add(args: argparse.Namespace) -> None:
             "[yellow]Warning: security verification skipped (--skip-verify).[/yellow]"
         )
 
+    # Preserve existing pinned Wasm/dependency provenance before pip has any
+    # side effects.  A malformed manifest or dangling symlink is not an empty
+    # plugin inventory: refusing the update avoids deleting existing pins (#252).
+    existing_manifest: list[PluginSpec] = []
+    if args.save:
+        manifest_path = Path(args.file)
+        if manifest_path.exists() or manifest_path.is_symlink():
+            try:
+                existing_manifest = load_plugins_file(manifest_path)
+            except Exception as exc:
+                raise RuntimeError(
+                    f"Refusing to overwrite invalid plugins manifest {manifest_path}: {exc}"
+                ) from exc
+
     # ── 1. Consult the official registry for official plugins ─────────────────
     registry_entry: RegistryEntry | None = None
     if not args.repo and not skip_verify:
@@ -682,13 +696,9 @@ def _cmd_plugins_add(args: argparse.Namespace) -> None:
     # ── 6. Save to manifest ───────────────────────────────────────────────────
     if args.save:
         yaml_path = Path(args.file)
-        existing: list = []
-        if yaml_path.exists():
-            with suppress(Exception):
-                existing = load_plugins_file(yaml_path)
-        # Replace if already present, otherwise append
+        # Replace only the matching entry; retain all other pinned provenance.
         existing = [
-            s for s in existing
+            s for s in existing_manifest
             if s.name != spec.name and s.name != spec.package_name
         ]
         existing.append(spec)
