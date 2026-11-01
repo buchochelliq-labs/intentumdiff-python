@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from intentumdiff.core.indexer import _collect_blob_files, _parse_catfile_output
@@ -137,11 +139,10 @@ def test_catfile_detector_failure_is_not_a_successful_binary_skip(
 
 
 def test_real_git_collector_skips_pdf_without_nul_and_retains_source(
-    tmp_path: "Path",
+    tmp_path: Path,
 ) -> None:
     """Use real git cat-file output and Rust's PDF magic-byte classifier."""
     import subprocess
-    from pathlib import Path
 
     repo = tmp_path / "repo"
     repo.mkdir()
