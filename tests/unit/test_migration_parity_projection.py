@@ -218,6 +218,21 @@ def test_sas_corpus_addition_rejects_fabricated_matching_semantic_labels():
         harness["check_visible_corpus_tokens"](sas, fabricated)
 
 
+def test_sas_proc_oracle_requires_literal_source_evidence():
+    """Generated labels such as PRINT (DATA=...) are not verbatim source."""
+    harness = runpy.run_path(str(SCRIPT))
+    sas = next(case for case in harness["full_corpus_cases"]()
+               if case["id"] == "corpus-sas-addition")
+    tokens = sas["required_visible_tokens"]
+    assert {"PRINT", "DATA=WORK.GREETING"} <= set(tokens)
+    assert "PRINT (DATA=WORK.GREETING)" not in tokens
+    assert "print (data=work.greeting)" not in sas["new"].casefold()
+    for token in tokens:
+        assert token.casefold() in sas["new"].casefold(), (
+            "SAS expected token not present in original source", token
+        )
+
+
 def test_release_corpus_rejects_an_empty_sas_source_oracle(monkeypatch):
     """A future manifest regression must stop acceptance before any parity checks."""
     harness = runpy.run_path(str(SCRIPT))
