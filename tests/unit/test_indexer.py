@@ -389,8 +389,9 @@ def test_index_directory(tmp_path: Path):
     (tmp_path / "a.py").write_text("x = 1")
     (tmp_path / "sub").mkdir()
     (tmp_path / "sub" / "b.py").write_text("y = 2")
-    # .png has no registered parser → PluginNotFoundError → skipped
-    (tmp_path / "img.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+    # The unsupported extension is still valid UTF-8, so parser selection
+    # (rather than host I/O decoding) classifies it as skipped.
+    (tmp_path / "img.png").write_text("not a supported source file", encoding="utf-8")
 
     differ = _make_stub_differ_for_extensions(".py")
     indexer = Indexer(differ)
@@ -399,6 +400,23 @@ def test_index_directory(tmp_path: Path):
     assert result.files_indexed == 2
     assert result.files_skipped == 1
     assert result.errors == []
+
+
+@pytest.mark.parametrize("filename", ["broken.py", "img.png"])
+def test_index_directory_rejects_undecodable_files_without_partial_success(
+    tmp_path: Path, filename: str
+):
+    """Malformed source bytes cannot turn a directory scan into a partial success."""
+    (tmp_path / "good.py").write_text("x = 1", encoding="utf-8")
+    (tmp_path / filename).write_bytes(b"\\xff\\xfe")
+    differ = _make_stub_differ_for_extensions(".py")
+    indexer = Indexer(differ)
+
+    with pytest.raises(RuntimeError, match="Failed to read directory index source"):
+        indexer.index_directory(tmp_path)
+
+    # A failed collection never publishes a successfully indexed subset.
+    differ.parse.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
