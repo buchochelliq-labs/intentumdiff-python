@@ -109,6 +109,7 @@ def apply_guardrails_to_diff(
     config: DiffConfig,
     diagnostics: DiagnosticsRecorder | None = None,
     policy_filename: str | None = None,
+    policy_old_filename: str | None = None,
 ) -> SemanticDiff:
     if not config.guardrails_enabled:
         return diff
@@ -120,13 +121,21 @@ def apply_guardrails_to_diff(
     # next to the actual destination file, not in the caller's cwd (#259).
     policy = load_guardrail_policy(policy_filename or diff.new_filename or diff.old_filename,
                                    explicit_path=config.guardrail_policy_path)
-    response = _c_abi_call("apply_guardrail_policy", json.dumps({
+    request = {
         "diff": diff.model_dump(mode="json"),
         "old_tree": old_tree.model_dump(mode="json") if old_tree else None,
         "new_tree": new_tree.model_dump(mode="json") if new_tree else None,
         "old_source": old_source, "new_source": new_source,
         "rules": [asdict(rule) for rule in policy.rules],
-    }))
+    }
+    if policy_filename is not None:
+        # Pure host-I/O provenance: only Rust selects filename-scoped rules
+        # and the implicit immutable policy-file warning. Public display
+        # labels in the SemanticDiff remain unchanged (#260 / Core #210).
+        request["guardrail_new_filename"] = policy_filename
+        if policy_old_filename is not None:
+            request["guardrail_old_filename"] = policy_old_filename
+    response = _c_abi_call("apply_guardrail_policy", json.dumps(request))
     result = SemanticDiff.model_validate(_require_complete_batch_diff_dto(response))
     violations = result.guardrail_violations[len(diff.guardrail_violations):]
 
