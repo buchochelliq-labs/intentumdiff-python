@@ -199,8 +199,8 @@ def create_server(
 
                 old_path = uri_to_path(old_uri, workspace_root=workspace_root)
                 new_path = uri_to_path(new_uri, workspace_root=workspace_root)
-                old_content = old_path.read_text(encoding="utf-8", errors="replace")
-                new_content = new_path.read_text(encoding="utf-8", errors="replace")
+                old_content = old_path.read_text(encoding="utf-8", errors="strict")
+                new_content = new_path.read_text(encoding="utf-8", errors="strict")
                 source = StringSource(
                     old_content=old_content,
                     new_content=new_content,

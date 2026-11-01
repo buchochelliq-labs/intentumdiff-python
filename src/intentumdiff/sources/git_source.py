@@ -32,7 +32,7 @@ def _decode_text_or_none(data: bytes) -> str | None:
     """
     if not _content_type.is_text_bytes(data):
         return None
-    return data.decode("utf-8", errors="replace")
+    return data.decode("utf-8", errors="strict")
 
 
 def _safe_file_path(file_path: str) -> str:

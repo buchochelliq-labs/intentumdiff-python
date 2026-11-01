@@ -254,3 +254,19 @@ def test_fast_worktree_collector_rejects_non_utf8_edits(tmp_path):
 
     with pytest.raises(UnicodeDecodeError):
         collect_working_tree_python_sources_fast(str(tmp_path), "HEAD")
+
+
+def test_fast_untracked_collector_rejects_non_utf8_source(
+    tmp_path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from intentumdiff.sources.git_source import collect_working_tree_python_sources_fast
+
+    repo = _make_repo(tmp_path)
+    _commit_file(repo, "tracked.py", "value = 1\n", "valid baseline")
+    (Path(repo.working_tree_dir) / "untracked.py").write_bytes(b"value = \xff\n")
+    monkeypatch.setattr(
+        "intentumdiff.sources.git_source._content_type.is_text_bytes",
+        lambda _data: True,
+    )
+    with pytest.raises(UnicodeDecodeError):
+        collect_working_tree_python_sources_fast(str(tmp_path), "HEAD")

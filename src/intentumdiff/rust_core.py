@@ -1675,6 +1675,9 @@ def try_rust_core_batch_diffs(
 
     try:
         backend = _load_backend()
+    except (RuntimeError, OSError):
+        # Missing Rust runtime is not an explicit Rust decline.
+        raise
     except Exception as exc:  # noqa: BLE001 - optional accelerator must never break diffing.
         logger.debug("Rust core unavailable: %s", exc)
         return RustCoreBatchDiffsAttempt(fallback_reason=f"unavailable: {exc}")
@@ -1858,6 +1861,9 @@ def try_rust_core_batch_diffs(
             invalid_output=True,
             adapter_phase_timings=adapter_phase_timings,
         )
+    except (RuntimeError, OSError):
+        # Rust failures cannot be treated as successful alternate routes.
+        raise
     except Exception as exc:  # noqa: BLE001 - optional accelerator must fall back.
         logger.debug("Rust core batch path failed: %s", exc, exc_info=True)
         return RustCoreBatchDiffsAttempt(
@@ -1947,6 +1953,10 @@ def _require_native_commit_diff_json(payload: bytes, operation: str) -> None:
                     raise ValueError(
                         f"Rust commit JSON file_diffs[{index}] requires {flag} boolean"
                     )
+            # Reject truncated Rust change evidence before Pydantic normalises it.
+            _require_source_anchored_changes(
+                file_diff.get("changes"), f"Rust commit JSON file_diffs[{index}]"
+            )
         result = CommitDiff.model_validate_json(payload)
         # A successful Rust commit must explicitly carry its file inventory.
         # Pydantic otherwise supplies [] for omitted arrays, manufacturing an
@@ -2021,6 +2031,9 @@ def try_rust_core_commit_json(
 
     try:
         backend = _load_backend()
+    except (RuntimeError, OSError):
+        # Missing Rust runtime is not an explicit Rust decline.
+        raise
     except Exception as exc:  # noqa: BLE001 - optional accelerator must never break diffing.
         logger.debug("Rust core unavailable: %s", exc)
         return RustCoreCommitJsonAttempt(fallback_reason=f"unavailable: {exc}")
@@ -2100,6 +2113,9 @@ def try_rust_core_commit_json(
             fallback_reason=f"invalid output: {exc}",
             adapter_phase_timings=adapter_phase_timings,
         )
+    except (RuntimeError, OSError):
+        # Rust failures cannot be treated as successful alternate routes.
+        raise
     except Exception as exc:  # noqa: BLE001 - optional accelerator must fall back.
         logger.debug("Rust core certified commit JSON failed: %s", exc, exc_info=True)
         return RustCoreCommitJsonAttempt(
@@ -2141,6 +2157,9 @@ def try_rust_core_working_tree_commit_json(
 
     try:
         backend = _load_backend()
+    except (RuntimeError, OSError):
+        # Missing Rust runtime is not an explicit Rust decline.
+        raise
     except Exception as exc:  # noqa: BLE001 - optional accelerator must fall back.
         logger.debug("Rust core unavailable: %s", exc)
         return RustCoreCommitJsonAttempt(fallback_reason=f"unavailable: {exc}")
@@ -2213,6 +2232,9 @@ def try_rust_core_working_tree_commit_json(
             fallback_reason=f"invalid output: {exc}",
             adapter_phase_timings=adapter_phase_timings,
         )
+    except (RuntimeError, OSError):
+        # Rust failures cannot be treated as successful alternate routes.
+        raise
     except Exception as exc:  # noqa: BLE001 - optional accelerator must fall back.
         logger.debug("Rust core working-tree commit JSON failed: %s", exc, exc_info=True)
         return RustCoreCommitJsonAttempt(

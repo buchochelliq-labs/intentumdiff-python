@@ -59,3 +59,18 @@ def test_directory_readable_and_ignored_files_remain_distinct(
     build_index.assert_called_once()
     assert build_index.call_args.args[0] == [("included.py", "x = 1\n")]
     differ.parse.assert_not_called()
+
+
+def test_directory_invalid_utf8_never_becomes_partial_success(tmp_path: Path) -> None:
+    """Malformed source cannot be indexed as replacement-character content."""
+    (tmp_path / "good.py").write_text("value = 1\n", encoding="utf-8")
+    (tmp_path / "bad.py").write_bytes(b"value = \xff\n")
+    indexer = Indexer(MagicMock())
+    with (
+        patch("intentumdiff.core.indexer.load_diffignore", return_value=None),
+        patch.object(indexer, "_index_files") as build_index,
+        pytest.raises(RuntimeError, match=r"bad\.py") as failure,
+    ):
+        indexer.index_directory(tmp_path)
+    assert isinstance(failure.value.__cause__, UnicodeDecodeError)
+    build_index.assert_not_called()

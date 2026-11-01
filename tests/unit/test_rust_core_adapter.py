@@ -2460,3 +2460,63 @@ def test_ctypes_explicit_rust_batch_decline_remains_routable(monkeypatch: Any) -
     assert attempt.invalid_output is False
     assert attempt.fallback_reasons == {0: "explicit native decline"}
     assert not attempt.diffs
+
+
+@pytest.mark.parametrize("route", ["batch", "commit", "working_tree"])
+@pytest.mark.parametrize("failure_point", ["load_backend", "ctypes_library"])
+def test_missing_cdylib_fails_closed_in_each_rust_adapter(
+    monkeypatch: Any, route: str, failure_point: str,
+) -> None:
+    """A missing native runtime is not a Rust-authored fallback response."""
+    def missing_library(*_args: Any, **_kwargs: Any) -> Any:
+        raise RuntimeError("missing cdylib")
+
+    if failure_point == "load_backend":
+        monkeypatch.setattr(rust_core, "_load_backend", missing_library)
+    else:
+        monkeypatch.setattr(rust_core, "_load_backend", rust_core._CtypesBackend)
+        monkeypatch.setattr(rust_core, "_c_abi_lib", missing_library)
+
+    config = DiffConfig(experimental_rust_core=True)
+    files = [{
+        "old_source": "x = 1", "new_source": "x = 2",
+        "old_filename": "a.py", "new_filename": "a.py",
+        "language": "python", "parser_plugin_id": "python",
+        "parser_wasm_path": "python_parser.wasm",
+    }]
+    with pytest.raises(RuntimeError, match="missing cdylib"):
+        if route == "batch":
+            rust_core.try_rust_core_batch_diffs(files=files, config=config)
+        elif route == "commit":
+            rust_core.try_rust_core_commit_json(
+                files=files, old_ref="HEAD", new_ref="", config=config,
+            )
+        else:
+            rust_core.try_rust_core_working_tree_commit_json(
+                repo_path=".", old_ref="HEAD", config=config,
+            )
+
+
+@pytest.mark.parametrize(
+    "change_type,required_side",
+    [
+        ("ADDITION", "new_node"), ("DELETION", "old_node"),
+        ("MODIFICATION", "old_node"), ("MOVE", "old_node"),
+        ("REORDER", "old_node"),
+    ],
+)
+def test_native_commit_rejects_changes_without_rust_source_nodes(
+    change_type: str, required_side: str,
+) -> None:
+    """Complete commit bytes must preserve mandatory Rust-authored source nodes."""
+    diff = SemanticDiff(
+        old_filename="a.py", new_filename="a.py", language="python",
+        metadata={"engine_owner": "rust"},
+    ).model_dump(mode="json")
+    diff["changes"] = [{"change_type": change_type}]
+    payload = json.dumps({
+        "old_ref": "HEAD", "new_ref": "", "file_diffs": [diff],
+        "cross_file_changes": [], "parse_errors": [], "guardrail_violations": [],
+    }).encode("utf-8")
+    with pytest.raises(RuntimeError, match=f"requires {required_side} source-node object"):
+        rust_core._require_native_commit_diff_json(payload, "test")

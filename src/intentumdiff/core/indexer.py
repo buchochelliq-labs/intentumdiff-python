@@ -433,9 +433,9 @@ class Indexer:
                 ignored_files.append(rel_posix)
                 continue
             try:
-                content = path.read_text(encoding="utf-8", errors="replace")
-            except OSError as exc:
-                # Host-I/O failure is not an intentional ignore or unsupported
+                content = path.read_text(encoding="utf-8", errors="strict")
+            except (OSError, UnicodeError) as exc:
+                # Host-I/O and decoding failures are not intentional ignores or unsupported
                 # parser. Returning a successful partial directory index would
                 # conceal source files from downstream semantic analysis (#203).
                 raise RuntimeError(
