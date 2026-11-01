@@ -43,8 +43,8 @@ def test_directory_read_failure_never_returns_a_partial_success(
 def test_directory_readable_and_ignored_files_remain_distinct(
     tmp_path: Path,
 ) -> None:
-    (tmp_path / "included.py").write_text("x = 1\n", encoding="utf-8")
-    (tmp_path / "ignored.py").write_text("y = 2\n", encoding="utf-8")
+    (tmp_path / "included.py").write_bytes(b"x = 1\n")
+    (tmp_path / "ignored.py").write_bytes(b"y = 2\n")
     differ = MagicMock()
     indexer = Indexer(differ)
     completed = SimpleNamespace(files_ignored=0, ignored_files=[])
