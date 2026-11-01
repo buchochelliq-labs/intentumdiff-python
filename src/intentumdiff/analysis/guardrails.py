@@ -240,6 +240,9 @@ def _find_policy_path(filename: str, explicit_path: Path | None) -> Path | None:
                 continue
             seen.add(directory)
             candidate = directory / GUARDRAIL_POLICY_FILENAME
-            if candidate.exists():
+            # A dangling symlink is an explicitly present but unusable policy.
+            # Treating it as absent would silently disable protected-change checks.
+            # The subsequent strict read must report the missing target instead.
+            if candidate.exists() or candidate.is_symlink():
                 return candidate
     return None
