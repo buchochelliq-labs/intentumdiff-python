@@ -198,8 +198,10 @@ def _parse_catfile_output(buf: bytes) -> dict[str, str | None]:
             continue
         try:
             blobs[sha] = content_bytes.decode("utf-8", errors="strict")
-        except UnicodeDecodeError:
-            blobs[sha] = content_bytes.decode("utf-8", errors="replace")
+        except UnicodeDecodeError as exc:
+            raise RuntimeError(
+                f"Invalid UTF-8 in Git blob {sha}: refusing lossy symbol indexing"
+            ) from exc
     return blobs
 
 
