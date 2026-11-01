@@ -196,6 +196,18 @@ def _parse_catfile_output(buf: bytes) -> dict[str, str | None]:
         if b"\x00" in content_bytes[:8192]:
             blobs[sha] = None  # binary: intentionally excluded from text indexing
             continue
+
+        # Some recognized binaries (for example PDFs) contain no NUL bytes.
+        # Use the Rust-owned content classifier on the original blob before
+        # decoding; otherwise their binary payload aborts the entire Git index
+        # as "invalid UTF-8" (#253). An opaque octet-stream is *not* proof
+        # that a source file is safely skippable: still decode it strictly.
+        from intentumdiff.content_type import detect_content_type  # noqa: PLC0415
+
+        content_type = detect_content_type(content_bytes)
+        if not content_type["is_text"] and content_type["mime"] != "application/octet-stream":
+            blobs[sha] = None
+            continue
         try:
             blobs[sha] = content_bytes.decode("utf-8", errors="strict")
         except UnicodeDecodeError as exc:
