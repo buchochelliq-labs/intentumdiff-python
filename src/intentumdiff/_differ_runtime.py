@@ -92,12 +92,12 @@ def _attach_content_type_metadata(
     """Enrich a diff's metadata with the detected content type (mime + category).
 
     Uses the Rust magic-byte detector on the changed content so downstream
-    surfaces can show what kind of file was diffed. Never raises — the detector
-    bridge falls back gracefully when the native core is unavailable.
+    surfaces can show what kind of file was diffed. Malformed UTF-8 source
+    and required Rust detector failures propagate; no fabricated bytes/fallback.
     """
     from intentumdiff.content_type import detect_content_type
 
-    head = (new_content or old_content)[:8192].encode("utf-8", errors="replace")
+    head = (new_content or old_content)[:8192].encode("utf-8", errors="strict")
     metadata = dict(diff.metadata or {})
     metadata["content_type"] = detect_content_type(head)
     return diff.model_copy(update={"metadata": metadata})
