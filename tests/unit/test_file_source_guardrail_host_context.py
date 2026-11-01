@@ -108,3 +108,53 @@ def test_file_source_alias_cannot_hide_immutable_policy_file_edit(
                for v in diff.guardrail_violations)
     assert diff.old_filename == diff.new_filename == "alias.yaml"
     assert all(v.file == "alias.yaml" for v in diff.guardrail_violations)
+
+
+def test_file_source_move_out_preserves_source_policy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    old, new = _files(tmp_path)
+    (old.parent / "intentumdiff.yaml").write_text(POLICY, encoding="utf-8")
+    # Destination has no policy; the source's immutable rule still protects
+    # version across the move. A display alias cannot hide the source (#262).
+    diff = SemanticDiffer().diff(FileSource(old, new, filename="public-alias.json"))
+    assert any(v.rule_id == "guard.version" for v in diff.guardrail_violations)
+    assert diff.old_filename == diff.new_filename == "public-alias.json"
+    assert all(v.file == "public-alias.json" for v in diff.guardrail_violations)
+
+
+def test_file_source_move_between_distinct_policy_directories_uses_both(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    old, new = _files(tmp_path)
+    (old.parent / "intentumdiff.yaml").write_text(
+        POLICY.replace("guard.version", "guard.source"), encoding="utf-8"
+    )
+    (new.parent / "intentumdiff.yaml").write_text(
+        POLICY.replace("guard.version", "guard.destination"), encoding="utf-8"
+    )
+    diff = SemanticDiffer().diff(FileSource(old, new))
+    ids = {v.rule_id for v in diff.guardrail_violations}
+    assert {"guard.source", "guard.destination"} <= ids
+    assert diff.old_filename == diff.new_filename == "config.json"
+
+
+def test_file_source_unreadable_source_policy_fails_closed_on_move_out(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    old, new = _files(tmp_path)
+    policy = old.parent / "intentumdiff.yaml"
+    policy.write_text(POLICY, encoding="utf-8")
+    original = Path.read_text
+
+    def unreadable(self: Path, *args: object, **kwargs: object) -> str:
+        if self == policy:
+            raise OSError("source guardrail policy cannot be read")
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", unreadable)
+    with pytest.raises(OSError, match="source guardrail policy cannot be read"):
+        SemanticDiffer().diff(FileSource(old, new))
