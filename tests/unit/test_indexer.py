@@ -408,7 +408,7 @@ def test_index_directory_rejects_undecodable_files_without_partial_success(
 ):
     """Malformed source bytes cannot turn a directory scan into a partial success."""
     (tmp_path / "good.py").write_text("x = 1", encoding="utf-8")
-    (tmp_path / filename).write_bytes(b"\\xff\\xfe")
+    (tmp_path / filename).write_bytes(bytes([0xFF, 0xFE]))
     differ = _make_stub_differ_for_extensions(".py")
     indexer = Indexer(differ)
 
