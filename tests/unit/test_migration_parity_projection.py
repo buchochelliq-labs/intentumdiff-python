@@ -205,6 +205,33 @@ def test_manifest_visible_tokens_are_carried_into_every_addition_case():
         )
 
 
+def test_abap_report_declaration_requires_nonempty_source_anchored_span():
+    """Three equal native/C ABI/Python (0,0)-(0,0) REPORT nodes are still wrong."""
+    harness = runpy.run_path(str(SCRIPT))
+    case = next(case for case in harness["full_corpus_cases"]()
+                if case["id"] == "corpus-abap-addition")
+    assert "Z_DEMO" in case["required_visible_tokens"]
+    assert case["new"].startswith("REPORT z_demo.\\n".replace("\\\\n", "\\n"))
+    check = harness["check_visible_corpus_tokens"]
+
+    # The prior pinned ABAP Wasm emitted this fabricated zero-width REPORT span
+    # on all three API routes. Route parity cannot certify absent source bytes.
+    wrong = _diff(_node("Z_DEMO"))
+    report = wrong["changes"][0]["new_node"]
+    report["node_type"] = "report"
+    report["position"] = {
+        "start_line": 0, "start_col": 0, "end_line": 0, "end_col": 0,
+    }
+    # Limit this focused regression to its independently sourced declaration;
+    # the integration corpus still ratchets ALL other visible tokens.
+    check_case = dict(case, required_visible_tokens=["Z_DEMO"])
+    with pytest.raises(AssertionError, match="missing source-ratcheted semantic tokens"):
+        check(check_case, wrong)
+
+    report["position"]["end_col"] = len("REPORT z_demo.".encode("utf-8"))
+    check(check_case, wrong)
+
+
 def test_sas_corpus_addition_rejects_fabricated_matching_semantic_labels():
     """SAS previously carried [] and accepted any nonempty, mutually equal tree."""
     harness = runpy.run_path(str(SCRIPT))

@@ -34,10 +34,10 @@ CORE_REPO = "https://github.com/buchochelliq-labs/intentumdiff-core"
 # Core #187 now emits explicit guardrail_violations even for valid empty Rust
 # batch inventories; Python #202 rejects omitted fields rather than defaulting.
 CORE_REF = os.environ.get("INTENTUMDIFF_CORE_REF", "707171f388b3aaa07e61fa5de1025d328b01f114")
-# Reviewed registry RC candidate: source-anchored Astro, PO, PostScript, Proto, ReasonML, SAS, Svelte, Vue, VB.NET, M/Q#/PHP parser Wasm.
+# Reviewed registry RC candidate: source-anchored ABAP, Astro, PO, PostScript, Proto, ReasonML, SAS, Svelte, Vue, VB.NET, M/Q#/PHP parser Wasm.
 # Registry PR #13 CI vetted these source-span repairs; every staged byte
 # remains separately verified against its source artifact and SHA-256.
-REGISTRY_REF = "a8eec58519da6748a5d002aff072f1503ee3636d"
+REGISTRY_REF = "277a297a1088dbefd261dedb264b41b029a5d1a5"
 
 
 def load_reviewed_registry(get, api: str, org: str):
