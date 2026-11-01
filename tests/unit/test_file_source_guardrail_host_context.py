@@ -74,3 +74,37 @@ def test_file_source_no_policy_does_not_invent_rules(
     diff = SemanticDiffer().diff(FileSource(old, new))
     assert not diff.guardrail_violations
     assert diff.old_filename == diff.new_filename == "config.json"
+
+
+def test_file_source_alias_cannot_bypass_physical_filename_rule(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    old, new = _files(tmp_path)
+    # Exact filename scope: a display alias must not make the physical
+    # protected/config.json disappear from Rust's filename check (#260).
+    policy = POLICY.replace('files: ["*.json"]', 'files: ["config.json"]')
+    (new.parent / "intentumdiff.yaml").write_text(policy, encoding="utf-8")
+    diff = SemanticDiffer().diff(FileSource(old, new, filename="alias.json"))
+    assert any(v.rule_id == "guard.version" for v in diff.guardrail_violations)
+    assert diff.old_filename == diff.new_filename == "alias.json"
+    assert all(v.file == "alias.json" for v in diff.guardrail_violations)
+
+
+def test_file_source_alias_cannot_hide_immutable_policy_file_edit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    old = tmp_path / "before" / "intentumdiff.yaml"
+    new = tmp_path / "protected" / "intentumdiff.yaml"
+    old.parent.mkdir()
+    new.parent.mkdir()
+    # These are valid policy documents with no protected rules. Rust must
+    # nevertheless flag the policy file itself as immutable when it changes.
+    old.write_text("guardrails:\n  protected: []\n", encoding="utf-8")
+    new.write_text("guardrails:\n  protected: null\n", encoding="utf-8")
+    diff = SemanticDiffer().diff(FileSource(old, new, filename="alias.yaml"))
+    assert any(v.rule_id == "intentumdiff.policy_file" and v.severity.value == "immutable"
+               for v in diff.guardrail_violations)
+    assert diff.old_filename == diff.new_filename == "alias.yaml"
+    assert all(v.file == "alias.yaml" for v in diff.guardrail_violations)
