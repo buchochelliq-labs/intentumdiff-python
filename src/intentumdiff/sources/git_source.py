@@ -20,7 +20,11 @@ from pathlib import Path
 from intentumdiff import content_type as _content_type
 from intentumdiff.sources.base import Source
 from intentumdiff.vcs._safe_path import safe_relative_path, safe_working_tree_path
-from intentumdiff.vcs.git_cli import resolve_repo_root, run_git_bytes
+from intentumdiff.vcs.git_cli import (
+    parse_name_status_z as _parse_name_status_z,
+    resolve_repo_root,
+    run_git_bytes,
+)
 
 
 def _decode_text_or_none(data: bytes) -> str | None:
@@ -62,12 +66,29 @@ def _is_python_path(path: str) -> bool:
 
 
 def _decode_git_path(path: bytes) -> str:
-    return path.decode("utf-8", errors="replace")
+    # A Git pathname need not be UTF-8 on every filesystem. Without a
+    # lossless byte transport to Rust, reject rather than invent a new name.
+    try:
+        return path.decode("utf-8", errors="strict")
+    except UnicodeDecodeError as exc:
+        raise UnicodeError("Invalid UTF-8 in Git pathname") from exc
+
+
+def _decode_nul_paths(data: bytes, *, source: str) -> list[str]:
+    """Require a complete, nonempty Git -z path inventory (#239)."""
+    if not data:
+        return []
+    if not data.endswith(b"\0"):
+        raise RuntimeError(f"Incomplete {source} output: missing NUL terminator")
+    raw_paths = data[:-1].split(b"\0")
+    if any(not path for path in raw_paths):
+        raise RuntimeError(f"Empty path in {source} output")
+    return [_decode_git_path(path) for path in raw_paths]
 
 
 def _untracked_paths(repo_path: str) -> list[str]:
     data = run_git_bytes(repo_path, ["ls-files", "--others", "--exclude-standard", "-z"])
-    return sorted(_decode_git_path(token) for token in data.split(b"\0") if token)
+    return sorted(_decode_nul_paths(data, source="git ls-files -z"))
 
 
 def _read_working_tree_text(path: Path) -> str | None:
@@ -78,30 +99,6 @@ def _read_working_tree_text(path: Path) -> str | None:
     # Content-based routing: binary/image assets are skipped (reviewed via the
     # perceptual asset diff), never decoded and sent to the text engine.
     return _decode_text_or_none(data)
-
-
-def _parse_name_status_z(data: bytes) -> list[tuple[str, str, str]]:
-    tokens = [token for token in data.split(b"\0") if token]
-    entries: list[tuple[str, str, str]] = []
-    idx = 0
-    while idx < len(tokens):
-        status = tokens[idx].decode("ascii", errors="replace")
-        idx += 1
-        code = status[:1]
-        if code in {"R", "C"}:
-            if idx + 1 >= len(tokens):
-                break
-            old_path = _decode_git_path(tokens[idx])
-            new_path = _decode_git_path(tokens[idx + 1])
-            idx += 2
-        else:
-            if idx >= len(tokens):
-                break
-            old_path = _decode_git_path(tokens[idx])
-            new_path = old_path
-            idx += 1
-        entries.append((code, old_path, new_path))
-    return entries
 
 
 def _read_commit_paths_batch(
@@ -168,11 +165,9 @@ def collect_working_tree_python_sources_fast(
         # sha) is equivalent here and avoids an extra round-trip.
         old_rev = old_ref
         diff_output = run_git_bytes(working_dir, ["diff", "--name-status", "-z", old_rev])
-        entries = [
-            entry
-            for entry in _parse_name_status_z(diff_output)
-            if entry[0] in _TEXT_CHANGE_TYPES
-        ]
+        entries = _parse_name_status_z(diff_output)
+        if any(code not in _TEXT_CHANGE_TYPES for code, _, _ in entries):
+            return ([], "Unsupported Git change status requires Rust review")
         untracked_paths = _untracked_paths(working_dir)
         if not entries and not untracked_paths:
             return [], None
@@ -193,11 +188,9 @@ def collect_working_tree_python_sources_fast(
             working_dir,
             ["diff", "--cached", "--name-only", "-z", old_rev],
         )
-        staged_paths = {
-            _decode_git_path(token)
-            for token in staged_output.split(b"\0")
-            if token
-        }
+        staged_paths = set(
+            _decode_nul_paths(staged_output, source="git diff --cached --name-only -z")
+        )
         old_paths = [old_path for code, old_path, _new_path in entries if code != "A"]
         old_contents = _read_commit_paths_batch(working_dir, old_rev, old_paths)
         sources: list[_ChangedSource] = []
