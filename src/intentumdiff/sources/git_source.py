@@ -141,7 +141,12 @@ def _read_commit_paths_batch(
         pos += size
         if pos < len(output) and output[pos : pos + 1] == b"\n":
             pos += 1
-        result[path] = content.decode("utf-8", errors="replace")
+        try:
+            result[path] = content.decode("utf-8", errors="strict")
+        except UnicodeDecodeError as exc:
+            raise UnicodeError(
+                f"Invalid UTF-8 in tracked Git baseline {rev}:{path}"
+            ) from exc
     return result
 
 
@@ -208,10 +213,7 @@ def collect_working_tree_python_sources_fast(
                 if not disk_path.exists():
                     new_content = ""
                 else:
-                    new_content = disk_path.read_text(
-                        encoding="utf-8",
-                        errors="replace",
-                    )
+                    new_content = disk_path.read_text(encoding="utf-8")
             staging_status = (
                 "staged"
                 if old_path in staged_paths or new_path in staged_paths
@@ -226,6 +228,10 @@ def collect_working_tree_python_sources_fast(
                 continue
             sources.append(("", new_content, untracked_path, untracked_path, "untracked"))
         return sources, None
+    except UnicodeError:
+        # The optimizer must not turn a bad source encoding into an altered,
+        # successful semantic review or silently reroute it as a normal decline.
+        raise
     except (OSError, subprocess.SubprocessError, ValueError):
         return None
 
