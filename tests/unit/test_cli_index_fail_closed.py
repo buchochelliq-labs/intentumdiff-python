@@ -83,3 +83,59 @@ def test_explicit_lsp_fails_when_all_available_servers_are_declined() -> None:
         asyncio.run(_commands._two_pass_index(_args(), MagicMock(), indexer))
 
     plain_index.assert_not_awaited()
+
+
+def test_explicit_lsp_fails_closed_on_partial_connection_and_cleans_up() -> None:
+    """One connected server cannot disguise a failed requested language."""
+    from intentumdiff.lsp import client as client_module
+    from intentumdiff.lsp import launcher as launcher_module
+
+    launched: list[str] = []
+    stopped: list[str] = []
+    shutdown: list[str] = []
+
+    class FakeLauncher:
+        def __init__(self, language: str, *, spec=None):
+            self.language = language
+
+        async def start(self):
+            launched.append(self.language)
+            return SimpleNamespace(transport="stdio", language=self.language)
+
+        async def stop(self):
+            stopped.append(self.language)
+
+    class FakeClient:
+        def __init__(self, cfg, *, root_uri):
+            self.language = cfg.language
+
+        async def start(self):
+            if self.language == "bad":
+                raise ConnectionError("connection refused")
+
+        async def shutdown(self):
+            shutdown.append(self.language)
+
+    indexer = MagicMock()
+    indexer.detect_languages.return_value = ({"good", "bad"}, 2)
+    specs = {
+        name: SimpleNamespace(command=[name], install_hint="")
+        for name in ("good", "bad")
+    }
+    with (
+        patch("rich.progress.Progress") as progress,
+        patch("intentumdiff.lsp.servers.KNOWN_SERVER_SPECS", specs),
+        patch.object(client_module, "AsyncLspClient", FakeClient),
+        patch.object(launcher_module, "LspServerProcess", FakeLauncher),
+        patch.object(_commands, "_console") as console,
+        patch.object(_commands, "_index_with_progress", new_callable=AsyncMock) as index_run,
+        pytest.raises(RuntimeError, match=r"bad: connection refused"),
+    ):
+        progress.return_value.__enter__.return_value = MagicMock()
+        console.input.return_value = "y"
+        asyncio.run(_commands._two_pass_index(_args(), MagicMock(), indexer))
+
+    index_run.assert_not_awaited()
+    assert set(launched) == {"good", "bad"}
+    assert set(stopped) == {"good", "bad"}
+    assert set(shutdown) == {"good", "bad"}

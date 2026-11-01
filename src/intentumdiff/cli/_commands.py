@@ -1079,6 +1079,7 @@ async def _two_pass_index(
 
     launchers: dict[str, LspServerProcess] = {}
     clients: dict[str, AsyncLspClient] = {}
+    connection_failures: dict[str, str] = {}
 
     # Separate languages into "already running" vs "needs auto-start".
     manual: list[str] = []
@@ -1134,6 +1135,7 @@ async def _two_pass_index(
                 f"  [green]✓[/green] {lang}  (tcp, already running @ {cfg_lsp})"
             )
         except (Exception, asyncio.CancelledError) as exc:
+            connection_failures[lang] = str(exc)
             _err.print(f"  [yellow]⚠[/yellow]  {lang}: {exc} — skipped")
             _hint = entry.install_hint
             if _hint:
@@ -1142,6 +1144,8 @@ async def _two_pass_index(
     # Spawn approved auto-start servers.
     for lang in to_start:
         entry = user_entries.get(lang)
+        launcher: LspServerProcess | None = None
+        client: AsyncLspClient | None = None
         try:
             spec = entry.to_spec() if entry is not None else None
             launcher = LspServerProcess(lang, spec=spec)
@@ -1154,6 +1158,7 @@ async def _two_pass_index(
                 f"  [green]✓[/green] {lang}  ({cfg_lsp.transport}, auto-started)"
             )
         except (Exception, asyncio.CancelledError) as exc:
+            connection_failures[lang] = str(exc)
             _err.print(f"  [yellow]⚠[/yellow]  {lang}: {exc} — skipped")
             _hint = (
                 entry.install_hint
@@ -1162,9 +1167,32 @@ async def _two_pass_index(
             )
             if _hint:
                 _err.print(f"    [dim]Install: {_hint}[/dim]")
-            if lang in launchers:
+            # A launcher/client that failed before registration still owns
+            # resources; do not strand it while refusing partial enrichment.
+            if client is not None and lang not in clients:
                 with suppress(Exception):
-                    await launchers.pop(lang).stop()
+                    await client.shutdown()
+            if launcher is not None and lang not in launchers:
+                with suppress(Exception):
+                    await launcher.stop()
+
+    if connection_failures:
+        # One connected language must not mask another requested language's
+        # failed server: that would yield a seemingly complete un-enriched index.
+        for client in clients.values():
+            with suppress(Exception):
+                await client.shutdown()
+        for launcher in launchers.values():
+            with suppress(Exception):
+                await launcher.stop()
+        details = ", ".join(
+            f"{language}: {reason}"
+            for language, reason in sorted(connection_failures.items())
+        )
+        raise RuntimeError(
+            "--lsp was requested, but configured LSP servers failed to connect; "
+            f"cannot certify type enrichment ({details})"
+        )
 
     if not clients:
         raise RuntimeError(
