@@ -94,8 +94,12 @@ def _untracked_paths(repo_path: str) -> list[str]:
 def _read_working_tree_text(path: Path) -> str | None:
     try:
         data = path.read_bytes()
-    except OSError:
-        return None
+    except OSError as exc:
+        # A failed read of an enumerated untracked file is not evidence that
+        # the file is binary; skipping it would certify an incomplete diff (#242).
+        raise RuntimeError(
+            f"Failed to read untracked working-tree source {path}: {exc}"
+        ) from exc
     # Content-based routing: binary/image assets are skipped (reviewed via the
     # perceptual asset diff), never decoded and sent to the text engine.
     return _decode_text_or_none(data)
@@ -123,27 +127,28 @@ def _read_commit_paths_batch(
         header = output[pos:header_end]
         pos = header_end + 1
         if header.endswith(b" missing"):
-            result[path] = ""
-            continue
+            # Every requested non-addition path must exist in the base tree.
+            # An empty fallback would manufacture semantic change evidence (#241).
+            raise RuntimeError(f"Missing tracked Git baseline {rev}:{path}")
         parts = header.split()
-        if len(parts) < 3:
-            raise ValueError("malformed git cat-file batch header")
+        if len(parts) != 3 or parts[1] != b"blob":
+            raise RuntimeError("malformed git cat-file batch blob header")
         try:
             size = int(parts[2])
         except ValueError as exc:
-            raise ValueError("malformed git cat-file batch size") from exc
+            raise RuntimeError("malformed git cat-file batch size") from exc
+        if size < 0 or pos + size >= len(output) or output[pos + size] != 0x0A:
+            raise RuntimeError("incomplete git cat-file batch blob payload")
         content = output[pos : pos + size]
-        if len(content) != size:
-            raise ValueError("truncated git cat-file batch content")
-        pos += size
-        if pos < len(output) and output[pos : pos + 1] == b"\n":
-            pos += 1
+        pos += size + 1  # consume mandatory delimiter
         try:
             result[path] = content.decode("utf-8", errors="strict")
         except UnicodeDecodeError as exc:
             raise UnicodeError(
                 f"Invalid UTF-8 in tracked Git baseline {rev}:{path}"
             ) from exc
+    if pos != len(output):
+        raise RuntimeError("Unexpected extra git cat-file batch output")
     return result
 
 
@@ -198,7 +203,7 @@ def collect_working_tree_python_sources_fast(
         for code, old_path, new_path in entries:
             _safe_file_path(old_path)
             _safe_file_path(new_path)
-            old_content = "" if code == "A" else old_contents.get(old_path, "")
+            old_content = "" if code == "A" else old_contents[old_path]
             if code == "D":
                 new_content = ""
             else:
