@@ -74,3 +74,9 @@ def test_collector_retains_shared_text_paths_but_skips_known_binary(
     files, ignored = _collect_blob_files("/not-needed", "HEAD", None)
     assert ignored == []
     assert files == [("a.py", "x = 1\n"), ("b.py", "x = 1\n")]
+
+
+def test_catfile_batch_rejects_invalid_utf8_in_source_blob() -> None:
+    source = b"\\xffx = 1\\n"
+    with pytest.raises(RuntimeError, match=r"Invalid UTF-8 in Git blob deadbeef"):
+        _parse_catfile_output(_blob_response("deadbeef", source))
