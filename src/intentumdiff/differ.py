@@ -1243,8 +1243,12 @@ class SemanticDiffer:
             "" if compile_metadata is None else f"|compile:{compile_metadata['fingerprint']}"
         )
 
+        # Both physical sides may carry protection. Display aliases must not
+        # hide the source policy on moves out of protected directories (#262).
         _guardrail_cache_bypass = guardrails_may_apply(
-            filename, policy_source_filename or new_filename, self._config,
+            policy_old_filename or filename,
+            policy_source_filename or new_filename,
+            self._config,
         )
         cache_grammar_id = parser.grammar_id
 
