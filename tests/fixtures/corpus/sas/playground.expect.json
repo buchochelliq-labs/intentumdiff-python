@@ -9,7 +9,8 @@
   "attempts = 4",
   "WORK.AUDIT",
   "checked = 9",
-  "PRINT (DATA=WORK.GREETING)"
+  "PRINT",
+  "DATA=WORK.GREETING"
  ],
  "append_statement": null,
  "mutation_xfail": {},
