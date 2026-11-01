@@ -144,3 +144,43 @@ def test_existing_empty_explicit_guardrail_policy_remains_valid(
     assert not guardrails_may_apply(
         str(source), None, DiffConfig(guardrail_policy_path=policy)
     )
+
+
+def test_rename_out_of_policy_directory_disables_batch_shortcut(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    old = tmp_path / "protected" / "config.json"
+    new = tmp_path / "unprotected" / "config.json"
+    old.parent.mkdir()
+    new.parent.mkdir()
+    (old.parent / "intentumdiff.yaml").write_text(
+        "guardrails:\n  protected:\n    - id: guard.version\n"
+        "      language: json\n      path: version\n"
+        '      files: ["config.json"]\n', encoding="utf-8",
+    )
+    assert _find_policy_path(str(old), None) is not None
+    assert _find_policy_path(str(new), None) is None
+    assert guardrails_may_apply(str(old), str(new), DiffConfig())
+
+
+def test_unreadable_old_policy_cannot_be_hidden_by_clean_destination(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    old = tmp_path / "protected" / "config.json"
+    new = tmp_path / "unprotected" / "config.json"
+    old.parent.mkdir()
+    new.parent.mkdir()
+    policy = old.parent / "intentumdiff.yaml"
+    policy.write_text("guardrails:\n  protected: []\n", encoding="utf-8")
+    original = Path.read_text
+
+    def unreadable(self: Path, *args: object, **kwargs: object) -> str:
+        if self == policy:
+            raise OSError("old guardrail policy cannot be read")
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", unreadable)
+    with pytest.raises(OSError, match="old guardrail policy cannot be read"):
+        guardrails_may_apply(str(old), str(new), DiffConfig())
