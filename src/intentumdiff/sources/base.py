@@ -27,6 +27,15 @@ class Source(ABC):
         """
         ...
 
+    def guardrail_policy_paths(self) -> tuple[str | None, str | None]:
+        """Return host filesystem paths for old/new guardrail policy discovery.
+
+        Source display labels are NOT physical policy identities. The default
+        has no filesystem context; adapters for real files/repos override it.
+        Rust alone interprets policy rules and evaluates semantic violations.
+        """
+        return None, None
+
     def display_names(self) -> tuple[str, str] | None:
         """
         Distinct ``(old, new)`` names, when the two sides are named differently.
