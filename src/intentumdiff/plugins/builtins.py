@@ -20,13 +20,6 @@ def _wasm(name: str) -> str:
     return str(_WASM_DIR / name)
 
 
-def _wasm_or_generic(name: str) -> str:
-    path = _WASM_DIR / name
-    if path.exists():
-        return str(path)
-    return _wasm("generic_parser.wasm")
-
-
 # ── Parser entry points ──────────────────────────────────────────────────────
 
 def python_parser_entry() -> str:
@@ -42,31 +35,31 @@ def generic_parser_entry() -> str:
 
 
 def graphql_parser_entry() -> str:
-    return _wasm_or_generic("graphql_parser.wasm")
+    return _wasm("graphql_parser.wasm")
 
 
 def gitignore_parser_entry() -> str:
-    return _wasm_or_generic("gitignore_parser.wasm")
+    return _wasm("gitignore_parser.wasm")
 
 
 def ocaml_parser_entry() -> str:
-    return _wasm_or_generic("ocaml_parser.wasm")
+    return _wasm("ocaml_parser.wasm")
 
 
 def reasonml_parser_entry() -> str:
-    return _wasm_or_generic("reasonml_parser.wasm")
+    return _wasm("reasonml_parser.wasm")
 
 
 def latex_parser_entry() -> str:
-    return _wasm_or_generic("latex_parser.wasm")
+    return _wasm("latex_parser.wasm")
 
 
 def asciidoc_parser_entry() -> str:
-    return _wasm_or_generic("asciidoc_parser.wasm")
+    return _wasm("asciidoc_parser.wasm")
 
 
 def po_parser_entry() -> str:
-    return _wasm_or_generic("po_parser.wasm")
+    return _wasm("po_parser.wasm")
 
 
 def js_ts_parser_entry() -> str:
