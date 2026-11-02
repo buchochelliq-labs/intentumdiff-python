@@ -313,8 +313,16 @@ class GitSource(Source):
         return old_content, new_content, self._file_path, self._language_hint
 
     def guardrail_policy_paths(self) -> tuple[str, str]:
-        """Locate policy context within the selected Git repository, not cwd."""
-        path = str(safe_working_tree_path(self._repo_path, self._file_path))
+        """Use repository policy context without inspecting a historical blob's live target.
+
+        Commit-to-commit Git data comes from object storage.  A checkout may
+        meanwhile replace the tracked file with an external symlink; following
+        that unrelated final component must not invalidate historical review.
+        Resolve and validate only its parent (where policy discovery begins).
+        """
+        relative = Path(self._file_path)
+        parent = safe_working_tree_path(self._repo_path, str(relative.parent))
+        path = str(parent / relative.name)
         return path, path
 
     @classmethod

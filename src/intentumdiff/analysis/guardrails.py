@@ -271,15 +271,28 @@ def _find_policy_path(filename: str, explicit_path: Path | None) -> Path | None:
     starts: list[Path] = []
     raw = Path(filename)
     if filename and not filename.startswith("<"):
-        starts.append(raw if raw.is_dir() else raw.parent)
-    starts.append(Path.cwd())
+        # The argument identifies a source *file*, even if its current checkout
+        # entry is a symlink to a directory.  Do not follow that final component
+        # into unrelated external policy directories for a historical Git diff.
+        # For relative paths, the parent resolves against cwd already.  An
+        # absolute path must never fall back to an unrelated process cwd.
+        starts.append(raw.parent)
+    else:
+        # Synthetic/in-memory sources have no physical policy-search origin.
+        starts.append(Path.cwd())
 
     seen: set[Path] = set()
     for start in starts:
         try:
             current = start.resolve()
-        except OSError:
-            current = Path.cwd()
+        except OSError as exc:
+            # A failed physical-path resolution is not permission to import
+            # a policy from another repository's process working directory.
+            # Report the host I/O failure instead of manufacturing a clean (or
+            # foreign-policy) guardrail result.
+            raise RuntimeError(
+                f"Unable to resolve guardrail policy search path {start}: {exc}"
+            ) from exc
         for directory in (current, *current.parents):
             if directory in seen:
                 continue
