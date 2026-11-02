@@ -183,7 +183,7 @@ def create_server(
                 diff = _do_diff(state, server, new_uri, content)
             else:
                 # Different URIs — read both from disk and compare.
-                from intentumdiff.sources.string_source import StringSource
+                from intentumdiff.sources.file_source import FileSource
 
                 # Derive workspace root for containment check.
                 workspace_root: Path | None = None
@@ -199,11 +199,9 @@ def create_server(
 
                 old_path = uri_to_path(old_uri, workspace_root=workspace_root)
                 new_path = uri_to_path(new_uri, workspace_root=workspace_root)
-                old_content = old_path.read_text(encoding="utf-8", errors="strict")
-                new_content = new_path.read_text(encoding="utf-8", errors="strict")
-                source = StringSource(
-                    old_content=old_content,
-                    new_content=new_content,
+                source = FileSource(
+                    old_path=old_path,
+                    new_path=new_path,
                     filename=new_path.name,
                 )
                 diff = state.differ.diff(source)

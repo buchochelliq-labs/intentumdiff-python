@@ -36,7 +36,7 @@ import json
 import logging
 import os
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Iterator
+from typing import TYPE_CHECKING, Callable, Iterator
 
 from intentumdiff.core.models import CommitDiff, CrossFileChange, DiffConfig, SemanticDiff
 from intentumdiff.differ import SemanticDiffer
@@ -45,6 +45,8 @@ from intentumdiff.core.index import SemanticIndex
 from intentumdiff.plugins.exceptions import PluginError, PluginNotFoundError
 from intentumdiff.sources.git_source import iter_changed_sources
 from intentumdiff.vcs.base import VcsBackend
+from intentumdiff.vcs.git_cli import resolve_repo_root
+from intentumdiff.vcs._safe_path import safe_policy_path
 
 if TYPE_CHECKING:
     from intentumdiff.core.models import SemanticNode
@@ -136,7 +138,8 @@ class CommitDiffer:
             return self._diff_with_backend(backend, old_ref, new_ref)
 
         results, errors, changed_file_count = self._collect_file_diffs(
-            iter_changed_sources(repo_path, old_ref, new_ref)
+            iter_changed_sources(repo_path, old_ref, new_ref),
+            policy_root=resolve_repo_root(repo_path),
         )
 
         return self._finalize_commit_diff(
@@ -167,7 +170,8 @@ class CommitDiffer:
         """
         from intentumdiff.content_type import is_text_bytes
 
-        for source in iter_changed_sources(repo_path, old_ref, new_ref):
+        policy_root = resolve_repo_root(repo_path)
+        for source in iter_changed_sources(policy_root, old_ref, new_ref):
             old_content, new_content, old_path, new_path, staging_status = source
             # Backstop: primary content-based routing happens at the git read
             # boundary (magic-byte detection); the same Rust detector catches any
@@ -178,7 +182,9 @@ class CommitDiffer:
                 continue
             try:
                 file_diff = self._differ._run_pipeline(
-                    old_content, new_content, old_path, None, new_filename=new_path
+                    old_content, new_content, old_path, None, new_filename=new_path,
+                    _policy_old_filename=safe_policy_path(policy_root, old_path),
+                    _policy_source_filename=safe_policy_path(policy_root, new_path or old_path),
                 )
                 if staging_status is not None:
                     file_diff = file_diff.model_copy(
@@ -236,16 +242,22 @@ class CommitDiffer:
     def _collect_file_diffs(
         self,
         sources: Iterator[tuple[str, str, str, str, object]],
+        *,
+        policy_root: str | os.PathLike[str],
+        policy_path_resolver: Callable[[str], str] | None = None,
     ) -> tuple[list[FileDiffResult], list[FileDiffError], int]:
         """Run the per-file pipeline over an iterator of changed sources."""
         results: list[FileDiffResult] = []
         errors: list[FileDiffError] = []
         changed_file_count = 0
+        policy_path = policy_path_resolver or (lambda path: safe_policy_path(policy_root, path))
         for old_content, new_content, old_path, new_path, staging_status in sources:
             changed_file_count += 1
             try:
                 file_diff = self._differ._run_pipeline(
-                    old_content, new_content, old_path, None, new_filename=new_path
+                    old_content, new_content, old_path, None, new_filename=new_path,
+                    _policy_old_filename=policy_path(old_path),
+                    _policy_source_filename=policy_path(new_path or old_path),
                 )
                 if staging_status is not None:
                     file_diff = file_diff.model_copy(
@@ -370,7 +382,10 @@ class CommitDiffer:
                 new = backend.get_blob(changed.new_path, new_ref) if changed.new_path else ""
                 yield old, new, path, new_path, None
 
-        results, errors, changed_file_count = self._collect_file_diffs(changed_sources())
+        results, errors, changed_file_count = self._collect_file_diffs(
+            changed_sources(), policy_root=backend.resolve_root(),
+            policy_path_resolver=backend.guardrail_policy_path,
+        )
         return self._finalize_commit_diff(
             results=results,
             errors=errors,

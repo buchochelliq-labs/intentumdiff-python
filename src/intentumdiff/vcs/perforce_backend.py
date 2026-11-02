@@ -107,3 +107,9 @@ class PerforceVcsBackend(VcsBackend):
     def resolve_root(self) -> Path:
         """Return the Perforce workspace (client) root path."""
         return Path(self._root)
+
+    def guardrail_policy_path(self, path: str) -> str:
+        """Use Rust's authoritative client-view mapping for a depot identity."""
+        from intentumdiff import rust_core
+
+        return rust_core.p4_policy_path(self._root, path)
