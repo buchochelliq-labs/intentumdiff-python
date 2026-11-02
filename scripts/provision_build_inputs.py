@@ -34,7 +34,7 @@ CORE_REPO = "https://github.com/buchochelliq-labs/intentumdiff-core"
 # Core #204 owns physical FileSource filename-scoped guardrail matching (#210) and malformed filename-filter rejection (#211); this exact pin is under fresh CI verification.
 # Core #187 now emits explicit guardrail_violations even for valid empty Rust
 # batch inventories; Python #202 rejects omitted fields rather than defaulting.
-CORE_REF = os.environ.get("INTENTUMDIFF_CORE_REF", "80f9c5bf64ff42ef1b7ddf4124c6b19a7ca7695c")
+CORE_REF = os.environ.get("INTENTUMDIFF_CORE_REF", "ee00c667e101a5aeb5e0e2ba630bc75f3e45689d")
 # Reviewed registry RC candidate: source-anchored ABAP, Astro, PO, PostScript, Proto, ReasonML, SAS, Svelte, Vue, VB.NET, M/Q#/PHP parser Wasm.
 # Registry PR #13 CI vetted these source-span repairs; every staged byte
 # remains separately verified against its source artifact and SHA-256.
