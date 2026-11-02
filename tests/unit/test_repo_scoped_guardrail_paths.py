@@ -122,7 +122,7 @@ def test_git_history_uses_committed_blobs_not_current_external_symlink(
     try:
         path.symlink_to(external, target_is_directory=target_is_directory)
     except (OSError, NotImplementedError) as exc:
-        pytest.skip(f"Host does not permit creating symlinks: {exc}")
+        pytest.skip(f"symlink creation unavailable on this host: {exc}")
 
     unrelated = tmp_path / "unrelated-cwd"
     unrelated.mkdir()
