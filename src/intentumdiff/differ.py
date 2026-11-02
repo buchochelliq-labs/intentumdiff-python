@@ -194,6 +194,7 @@ from intentumdiff.rust_core import (
     try_rust_profile_label_enrichment,
 )
 from intentumdiff.sources.base import Source
+from intentumdiff.sources.file_source import FileSource as FileSource  # compatibility re-export
 
 logger = logging.getLogger(__name__)
 
