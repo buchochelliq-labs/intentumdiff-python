@@ -312,6 +312,11 @@ class GitSource(Source):
         )
         return old_content, new_content, self._file_path, self._language_hint
 
+    def guardrail_policy_paths(self) -> tuple[str, str]:
+        """Locate policy context within the selected Git repository, not cwd."""
+        path = str(safe_working_tree_path(self._repo_path, self._file_path))
+        return path, path
+
     @classmethod
     def working_tree(
         cls,
@@ -377,3 +382,8 @@ class WorkingTreeSource(Source):
             self._repo_path, self._file_path, self._ref
         )
         return old_content, new_content, self._file_path, self._language_hint
+
+    def guardrail_policy_paths(self) -> tuple[str, str]:
+        """Locate working-tree guardrails in the actual repository root."""
+        path = str(safe_working_tree_path(self._repo_path, self._file_path))
+        return path, path
