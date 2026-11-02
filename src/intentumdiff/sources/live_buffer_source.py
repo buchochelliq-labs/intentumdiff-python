@@ -18,7 +18,7 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
 from intentumdiff.sources.base import Source
-from intentumdiff.vcs._safe_path import safe_relative_path
+from intentumdiff.vcs._safe_path import safe_relative_path, safe_working_tree_path
 from intentumdiff.vcs.git_cli import resolve_repo_root, run_git_bytes
 
 if TYPE_CHECKING:
@@ -99,6 +99,12 @@ class LiveBufferSource(Source):
             old_content = self._read_committed()
         filename = Path(self._file_path).name
         return old_content, self._live_content, filename, self._language_hint
+
+    def guardrail_policy_paths(self) -> tuple[str, str]:
+        """Use the selected repository, not process cwd, for buffer policy I/O."""
+        root = resolve_repo_root(self._repo_path)
+        path = str(safe_working_tree_path(root, self._file_path))
+        return path, path
 
     # ------------------------------------------------------------------
     # Internal helpers
