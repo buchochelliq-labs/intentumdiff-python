@@ -194,7 +194,6 @@ from intentumdiff.rust_core import (
     try_rust_profile_label_enrichment,
 )
 from intentumdiff.sources.base import Source
-from intentumdiff.sources.file_source import FileSource
 
 logger = logging.getLogger(__name__)
 
@@ -440,11 +439,13 @@ class SemanticDiffer:
         profiler = self._new_profiler()
         with profiler.phase("source_loading"):
             old_content, new_content, filename, language_hint = source.get_content()
-        # FileSource's public filename is deliberately just a display basename.
-        # Retain its actual destination only for host-side policy discovery;
-        # the Rust semantic diff must continue to receive the public labels.
-        policy_source_filename = str(source._new_path) if isinstance(source, FileSource) else None
-        policy_old_filename = str(source._old_path) if isinstance(source, FileSource) else None
+        # Resolve host filesystem identity separately from public display labels.
+        # Source adapters validate repo roots/paths; only Rust evaluates the
+        # discovered guardrail policies against the semantic changes.
+        policy_context = getattr(source, "guardrail_policy_paths", None)
+        policy_old_filename, policy_source_filename = (
+            policy_context() if callable(policy_context) else (None, None)
+        )
         diff = self._run_pipeline(
             old_content,
             new_content,
