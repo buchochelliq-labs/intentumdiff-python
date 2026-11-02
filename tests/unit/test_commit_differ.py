@@ -15,8 +15,9 @@ import os
 import subprocess
 import threading
 import time
-from contextlib import contextmanager, nullcontext
+from contextlib import contextmanager
 from types import SimpleNamespace
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -123,6 +124,7 @@ class TestSemanticDifferParallelCommit:
         # None to fall back to the mocked iter_changed_sources — otherwise it runs real
         # git against the test's cwd.
         with (
+            patch("intentumdiff.vcs.git_cli.resolve_repo_root", return_value=str(Path.cwd())),
             patch(
                 "intentumdiff.sources.git_source.collect_working_tree_python_sources_fast",
                 return_value=None,
@@ -764,16 +766,19 @@ class TestDiffCommit:
         """Patch _run_pipeline to return successive diffs."""
         cd._differ._run_pipeline = MagicMock(side_effect=diffs)
 
+    @contextmanager
     def _patch_iter_changed_sources(self, changed_files: list[tuple]):
         """Return a context manager that patches iter_changed_sources."""
-        return patch(
+        with self._patch_git_repo(), patch(
             "intentumdiff.core.commit_differ.iter_changed_sources",
             return_value=iter(changed_files),
-        )
+        ):
+            yield
 
     def _patch_git_repo(self):
-        # Sources are mocked independently; commit finalization requires no extra Git I/O.
-        return nullcontext(MagicMock())
+        # Source collection and repository discovery are independent host I/O.
+        return patch("intentumdiff.core.commit_differ.resolve_repo_root",
+                     return_value=str(Path.cwd()))
 
     def test_returns_commit_diff(self):
         cd = self._make_differ()
@@ -917,6 +922,7 @@ class TestDiffCommit:
 
         cd = self._make_differ()
         backend = SimpleNamespace(
+            resolve_root=lambda: Path.cwd(),
             list_changed_files=lambda _old, _new: [
                 ChangedFile("good.py", "good.py", "modified"),
                 ChangedFile("bad.py", "bad.py", "modified"),
@@ -934,6 +940,7 @@ class TestDiffCommit:
 
         cd = self._make_differ()
         backend = SimpleNamespace(
+            resolve_root=lambda: Path.cwd(),
             list_changed_files=lambda _old, _new: [
                 ChangedFile("image.png", "image.png", "modified", is_binary=True)
             ],
@@ -1076,7 +1083,7 @@ class TestDiffCommit:
         cd = self._make_differ()
         parsed: list[str] = []
 
-        def fake_pipeline(_old, _new, old_path, _hint, new_filename=None):
+        def fake_pipeline(_old, _new, old_path, _hint, new_filename=None, **kwargs):
             parsed.append(new_filename or old_path)
             return MagicMock()
 
@@ -1100,7 +1107,7 @@ class TestDiffCommit:
         cd = self._make_differ()
         parsed: list[str] = []
 
-        def fake_pipeline(_old, _new, old_path, _hint, new_filename=None):
+        def fake_pipeline(_old, _new, old_path, _hint, new_filename=None, **kwargs):
             parsed.append(new_filename or old_path)
             return MagicMock()
 

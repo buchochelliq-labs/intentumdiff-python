@@ -806,9 +806,12 @@ class SemanticDiffer:
             One entry per reviewed changed text file; failures raise rather than disappear.
         """
         from intentumdiff.sources.git_source import iter_changed_sources
+        from intentumdiff.vcs.git_cli import resolve_repo_root
+        from intentumdiff.vcs._safe_path import safe_policy_path
 
         source_started = time.perf_counter()
-        sources = list(iter_changed_sources(repo_path, old_ref, new_ref))
+        policy_root = resolve_repo_root(repo_path)
+        sources = list(iter_changed_sources(policy_root, old_ref, new_ref))
         source_collection_ms = (time.perf_counter() - source_started) * 1000
         rust_batch_results: dict[int, SemanticDiff] = {}
         rust_batch_attempted: set[int] = set()
@@ -958,6 +961,8 @@ class SemanticDiffer:
                 None,
                 new_filename=new_path,
                 _profiler=profiler,
+                _policy_old_filename=safe_policy_path(policy_root, old_path),
+                _policy_source_filename=safe_policy_path(policy_root, new_path or old_path),
             )
             if staging_status is not None:
                 result = result.model_copy(update={"staging_status": staging_status})

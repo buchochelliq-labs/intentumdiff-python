@@ -19,7 +19,7 @@ from pathlib import Path
 
 from intentumdiff import content_type as _content_type
 from intentumdiff.sources.base import Source
-from intentumdiff.vcs._safe_path import safe_relative_path, safe_working_tree_path
+from intentumdiff.vcs._safe_path import safe_policy_path, safe_relative_path, safe_working_tree_path
 from intentumdiff.vcs.git_cli import (
     parse_name_status_z as _parse_name_status_z,
     resolve_repo_root,
@@ -320,9 +320,7 @@ class GitSource(Source):
         that unrelated final component must not invalidate historical review.
         Resolve and validate only its parent (where policy discovery begins).
         """
-        relative = Path(self._file_path)
-        parent = safe_working_tree_path(self._repo_path, str(relative.parent))
-        path = str(parent / relative.name)
+        path = safe_policy_path(self._repo_path, self._file_path)
         return path, path
 
     @classmethod
@@ -346,6 +344,48 @@ class GitSource(Source):
             ref=ref,
             language_hint=language_hint,
         )
+
+
+class StagedSource(GitSource):
+    """Select one file from Rust's index comparison, preserving rename paths."""
+
+    def __init__(self, repo_path: str | os.PathLike[str], file_path: str,
+                 ref: str = "HEAD") -> None:
+        super().__init__(repo_path, file_path, old_ref=ref, new_ref=_REF_STAGED)
+        self._old_path = self._file_path
+        self._new_path = self._file_path
+
+    def get_content(self) -> tuple[str, str, str, str | None]:
+        from intentumdiff import rust_core
+
+        sources = list(iter_changed_sources(self._repo_path, self._old_ref, _REF_STAGED))
+        # Prefer the destination when a path is both a rename source and target.
+        selected = next((row for row in sources if row[3] == self._file_path), None)
+        if selected is None:
+            selected = next((row for row in sources if row[2] == self._file_path), None)
+        if selected is not None:
+            old, new, self._old_path, self._new_path, _status = selected
+            return old, new, self._new_path, self._language_hint
+        # The text inventory also omits binary entries. Read the actual index
+        # bytes before treating an absent row as an unchanged text source.
+        self._old_path = self._new_path = self._file_path
+        index_bytes = run_git_bytes(
+            self._repo_path, ["cat-file", "blob", f":{self._file_path}"]
+        )
+        new = _decode_text_or_none(index_bytes)
+        if new is None:
+            raise ValueError(f"Staged source {self._file_path!r} is not text")
+        old, _ = rust_core.git_source_content(
+            self._repo_path, self._file_path, self._old_ref, self._old_ref
+        )
+        return old, new, self._file_path, self._language_hint
+
+    def display_names(self) -> tuple[str, str]:
+        return self._old_path, self._new_path
+
+    def guardrail_policy_paths(self) -> tuple[str, str]:
+        return (safe_policy_path(self._repo_path, self._old_path),
+                safe_policy_path(self._repo_path, self._new_path))
 
 
 class WorkingTreeSource(Source):

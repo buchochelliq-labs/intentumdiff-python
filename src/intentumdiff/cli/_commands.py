@@ -107,7 +107,7 @@ def _cmd_assets_git(args: argparse.Namespace) -> None:
 
 
 def _cmd_git(args: argparse.Namespace) -> None:
-    from intentumdiff.sources.git_source import _REF_STAGED, _REF_UNPUSHED
+    from intentumdiff.sources.git_source import StagedSource, _REF_STAGED, _REF_UNPUSHED
     from intentumdiff.vcs.git_cli import NotAGitRepositoryError
 
     repo_path = args.repo  # '.' when not supplied
@@ -144,11 +144,7 @@ def _cmd_git(args: argparse.Namespace) -> None:
                     ref=old_ref,
                 )
             elif new_ref == _REF_STAGED:
-                # Staged single-file: use WorkingTreeSource pointing at the index.
-                # WorkingTreeSource reads the committed version for old_content and
-                # the on-disk file for new_content — for staged-only accuracy the
-                # user should rely on commit-wide mode or pass an explicit --new ref.
-                source = WorkingTreeSource(
+                source = StagedSource(
                     repo_path=repo_path,
                     file_path=args.file,
                     ref=old_ref,
