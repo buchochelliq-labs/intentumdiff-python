@@ -834,10 +834,15 @@ class SemanticDiffer:
                     or effective_new_path_lower.endswith((".py", ".pyi"))
                 ):
                     continue
-                # Protected guardrail rules currently apply only to
-                # config/profile languages.  Certified Python batches can skip
-                # the expensive policy lookup; policy-file changes are not
-                # Python files and therefore remain on the fallback path.
+                # A discovered or explicit policy must be validated even when
+                # its file is unchanged/ignored. Rust decides whether it applies;
+                # policy-relevant sources keep the normal physical-path route.
+                if guardrails_may_apply(
+                    safe_policy_path(policy_root, old_path),
+                    safe_policy_path(policy_root, effective_new_path),
+                    self._config,
+                ):
+                    continue
                 request_to_source_index.append(idx)
                 request_files.append(
                     {

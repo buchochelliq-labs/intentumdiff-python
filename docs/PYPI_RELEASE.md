@@ -30,6 +30,6 @@ Dependabot runs without provisioned components do not produce this full evidence
 Before release, inspect source examples and both implementations' actual output,
 verify the wheel checksum after download, and retain the approved evidence with the
 release record before CI artifacts expire. Confirm the tested commits and components
-match the candidate being published. These CI wheels are built with the workflow's
-development profile; they are not a substitute for verifying the eventual release
-wheels. Media provenance must identify the exact installed wheel used for recording.
+match the candidate being published. These CI wheels are built with the release profile. Verify their recorded build
+profile and exact source/component identities; rebuilt publication wheels still
+require checksum, packaging and installed-wheel verification. Media provenance must identify the exact installed wheel used for recording.
