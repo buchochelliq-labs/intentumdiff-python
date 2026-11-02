@@ -47,6 +47,21 @@ _CASES = _matrix_cases()
 _IDS = [f"{manifest['language']}-{verb}" for _, manifest, _, verb in _CASES]
 
 
+def test_construct_edit_matrix_covers_every_corpus_language() -> None:
+    """A missing matrix/manifest must not shrink the parametrized acceptance set."""
+    dirs = {p.name for p in _CORPUS_ROOT.iterdir() if p.is_dir()}
+    assert len(dirs) == 74, f"expected 74 fixture languages, found {len(dirs)}"
+    matrix_dirs = {p.parent.name for p in _CORPUS_ROOT.glob("*/edit_matrix.expect.json")}
+    assert matrix_dirs == dirs, f"missing edit matrices: {sorted(dirs - matrix_dirs)}"
+    actual_pairs = {(source.parent.name, verb) for source, _, _, verb in _CASES}
+    expected_pairs = {(directory, verb) for directory in dirs for verb in EDIT_VERBS}
+    assert actual_pairs == expected_pairs, (
+        f"missing construct-edit cases: {sorted(expected_pairs - actual_pairs)}"
+    )
+    assert len(_CASES) == len(expected_pairs), "duplicate or missing construct-edit cases"
+
+
+
 @pytest.mark.parametrize(("source_path", "manifest", "expectation", "verb"), _CASES, ids=_IDS)
 def test_construct_edit(source_path: Path, manifest: dict, expectation: dict, verb: str) -> None:
     if "skip" in expectation:
