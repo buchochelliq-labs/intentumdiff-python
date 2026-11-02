@@ -605,6 +605,11 @@ class DiffConfig(BaseModel):
 
     Unlike result models, this is NOT frozen — callers may update it freely
     before passing to ``SemanticDiffer``.
+
+    Compatibility-only fields in 0.0.2: ``ignore_style``, ``detect_refactorings``,
+    ``approx_move_threshold``, ``leaf_text_diff`` and ``extra_trivia_types``.
+    Rust accepts their existing defaults but rejects unsupported overrides.
+    Configurable semantics are tracked in Core issues #220–#224.
     """
 
     # GumTree tuning

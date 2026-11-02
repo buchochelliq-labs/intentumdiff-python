@@ -732,6 +732,11 @@ def try_rust_finalize_review(
                 "max_nodes": config.max_nodes,
                 "collect_trace": collect_trace,
                 "fallback_to_token_diff": config.fallback_to_token_diff,
+                "ignore_style": config.ignore_style,
+                "detect_refactorings": config.detect_refactorings,
+                "approx_move_threshold": config.approx_move_threshold,
+                "leaf_text_diff": config.leaf_text_diff,
+                "extra_trivia_types": config.extra_trivia_types,
             }
         )
         data = json.loads(
