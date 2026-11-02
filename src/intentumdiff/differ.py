@@ -1731,38 +1731,15 @@ class SemanticDiffer:
         event-shaped transport contract, but it does not manufacture progressive
         semantic phases or reconcile changes using Python object identity.
         """
-        old_content, new_content, filename, language_hint = source.get_content()
-        yield from self._run_pipeline_streaming(old_content, new_content, filename, language_hint)
-
-    def _run_pipeline_streaming(
-        self,
-        old_content: str,
-        new_content: str,
-        filename: str,
-        language_hint: str | None,
-        *,
-        new_filename: str | None = None,
-    ) -> Iterator[ChangeStreamEvent]:
-        """Emit Rust-finalized changes through the event-shaped API."""
-        result = self._run_stages_1_to_11(
-            old_content, new_content, filename, language_hint, new_filename=new_filename
-        )
-
-        if isinstance(result, SemanticDiff):
-            # Early exit (cache hit / style-only / token fallback): emit all changes
-            # as FINAL so consumers still receive a well-formed event stream.
-            for change in result.changes:
-                yield ChangeStreamEvent(
-                    phase=ChangeStreamPhase.FINAL,
-                    action="add",
-                    change=change,
-                )
-            return
-
-        raise AssertionError(
-            "unreachable: _run_stages_1_to_11 always returns a SemanticDiff since the "
-            "python pipeline retirement (issue #57 payoff, stage 4b)"
-        )
+        # Reuse the public path so FileSource policy discovery retains both
+        # physical paths even when the source exposes a display alias.
+        result = self.diff(source)
+        for change in result.changes:
+            yield ChangeStreamEvent(
+                phase=ChangeStreamPhase.FINAL,
+                action="add",
+                change=change,
+            )
 
     def _cached_process(
         self,

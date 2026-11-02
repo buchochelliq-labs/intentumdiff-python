@@ -141,8 +141,9 @@ def test_file_source_move_between_distinct_policy_directories_uses_both(
     assert diff.old_filename == diff.new_filename == "config.json"
 
 
+@pytest.mark.parametrize("progressive", [False, True])
 def test_file_source_unreadable_source_policy_fails_closed_on_move_out(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, progressive: bool
 ) -> None:
     monkeypatch.chdir(tmp_path)
     old, new = _files(tmp_path)
@@ -157,4 +158,10 @@ def test_file_source_unreadable_source_policy_fails_closed_on_move_out(
 
     monkeypatch.setattr(Path, "read_text", unreadable)
     with pytest.raises(OSError, match="source guardrail policy cannot be read"):
-        SemanticDiffer().diff(FileSource(old, new))
+        differ = SemanticDiffer()
+        source = FileSource(old, new, filename="public-alias.json")
+        if progressive:
+            list(differ.diff_stream_progressive(source))
+        else:
+            differ.diff(source)
+

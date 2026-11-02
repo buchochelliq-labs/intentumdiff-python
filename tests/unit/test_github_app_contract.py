@@ -44,8 +44,15 @@ def test_github_app_signature_url_event_and_check_payload_contracts() -> None:
     assert payload["conclusion"] == "failure"
     assert payload["details_url"] == "https://example.invalid/review"
 
+    with pytest.raises(ValueError, match="evidence is required"):
+        build_pull_request_check_response(json.loads(body))
+    reviewed_payload = json.loads(body)
+    reviewed_payload["intentumdiff_review"] = {
+        "checked_files": 0, "semantic_changes": 0,
+        "guardrail_violations": 0, "passed": True,
+    }
     response = build_pull_request_check_response(
-        json.loads(body),
+        reviewed_payload,
         details_url="https://example.invalid/review",
     )
     assert response["ok"] is True
@@ -110,6 +117,17 @@ def test_github_app_webhook_asgi_contract_validates_signature() -> None:
     )
     assert rejected.status_code == 401
 
+    missing_review = json.loads(body)
+    del missing_review["intentumdiff_review"]
+    missing_body = json.dumps(missing_review).encode()
+    missing_signature = "sha256=" + hmac.new(b"secret", missing_body, hashlib.sha256).hexdigest()
+    missing = client.post(
+        "/github/webhook", content=missing_body,
+        headers={"X-GitHub-Event": "pull_request", "X-Hub-Signature-256": missing_signature},
+    )
+    assert missing.status_code == 422
+    assert "check_run" not in missing.json()
+
 
 def test_gist_url_parser_accepts_only_github_gist_urls() -> None:
     gist = parse_gist_url("https://gist.github.com/owner/abcdef123456")
@@ -117,3 +135,4 @@ def test_gist_url_parser_accepts_only_github_gist_urls() -> None:
 
     with pytest.raises(ValueError):
         parse_gist_url("https://example.com/owner/abcdef123456")
+

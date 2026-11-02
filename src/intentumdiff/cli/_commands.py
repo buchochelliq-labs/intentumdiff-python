@@ -242,8 +242,9 @@ def _cmd_file(args: argparse.Namespace) -> None:
         config_start_path=args.new_file,
         guardrails_policy=getattr(args, "guardrails_policy", None),
     )
+    diff = differ.diff(source)
     if args.stream:
-        for change in differ.diff_stream(source):
+        for change in diff.changes:
             ct_str = (
                 change.change_type.value
                 if hasattr(change.change_type, "value")
@@ -254,11 +255,10 @@ def _cmd_file(args: argparse.Namespace) -> None:
                 line += f"  [{change.text_diff}]"
             _console.print(line)
     else:
-        diff = differ.diff(source)
         _render_with_profile(diff, args, fuel=differ._config.plugin_fuel)
-        result = _emit_guardrail_reports(diff, args)
-        _record_diagnostics_db(diff, args)
-        _exit_if_guardrail_result_fails(result)
+    result = _emit_guardrail_reports(diff, args)
+    _record_diagnostics_db(diff, args)
+    _exit_if_guardrail_result_fails(result)
 
 
 def _cmd_patch(args: argparse.Namespace) -> None:
