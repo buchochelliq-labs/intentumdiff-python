@@ -13,7 +13,7 @@ import pytest
 from scripts.smoke_published_wheel import PROVENANCE_SCRIPT
 
 
-@pytest.mark.parametrize('defect', ['none', 'missing', 'tampered', 'extra', 'count'])
+@pytest.mark.parametrize('defect', ['none', 'missing', 'tampered', 'extra', 'count', 'source', 'registry'])
 def test_installed_provenance_probe(tmp_path: Path, defect: str) -> None:
     package = tmp_path / 'intentumdiff'
     wasm = package / 'wasm'
@@ -22,13 +22,25 @@ def test_installed_provenance_probe(tmp_path: Path, defect: str) -> None:
     data = b'\x00asm fixture'
     (wasm / 'fixture.wasm').write_bytes(data)
     manifest = {
-        'schema_version': 1, 'artifact_count': 1,
+        'schema_version': 1, 'registry_commit': 'c' * 40, 'artifact_count': 1,
         'artifacts': {'fixture.wasm': {
             'size_bytes': len(data), 'sha256': hashlib.sha256(data).hexdigest(),
+            'source': {
+                'repository': 'https://github.com/buchochelliq-labs/intentumdiff-fixture-parser',
+                'commit': 'a' * 40,
+                'artifact': 'parser-wasm',
+                'artifact_id': 123,
+                'artifact_archive_sha256': 'b' * 64,
+                'abi_target': '1.0.0',
+            },
         }},
     }
     if defect == 'count':
         manifest['artifact_count'] = 2
+    if defect == 'source':
+        manifest['artifacts']['fixture.wasm'].pop('source')
+    if defect == 'registry':
+        manifest['registry_commit'] = 'main'
     if defect != 'missing':
         (wasm / 'wasm_provenance.json').write_text(json.dumps(manifest), encoding='utf-8')
     if defect == 'tampered':

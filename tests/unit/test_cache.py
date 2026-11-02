@@ -5,7 +5,6 @@ tests/unit/test_cache.py — unit tests for the caching layer.
 from __future__ import annotations
 
 import json
-import os
 import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -229,51 +228,211 @@ def test_differ_creates_sqlite_cache_from_config(tmp_path: Path):
     differ._cache.close()
 
 
-@pytest.mark.skipif(
-    os.getenv("INTENTUMDIFF_ENFORCE_RUST_ONLY_ENGINE") == "1",
-    reason=(
-        "Uses a fully MagicMock'd parser to control the cache key; the mock cannot satisfy "
-        "the native Rust path the RUST_ONLY gate requires. Cache-hit behaviour with the real "
-        "engine is covered by the other cache tests."
-    ),
-)
-def test_diff_cache_hit_skips_wasm(tmp_path: Path):
-    """A diff-cache hit should return without calling parser.process()."""
-    cache = _InMemoryCache()
-    differ = SemanticDiffer(cache=cache)
-
-    # Build a minimal valid SemanticDiff JSON and prime the diff cache
+def test_legacy_diff_cache_cannot_replay_a_false_style_only_result(tmp_path: Path):
+    """An old semantic cache entry cannot bypass the current Rust/parser pipeline."""
     from intentumdiff.core.models import SemanticDiff
-    fake_diff = SemanticDiff(
-        changes=[],
-        old_filename="a.py",
-        new_filename="a.py",
-        language="python",
-        has_semantic_changes=False,
-        is_style_only=True,
+
+    cache = _InMemoryCache()
+    differ = SemanticDiffer(config=DiffConfig(experimental_rust_core=False), cache=cache)
+    old, new = "def f(): pass", "def g(): pass"
+    fake = SemanticDiff(
+        changes=[], old_filename="test.py", new_filename="test.py",
+        language="python", has_semantic_changes=False, is_style_only=True,
         parse_errors=[],
     )
-    fake_json = fake_diff.model_dump_json()
+    parser = MagicMock()
+    parser.grammar_id = "python"
+    parser.parser_mode = "full-parse"
+    parser.wasm_path = str(tmp_path / "python_parser.wasm")
+    Path(parser.wasm_path).write_bytes(b"\x00asm\x01\x00\x00\x00")
+    parser.trivia_node_types = []
+    parser.preprocess_source.side_effect = lambda value: value
+    parser.process.side_effect = RuntimeError("parser execution required")
 
-    # We need to know what key will be computed; use a mock parser to control it.
-    mock_parser = MagicMock()
-    mock_parser.grammar_id = "python"
-    mock_parser.parser_mode = "full-parse"
-    mock_parser.wasm_path = str(tmp_path / "python_parser.wasm")  # non-existent → "unknown" hash
-    mock_parser.trivia_node_types = []
-    mock_parser.preprocess_source.side_effect = lambda s: s
+    digest = differ._wasm_hash_for(parser)
+    cache.put_diff(cache.diff_key(old, new, "python", digest), fake.model_dump_json())
+    with patch.object(differ._registry, "detect_parser", return_value=(parser, "python")):
+        with pytest.raises(RuntimeError, match="parser execution required"):
+            differ.diff_strings(old, new, "test.py")
+    assert cache.diff_hits == 0
+    parser.process.assert_called_once()
 
-    with patch.object(differ._registry, "detect_parser", return_value=(mock_parser, "python")):
-        # Compute the key ourselves
-        wasm_hash = differ._wasm_hash_for(mock_parser)
-        diff_key = cache.diff_key("def f(): pass", "def g(): pass", "python", wasm_hash)
-        cache._diff[diff_key] = fake_json
 
-        result = differ.diff_strings("def f(): pass", "def g(): pass", "test.py")
+def test_missing_wasm_rejects_legacy_unknown_diff_cache_hit(tmp_path: Path):
+    """A missing component must not resurrect a cached style-only success."""
+    from intentumdiff.core.models import SemanticDiff
 
-    assert result.is_style_only is True
-    assert cache.diff_hits == 1
-    mock_parser.process.assert_not_called()
+    cache = _InMemoryCache()
+    differ = SemanticDiffer(config=DiffConfig(experimental_rust_core=False), cache=cache)
+    old, new = "def f(): pass", "def g(): pass"
+    fake = SemanticDiff(
+        changes=[], old_filename="test.py", new_filename="test.py",
+        language="python", has_semantic_changes=False, is_style_only=True,
+        parse_errors=[],
+    )
+    cache.put_diff(cache.diff_key(old, new, "python", "unknown"), fake.model_dump_json())
+
+    parser = MagicMock()
+    parser.grammar_id = "python"
+    parser.parser_mode = "full-parse"
+    parser.wasm_path = str(tmp_path / "missing_parser.wasm")
+    parser.trivia_node_types = []
+    parser.preprocess_source.side_effect = lambda value: value
+
+    with patch.object(differ._registry, "detect_parser", return_value=(parser, "python")):
+        with pytest.raises(RuntimeError, match="cannot fingerprint parser Wasm"):
+            differ.diff_strings(old, new, "test.py")
+    assert cache.diff_hits == 0
+    parser.process.assert_not_called()
+
+
+def test_wasm_digest_cache_tracks_artifact_path_replacement_and_deletion(tmp_path: Path):
+    """Same grammar does not let distinct/replaced Wasm files share a digest."""
+    differ = SemanticDiffer()
+    first = tmp_path / "parser-1.wasm"
+    second = tmp_path / "parser-2.wasm"
+    first.write_bytes(b"\x00asm\x01\x00\x00\x00parser-one")
+    second.write_bytes(b"\x00asm\x01\x00\x00\x00parser-two")
+    parser = MagicMock()
+    parser.grammar_id = "shared"
+
+    parser.wasm_path = str(first)
+    first_digest = differ._wasm_hash_for(parser)
+    assert len(first_digest) == 64
+    parser.wasm_path = str(second)
+    assert differ._wasm_hash_for(parser) != first_digest
+
+    parser.wasm_path = str(first)
+    first.write_bytes(b"\x00asm\x01\x00\x00\x00replaced-with-new-bytes")
+    assert differ._wasm_hash_for(parser) != first_digest
+    first.unlink()
+    with pytest.raises(RuntimeError, match="cannot fingerprint parser Wasm"):
+        differ._wasm_hash_for(parser)
+
+
+def test_parse_cache_distinguishes_language_and_filename_for_shared_grammar(
+    tmp_path: Path,
+):
+    """Wasm parser inputs with identical source/grammar must not alias."""
+    from intentumdiff.core.models import NodePosition, SemanticNode
+
+    cache = _InMemoryCache()
+    differ = SemanticDiffer(cache=cache)
+    wasm = tmp_path / "shared-parser.wasm"
+    wasm.write_bytes(b"\x00asm\x01\x00\x00\x00")
+    parser = MagicMock()
+    parser.grammar_id = "js-ts"
+    parser.wasm_path = str(wasm)
+
+    def process(_source: str, language: str, filename: str, *, fuel: int):
+        assert fuel == 100
+        return SemanticNode(
+            id=f"{language}@{filename}",
+            node_type="module", label="", structural_hash="h",
+            position=NodePosition(
+                start_line=0, start_col=0, end_line=0, end_col=0,
+            ),
+            children=[],
+        )
+
+    parser.process.side_effect = process
+    js = differ._cached_process(parser, "same source", "javascript", "same.js", 100)
+    ts = differ._cached_process(parser, "same source", "typescript", "same.js", 100)
+    renamed = differ._cached_process(
+        parser, "same source", "typescript", "renamed.ts", 100,
+    )
+    again = differ._cached_process(
+        parser, "same source", "typescript", "renamed.ts", 100,
+    )
+    assert [js.id, ts.id, renamed.id] == [
+        "javascript@same.js", "typescript@same.js", "typescript@renamed.ts",
+    ]
+    assert again == renamed
+    assert parser.process.call_count == 3
+    assert cache.parse_hits == 1
+
+
+
+def test_instantiated_wasm_revision_cannot_poison_new_parser_cache(tmp_path: Path):
+    """Replacing A's backing Wasm with B must never cache A under B's key (#196)."""
+    import hashlib
+    from intentumdiff.core.models import NodePosition, SemanticNode
+
+    cache = _InMemoryCache()
+    differ = SemanticDiffer(cache=cache)
+    wasm = tmp_path / "shared_parser.wasm"
+    revision_a = b"wasm revision A"
+    revision_b = b"entirely different wasm revision B"
+    wasm.write_bytes(revision_a)
+
+    def make_parser(revision: bytes, label: str):
+        parser = MagicMock()
+        parser.grammar_id = "shared"
+        parser.wasm_path = str(wasm)
+        parser.compiled_wasm_sha256 = hashlib.sha256(revision).hexdigest()
+        parser.process.return_value = SemanticNode(
+            id=label, node_type="module", label=label, structural_hash=label,
+            position=NodePosition(
+                start_line=0, start_col=0, end_line=0, end_col=0,
+            ),
+            children=[],
+        )
+        return parser
+
+    parser_a = make_parser(revision_a, "A")
+    first = differ._cached_process(parser_a, "same source", "python", "a.py", 100)
+    assert first.id == "A"
+    assert differ._cached_process(parser_a, "same source", "python", "a.py", 100) == first
+    assert parser_a.process.call_count == 1
+
+    # The old parser still executes A, even though its filesystem path now
+    # points at B. It must neither read nor write a B-keyed cache entry.
+    wasm.write_bytes(revision_b)
+    with pytest.raises(RuntimeError, match="compiled parser Wasm differs"):
+        differ._cached_process(parser_a, "same source", "python", "a.py", 100)
+    assert parser_a.process.call_count == 1
+
+    parser_b = make_parser(revision_b, "B")
+    second = differ._cached_process(parser_b, "same source", "python", "a.py", 100)
+    assert second.id == "B"
+    assert differ._cached_process(parser_b, "same source", "python", "a.py", 100) == second
+    assert parser_b.process.call_count == 1
+    assert cache.parse_hits == 2
+
+
+def test_wasm_identity_change_during_process_does_not_write_cache(tmp_path: Path):
+    """A trap/reload during parsing must not store B output under A's key."""
+    import hashlib
+    from intentumdiff.core.models import NodePosition, SemanticNode
+
+    cache = _InMemoryCache()
+    differ = SemanticDiffer(cache=cache)
+    wasm = tmp_path / "reload_parser.wasm"
+    revision_a = b"compiled original A"
+    revision_b = b"compiled replacement revision B with a different size"
+    wasm.write_bytes(revision_a)
+
+    parser = MagicMock()
+    parser.grammar_id = "shared"
+    parser.wasm_path = str(wasm)
+    parser.compiled_wasm_sha256 = hashlib.sha256(revision_a).hexdigest()
+
+    def reload_while_parsing(*_args, **_kwargs):
+        wasm.write_bytes(revision_b)
+        parser.compiled_wasm_sha256 = hashlib.sha256(revision_b).hexdigest()
+        return SemanticNode(
+            id="B", node_type="module", label="", structural_hash="B",
+            position=NodePosition(
+                start_line=0, start_col=0, end_line=0, end_col=0,
+            ),
+            children=[],
+        )
+
+    parser.process.side_effect = reload_while_parsing
+    with pytest.raises(RuntimeError, match="identity changed during parse"):
+        differ._cached_process(parser, "same source", "python", "a.py", 100)
+    assert cache._parse == {}
+    assert parser.process.call_count == 1
 
 
 # ---------------------------------------------------------------------------

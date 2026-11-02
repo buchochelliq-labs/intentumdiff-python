@@ -43,8 +43,8 @@ class FileSource(Source):
         self._filename = filename or self._new_path.name
 
     def get_content(self) -> tuple[str, str, str, str | None]:
-        old_content = self._old_path.read_text(encoding="utf-8", errors="replace")
-        new_content = self._new_path.read_text(encoding="utf-8", errors="replace")
+        old_content = self._old_path.read_text(encoding="utf-8", errors="strict")
+        new_content = self._new_path.read_text(encoding="utf-8", errors="strict")
         return old_content, new_content, self._filename, self._language_hint
 
     def display_names(self) -> tuple[str, str] | None:

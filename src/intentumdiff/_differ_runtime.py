@@ -25,10 +25,12 @@ def _infer_file_lifecycle(old_source: str, new_source: str, staging_status: str 
 
 def _apply_file_lifecycle_to_diff(diff: SemanticDiff, lifecycle: str) -> SemanticDiff:
     """Convert the shared Rust result back into the public Python DTO."""
-    from intentumdiff.rust_core import _c_abi_call
-    return SemanticDiff.model_validate(_c_abi_call(
+    from intentumdiff.rust_core import _c_abi_call, _require_complete_batch_diff_dto
+
+    response = _c_abi_call(
         "finalize_file_lifecycle", diff.model_dump(mode="json"), lifecycle,
-    ))
+    )
+    return SemanticDiff.model_validate(_require_complete_batch_diff_dto(response))
 
 
 class _PhaseProfiler:
@@ -90,12 +92,12 @@ def _attach_content_type_metadata(
     """Enrich a diff's metadata with the detected content type (mime + category).
 
     Uses the Rust magic-byte detector on the changed content so downstream
-    surfaces can show what kind of file was diffed. Never raises — the detector
-    bridge falls back gracefully when the native core is unavailable.
+    surfaces can show what kind of file was diffed. Malformed UTF-8 source
+    and required Rust detector failures propagate; no fabricated bytes/fallback.
     """
     from intentumdiff.content_type import detect_content_type
 
-    head = (new_content or old_content)[:8192].encode("utf-8", errors="replace")
+    head = (new_content or old_content)[:8192].encode("utf-8", errors="strict")
     metadata = dict(diff.metadata or {})
     metadata["content_type"] = detect_content_type(head)
     return diff.model_copy(update={"metadata": metadata})

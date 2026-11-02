@@ -18,6 +18,7 @@
   "total_cents"
  ],
  "append_statement": "message AuditEvent {\n  string actor = 1;\n}",
+ "string_mutation": {"old":"\"proto3\"","new":"\"proto2\""},
  "mutation_xfail": {},
  "invisible_tokens_at_generation": []
 }

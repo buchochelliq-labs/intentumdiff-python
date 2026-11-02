@@ -15,13 +15,22 @@ def compile_commands_metadata(*, filename: str, language: str, cwd: Path | None 
         file_path = base_dir / file_path
     for directory in (file_path.parent, *file_path.parents):
         database = directory / "compile_commands.json"
-        if database.is_file():
-            try:
-                contents = json.loads(database.read_text(encoding="utf8"))
-            except (OSError, json.JSONDecodeError):
-                return None
-            return _c_abi_call("compile_context", json.dumps({
-                "database": contents, "database_path": str(database), "filename": filename,
-                "language": language, "cwd": str(base_dir),
-            }))
+        try:
+            raw = database.read_text(encoding="utf-8")
+        except FileNotFoundError as exc:
+            # A broken link represents an explicitly configured unusable DB,
+            # not an absent optional compile database.
+            if database.is_symlink():
+                raise RuntimeError(f"Cannot read configured compile database {database}: {exc}") from exc
+            continue
+        except (OSError, UnicodeError) as exc:
+            raise RuntimeError(f"Cannot read configured compile database {database}: {exc}") from exc
+        try:
+            contents = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Malformed compile database {database}: {exc}") from exc
+        return _c_abi_call("compile_context", json.dumps({
+            "database": contents, "database_path": str(database), "filename": filename,
+            "language": language, "cwd": str(base_dir),
+        }))
     return None

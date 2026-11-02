@@ -2,7 +2,7 @@
   "language": "typescript",
   "filename": "code.ts",
   "visible_tokens": [
-    "interface",
+    "id",
     "User",
     "number",
     "name",

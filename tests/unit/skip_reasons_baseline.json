@@ -32,21 +32,6 @@
       "justification": "optional LSP server dep"
     },
     {
-      "pattern": "no rust support",
-      "class": "platform",
-      "justification": "language-gated engine capability"
-    },
-    {
-      "pattern": "backend unavailable",
-      "class": "platform",
-      "justification": "compiled core not present in minimal envs"
-    },
-    {
-      "pattern": "unavailable: test",
-      "class": "platform",
-      "justification": "availability-probed optional deps"
-    },
-    {
       "pattern": "intentumdiff not installed",
       "class": "platform",
       "justification": "entry-point tests need an installed dist"
@@ -170,6 +155,11 @@
       "pattern": "^\\{parser_name\\} parser unavailable: \\{reason\\}$",
       "class": "platform",
       "justification": "Rust parser_availability explicitly excludes a parser on this platform, currently PowerShell on Windows ARM64 (#42); scenarios remain active everywhere else and resume automatically when Rust reports the parser available."
+    },
+    {
+      "pattern": "^symlink creation unavailable on this host: \\{exc\\}$",
+      "class": "platform",
+      "justification": "The fail-closed dangling-policy regression requires permission to create a symlink. On hosts or filesystems that disallow creation, the behavior cannot be exercised; where permitted, policy loading is still required to fail closed. The skip is environment-specific and not a successful semantic result."
     }
   ]
 }

@@ -126,17 +126,18 @@ def test_enrich_multiple_nodes() -> None:
     assert result == {"a": "str", "b": "int"}
 
 
-def test_enrich_returns_empty_on_connection_error() -> None:
+def test_enrich_rejects_connection_error() -> None:
     leaf = _node("n1", "function_name", line=0, col=0)
     root = _node("root", "module", children=[leaf])
     client = MagicMock()
     client.did_open = AsyncMock(side_effect=LspConnectionError("refused"))
 
-    result = run(TypeEnricher(client, "python").enrich("/tmp/test.py", "a\nb\nc\n", root))  # type: ignore[arg-type]
-    assert result == {}
+    with pytest.raises(LspConnectionError, match="refused"):
+        run(TypeEnricher(client, "python").enrich("/tmp/test.py", "a\nb\nc\n", root))  # type: ignore[arg-type]
+    client.did_close.assert_not_called()
 
 
-def test_enrich_skips_nodes_on_timeout() -> None:
+def test_enrich_rejects_partial_hover_on_timeout() -> None:
     a = _node("a", "function_name", line=0, col=0)
     b = _node("b", "function_name", line=1, col=0)
     root = _node("root", "module", children=[a, b])
@@ -151,9 +152,10 @@ def test_enrich_skips_nodes_on_timeout() -> None:
     client.did_close = AsyncMock()
     client.hover = AsyncMock(side_effect=_hover)
 
-    result = run(TypeEnricher(client, "python").enrich("/tmp/test.py", "a\nb\nc\n", root))  # type: ignore[arg-type]
-    assert "a" not in result
-    assert result.get("b") == "float"
+    with pytest.raises(RuntimeError, match="LSP hover failed for node a.*timeout") as err:
+        run(TypeEnricher(client, "python").enrich("/tmp/test.py", "a\nb\nc\n", root))  # type: ignore[arg-type]
+    assert isinstance(err.value.__cause__, LspTimeoutError)
+    client.did_close.assert_awaited_once()
 
 
 def test_enrich_empty_tree() -> None:
@@ -172,9 +174,10 @@ def test_enrich_did_close_called_even_on_unexpected_error() -> None:
     client.did_close = AsyncMock()
     client.hover = AsyncMock(side_effect=RuntimeError("unexpected"))
 
-    result = run(TypeEnricher(client, "python").enrich("/tmp/test.py", "a\nb\nc\n", root))  # type: ignore[arg-type]
-    client.did_close.assert_called_once()
-    assert result == {}
+    with pytest.raises(RuntimeError, match="LSP hover failed.*unexpected") as err:
+        run(TypeEnricher(client, "python").enrich("/tmp/test.py", "a\nb\nc\n", root))  # type: ignore[arg-type]
+    assert isinstance(err.value.__cause__, RuntimeError)
+    client.did_close.assert_awaited_once()
 
 # ---------------------------------------------------------------------------
 # Tests: Rust core parity (issue 100 S2 — hover-target collection in the core)

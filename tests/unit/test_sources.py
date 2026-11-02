@@ -79,3 +79,16 @@ class TestFileSource:
         old, new, _, _ = src.get_content()
         assert old == "old_content"
         assert new == "new_content"
+
+
+@pytest.mark.parametrize("bad_side", ["old", "new"])
+def test_file_source_rejects_non_utf8_source_bytes(tmp_path, bad_side):
+    from intentumdiff.sources.file_source import FileSource
+
+    old_path = tmp_path / "before.py"
+    new_path = tmp_path / "after.py"
+    old_path.write_text("value = 1\n", encoding="utf-8")
+    new_path.write_text("value = 2\n", encoding="utf-8")
+    (old_path if bad_side == "old" else new_path).write_bytes(b"value = \xff\n")
+    with pytest.raises(UnicodeDecodeError):
+        FileSource(old_path, new_path).get_content()

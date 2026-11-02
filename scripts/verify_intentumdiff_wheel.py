@@ -111,6 +111,12 @@ def _validate_archive_entry_name(name: str) -> None:
         or ".." in windows.parts
     ):
         raise ValueError(f"wheel contains unsafe archive path: {name!r}")
+    # ZIP member names are POSIX paths. Dot/empty segments and backslashes
+    # can resolve to another install target on Windows even when their raw
+    # names differ from the reviewed files.
+    canonical = posix.as_posix() + ("/" if name.endswith("/") else "")
+    if "\\" in name or canonical != name:
+        raise ValueError(f"wheel contains noncanonical archive path: {name!r}")
 
 
 def _validate_wheel_entries(
@@ -148,6 +154,12 @@ def _verify_wasm_provenance(zf: zipfile.ZipFile, names: set[str], wasm_files: li
         manifest = json.loads(zf.read(PROVENANCE_ENTRY).decode("utf-8"))
     except (ValueError, KeyError) as exc:
         raise ValueError(f"wheel provenance manifest is not valid JSON: {exc}") from exc
+    if not isinstance(manifest, dict) or manifest.get("schema_version") != 1:
+        raise ValueError("wheel provenance manifest has an invalid schema")
+    registry_commit = manifest.get("registry_commit")
+    if (not isinstance(registry_commit, str) or len(registry_commit) != 40
+            or any(c not in "0123456789abcdef" for c in registry_commit)):
+        raise ValueError("wheel provenance has no immutable registry commit")
     artifacts = manifest.get("artifacts")
     if not isinstance(artifacts, dict):
         raise ValueError("wheel provenance manifest has no 'artifacts' map")
@@ -168,9 +180,34 @@ def _verify_wasm_provenance(zf: zipfile.ZipFile, names: set[str], wasm_files: li
         )
     for name in wasm_files:
         basename = PurePosixPath(name).name
-        digest = hashlib.sha256(zf.read(name)).hexdigest()
-        if digest != artifacts[basename].get("sha256"):
-            raise ValueError(f"wheel wasm {basename} does not match its provenance SHA-256")
+        entry = artifacts[basename]
+        if not isinstance(entry, dict):
+            raise ValueError(f"wheel wasm {basename} has malformed provenance")
+        blob = zf.read(name)
+        digest = hashlib.sha256(blob).hexdigest()
+        if digest != entry.get("sha256") or len(blob) != entry.get("size_bytes"):
+            raise ValueError(f"wheel wasm {basename} does not match its provenance SHA-256/size")
+        source = entry.get("source")
+        required = {"repository", "commit", "artifact", "artifact_id",
+                    "artifact_archive_sha256", "abi_target"}
+        if not isinstance(source, dict) or set(source) != required:
+            raise ValueError(f"wheel wasm {basename} lacks exact source and artifact provenance")
+        commit, archive_sha = source["commit"], source["artifact_archive_sha256"]
+        repository, artifact = source["repository"], source["artifact"]
+        if (not isinstance(repository, str)
+                or not repository.startswith("https://github.com/buchochelliq-labs/intentumdiff-")
+                or not isinstance(commit, str) or len(commit) != 40
+                or any(c not in "0123456789abcdef" for c in commit)
+                or not isinstance(archive_sha, str) or len(archive_sha) != 64
+                or any(c not in "0123456789abcdef" for c in archive_sha)
+                or not isinstance(source["artifact_id"], int)
+                or isinstance(source["artifact_id"], bool)
+                or source["artifact_id"] < 1
+                or artifact not in ("parser-wasm", "renderer-components")
+                or (artifact == "renderer-components") != basename.endswith("_renderer.wasm")
+                or (source["abi_target"] is not None
+                    and not isinstance(source["abi_target"], str))):
+            raise ValueError(f"wheel wasm {basename} has invalid immutable CI source attribution")
     return len(expected)
 
 
@@ -206,12 +243,42 @@ def verify_wheel(
         raise ValueError("IntentumDiff release wheel must be native, not py3-none-any")
 
     with zipfile.ZipFile(wheel) as zf:
-        names = set(zf.namelist())
+        members = zf.infolist()
+        # On Windows, Python's ZipInfo normalizes backslashes to forward
+        # slashes when reading an archive. namelist()/filename therefore
+        # cannot expose the original unsafe member name. Validate the raw
+        # central-directory name before trusting the normalized name.
+        for member in members:
+            if member.orig_filename != member.filename:
+                raise ValueError(
+                    f"wheel contains noncanonical archive path: {member.orig_filename!r}"
+                )
+            _validate_archive_entry_name(member.orig_filename)
+        entries = [member.filename for member in members]
+        # A set would silently discard repeated ZIP members. Different wheel
+        # installers can select different bytes for the same pathname, so even
+        # byte-identical duplicates are invalid release inputs.
+        names = set(entries)
+        if len(entries) != len(names):
+            from collections import Counter
+            duplicates = sorted(name for name, count in Counter(entries).items() if count > 1)
+            raise ValueError("wheel contains duplicate archive entries: " + ", ".join(duplicates))
     _validate_wheel_entries(
         names,
         expected_name=expected_name,
         expected_version=expected_version,
     )
+    # On case-insensitive filesystems two distinct ZIP names can extract to
+    # the same path. Reject aliases before validating Wasm/native payloads.
+    # Exact-name duplicates have already been rejected above.
+    install_targets: dict[str, str] = {}
+    for entry in entries:
+        target = PurePosixPath(entry).as_posix().rstrip("/").casefold()
+        previous = install_targets.setdefault(target, entry)
+        if previous is not None and previous != entry:
+            raise ValueError(
+                f"wheel contains platform-aliasing archive entries: {previous!r}, {entry!r}"
+            )
 
     missing_packages = sorted(REQUIRED_PACKAGES - names)
     if missing_packages:

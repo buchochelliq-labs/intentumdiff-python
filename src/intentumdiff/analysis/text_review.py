@@ -33,9 +33,10 @@ def normalize_generic_text_for_review(
     """Replace generic parser token churn with line/character text spans.
 
     Rust-authoritative (readiness #90/#91): the Rust generic-text review is the
-    only implementation. When it declines (backend unavailable, or the input
-    exceeds its size cap), the changes pass through unchanged — "if Python didn't
-    exist, IntentumDiff still works". The full port lives in ``text_review_generic.rs``.
+    only implementation. Only an explicit Rust-certified LCS size-cap decline
+    passes through the existing change DTOs. An unavailable Rust handler or
+    malformed response raises rather than manufacturing a successful review.
+    The implementation lives in ``text_review_generic.rs``.
     """
     from intentumdiff.rust_core import try_rust_generic_text_review
 

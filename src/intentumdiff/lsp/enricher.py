@@ -18,10 +18,9 @@ The Rust engine selects hover targets and result node IDs. This adapter uses
 which keeps latency proportional to the server's response time rather than
 the number of nodes.
 
-LSP failures are non-fatal:
-- ``LspConnectionError`` — logged as a warning; an empty dict is returned.
-- ``LspTimeoutError`` per node — that node is silently skipped.
-- Any other exception — logged as a debug message; the node is skipped.
+LSP transport failures fail closed: connection errors and hover timeouts are
+reported to the indexer instead of being converted into an empty type map.
+A successful hover response with no type remains a legitimate None result.
 """
 
 from __future__ import annotations
@@ -31,7 +30,6 @@ import logging
 import pathlib
 
 from intentumdiff.lsp.client import AsyncLspClient
-from intentumdiff.lsp.exceptions import LspConnectionError, LspTimeoutError
 from intentumdiff.core.models import SemanticNode
 
 logger = logging.getLogger(__name__)
@@ -72,15 +70,11 @@ class TypeEnricher:
         Sends ``textDocument/didOpen``, fires all hover requests concurrently,
         then sends ``textDocument/didClose``.
 
-        Returns an empty dict on connection failure so that the caller can
-        continue the diff pipeline without type information.
+        Raises transport errors; only a completed query with no type results
+        produces an empty dict.
         """
         uri = _path_to_uri(file_path)
-        try:
-            await self._client.did_open(uri, self._language, source_text)
-        except LspConnectionError as exc:
-            logger.warning("LSP type enrichment skipped (%s): %s", file_path, exc)
-            return {}
+        await self._client.did_open(uri, self._language, source_text)
         try:
             result = await self._query_all(uri, root, source_text)
         finally:
@@ -109,15 +103,11 @@ class TypeEnricher:
         async with sem:
             try:
                 type_str = await self._client.hover(uri, line, col)
-                return node_id, type_str
-            except LspTimeoutError:
-                return node_id, None
-            except Exception as exc:
-                logger.debug(
-                    "LSP hover failed for node %s at %d:%d — %s",
-                    node_id, line, col, exc,
-                )
-                return node_id, None
+            except Exception as exc:  # noqa: BLE001
+                raise RuntimeError(
+                    f"LSP hover failed for node {node_id} at {line}:{col}: {exc}"
+                ) from exc
+            return node_id, type_str
 
     async def _query_all(
         self,

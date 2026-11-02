@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
+
+import pytest
 
 from intentumdiff.analysis.compile_commands import compile_commands_metadata
 
@@ -145,3 +148,43 @@ def test_compile_context_preserves_quoted_spaces_and_resolves_relative_directory
     assert result['directory'] == 'build'
     assert result['include_dirs'] == ['include with spaces']
     assert result['defines'] == ['NAME=hello world']
+
+def test_missing_compile_database_is_optional(tmp_path) -> None:
+    assert compile_commands_metadata(
+        filename="src/main.cpp", language="cpp", cwd=tmp_path,
+    ) is None
+
+
+def test_malformed_present_compile_database_fails_closed(tmp_path) -> None:
+    (tmp_path / "compile_commands.json").write_text("{bad JSON", encoding="utf-8")
+    with pytest.raises(ValueError, match="Malformed compile database"):
+        compile_commands_metadata(filename="src/main.cpp", language="cpp", cwd=tmp_path)
+
+
+def test_invalid_utf8_compile_database_fails_closed(tmp_path) -> None:
+    (tmp_path / "compile_commands.json").write_bytes(b"\xff")
+    with pytest.raises(RuntimeError, match="Cannot read configured compile database"):
+        compile_commands_metadata(filename="src/main.cpp", language="c", cwd=tmp_path)
+
+
+def test_unreadable_compile_database_fails_closed(
+    tmp_path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    policy = tmp_path / "compile_commands.json"
+    policy.write_text("[]", encoding="utf-8")
+    real_read = Path.read_text
+
+    def failed_read(self: Path, *args, **kwargs):
+        if self == policy:
+            raise PermissionError("compile DB read denied")
+        return real_read(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", failed_read)
+    with pytest.raises(RuntimeError, match="compile DB read denied"):
+        compile_commands_metadata(filename="src/main.cpp", language="cpp", cwd=tmp_path)
+
+
+def test_directory_instead_of_compile_database_fails_closed(tmp_path) -> None:
+    (tmp_path / "compile_commands.json").mkdir()
+    with pytest.raises(RuntimeError, match="Cannot read configured compile database"):
+        compile_commands_metadata(filename="src/main.cpp", language="cpp", cwd=tmp_path)

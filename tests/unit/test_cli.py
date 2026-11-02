@@ -912,7 +912,7 @@ def test_cmd_index_from_cache(MockIndexer, MockDiffer, tmp_path):
 
 @patch("intentumdiff.cli._commands.SemanticDiffer")
 @patch("intentumdiff.core.indexer.Indexer")
-def test_cmd_index_with_few_errors(MockIndexer, MockDiffer, tmp_path):
+def test_cmd_index_with_few_errors(MockIndexer, MockDiffer, tmp_path, capsys):
     errors = [(f"file_{i}.py", f"error {i}") for i in range(5)]
     MockDiffer.return_value = _make_mock_differ()
     MockIndexer.return_value.index_repo.return_value = _make_result(
@@ -921,12 +921,19 @@ def test_cmd_index_with_few_errors(MockIndexer, MockDiffer, tmp_path):
     args = argparse.Namespace(
         repo=str(tmp_path), ref="HEAD", force=False, cache_path=str(tmp_path / "cache")
     )
-    _cmd_index(args)  # parse errors are shown but do not raise
+    with pytest.raises(SystemExit) as exc_info:
+        _cmd_index(args)
+    assert exc_info.value.code == 1
+    output = capsys.readouterr().out
+    assert "5 error(s)" in output
+    for filename, message in errors:
+        assert filename in output
+        assert message in output
 
 
 @patch("intentumdiff.cli._commands.SemanticDiffer")
 @patch("intentumdiff.core.indexer.Indexer")
-def test_cmd_index_with_many_errors_truncates(MockIndexer, MockDiffer, tmp_path):
+def test_cmd_index_with_many_errors_truncates(MockIndexer, MockDiffer, tmp_path, capsys):
     errors = [(f"file_{i}.py", f"error {i}") for i in range(15)]
     MockDiffer.return_value = _make_mock_differ()
     MockIndexer.return_value.index_repo.return_value = _make_result(
@@ -935,7 +942,15 @@ def test_cmd_index_with_many_errors_truncates(MockIndexer, MockDiffer, tmp_path)
     args = argparse.Namespace(
         repo=str(tmp_path), ref="HEAD", force=False, cache_path=str(tmp_path / "cache")
     )
-    _cmd_index(args)  # "…and 5 more" is printed; should not raise
+    with pytest.raises(SystemExit) as exc_info:
+        _cmd_index(args)
+    assert exc_info.value.code == 1
+    output = capsys.readouterr().out
+    assert "15 error(s)" in output
+    assert "file_0.py" in output
+    assert "file_9.py" in output
+    assert "file_10.py" not in output
+    assert "and 5 more" in output
 
 
 @patch("intentumdiff.cli._commands.SemanticDiffer")

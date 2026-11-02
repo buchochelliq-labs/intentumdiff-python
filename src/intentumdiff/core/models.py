@@ -123,8 +123,12 @@ class LanguageInfoGroup(BaseModel, frozen=True):
 
 
 class NodeFacts(BaseModel, frozen=True):
+    # Unknown Rust-authored facts must fail validation rather than disappear
+    # through Pydantic's extra=ignore (0.0.2 thin-wrapper contract, #226).
+    model_config = ConfigDict(extra="forbid")
+
     """
-    Privacy-safe structural facts about a definition node (function/method/class),
+    Privacy-safe structural facts about an entity or keyed/resource node,
     computed by the Rust parser from the full CST before pruning. Only counts,
     enums, and flags — never source text, identifiers, or literals — so they can
     describe a change's shape ("no parameters", "returns nothing", "no-op body")
@@ -213,6 +217,20 @@ class NodeFacts(BaseModel, frozen=True):
     #: function calls itself (recursion). Count/flag only.
     call_count: int | None = None
     recursive: bool | None = None
+
+    # Rust-owned keyed/collection/resource NodeFacts (#179, Core #203,
+    # Python #226). These are DTO fields only: the Python host must preserve
+    # Rust's privacy-safe counts, flags and shape categories without deriving
+    # them or silently dropping them through Pydantic's extra=ignore.
+    shape: str | None = None
+    child_count: int | None = None
+    value_kind: str | None = None
+    item_count: int | None = None
+    nesting: int | None = None
+    is_leaf: bool | None = None
+    attribute_count: int | None = None
+    nested_block_count: int | None = None
+    has_nested_block: bool | None = None
 
 
 class SemanticNode(BaseModel, frozen=True):
@@ -420,14 +438,12 @@ class ChangeGroup(BaseModel, frozen=True):
 class ChangeStreamEvent(BaseModel, frozen=True):
     """A single event emitted by ``SemanticDiffer.diff_stream_progressive``.
 
-    Events are ordered: STRUCTURAL (phase 1) events arrive first, followed by
-    REFINED (phase 2) events that may revise or supersede them, and finally
-    FINAL (phase 3) events from the classification and diff-analyzer passes.
+    The 0.0.2 Python adapter emits FINAL add events only, after Rust has
+    produced a complete diff. STRUCTURAL, REFINED, revise and remove remain in
+    the DTO schema for compatibility but are not synthesized by Python.
 
-    ``replaced_ids`` contains the ``old_node.id`` / ``new_node.id`` values of
-    Phase-1 changes that this event supersedes.  When ``action="revise"`` the
-    consumer should look up prior events by these IDs and replace them.  When
-    ``action="remove"`` there is no replacement — the change was absorbed.
+    ``replaced_ids`` carries identifiers supplied by a backend for revising or
+    removing earlier events; the 0.0.2 adapter leaves it empty.
     """
 
     phase: ChangeStreamPhase
@@ -716,11 +732,10 @@ class DiffConfig(BaseModel):
     ``SemanticDiff`` will have ``is_fallback=True``."""
 
     stream_analysis: bool = False
-    """Enable progressive per-phase streaming via ``diff_stream_progressive``.
+    """Legacy stream-analysis configuration flag.
 
-    When ``True``, callers may iterate ``SemanticDiffer.diff_stream_progressive``
-    to receive ``ChangeStreamEvent`` objects as each pipeline phase completes,
-    rather than waiting for the entire pipeline to finish."""
+    In 0.0.2, ``diff_stream_progressive`` only adapts a completed Rust diff to
+    FINAL add events. This flag does not enable partial Rust phase snapshots."""
 
 
 # ---------------------------------------------------------------------------

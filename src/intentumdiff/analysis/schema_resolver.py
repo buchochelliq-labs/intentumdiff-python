@@ -16,6 +16,7 @@ import urllib.parse
 import urllib.request
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -250,7 +251,7 @@ def resolve_schema(
             ttl,
             current_time,
             values,
-            fetcher or _fetch_https,
+            fetcher or partial(_fetch_https, env=values),
         )
     except Exception as exc:
         logger.debug("Schema fetch failed for %s", candidate.url, exc_info=True)
@@ -454,11 +455,13 @@ def _cache_file(candidate: SchemaCandidate, root: Path) -> Path:
     return root / f"{digest}.json"
 
 
-def _fetch_https(url: str, headers: Mapping[str, str]) -> FetchResponse:
+def _fetch_https(
+    url: str, headers: Mapping[str, str], *, env: Mapping[str, str] | None = None
+) -> FetchResponse:
     request = urllib.request.Request(url, headers=dict(headers))  # noqa: S310
     context = ssl.create_default_context()
     opener = urllib.request.build_opener(
-        _HttpsOnlyRedirectHandler,
+        _HttpsOnlyRedirectHandler(env),
         urllib.request.HTTPSHandler(context=context),
     )
     with opener.open(  # noqa: S310 - URL and redirects are validated before fetch.
@@ -476,6 +479,10 @@ def _fetch_https(url: str, headers: Mapping[str, str]) -> FetchResponse:
 
 
 class _HttpsOnlyRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def __init__(self, env: Mapping[str, str] | None = None) -> None:
+        super().__init__()
+        self._schema_env = env or {}
+
     def redirect_request(
         self,
         req: urllib.request.Request,
@@ -493,6 +500,11 @@ class _HttpsOnlyRedirectHandler(urllib.request.HTTPRedirectHandler):
                 dict(headers),
                 fp,
             )
+        # Every HTTPS redirect is a new network target. Check it before
+        # urllib opens the redirected request, not only after receiving bytes
+        # from its final_url (#256). Honour the same explicit private-host
+        # override as the initial request.
+        _validate_schema_url(newurl, self._schema_env)
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
@@ -557,8 +569,12 @@ def _validate_schema_url(url: str, env: Mapping[str, str]) -> None:
 def _is_private_host(host: str) -> bool:
     try:
         addresses = {info[4][0] for info in socket.getaddrinfo(host, None)}
-    except OSError:
-        addresses = {host}
+    except OSError as exc:
+        # DNS failure must not certify a host as public: urllib would perform
+        # its own later lookup, which could resolve to a private address (#255).
+        raise ValueError(f"schema URL host could not be resolved: {host}") from exc
+    if not addresses:
+        raise ValueError(f"schema URL host returned no addresses: {host}")
     for address in addresses:
         try:
             ip = ipaddress.ip_address(address)

@@ -67,6 +67,22 @@ def test_construct_edit(source_path: Path, manifest: dict, expectation: dict, ve
     assert status == "ok", f"{language} [{verb}]: {detail}"
 
 
+
+def test_lua_local_function_duplicate_derivation_keeps_valid_source() -> None:
+    from tests.unit.construct_edit_matrix import Construct, derive_duplicate_entity
+
+    source = "local function greet(name)\n    return name\nend\n"
+    derived = derive_duplicate_entity(
+        source, [Construct("function_declaration", "local greet", 0, 2)], 0
+    )
+    assert derived is not None
+    mutated, context = derived
+    assert context == {"copy": "greetCopy", "original": "greet"}
+    assert mutated.count("local function greet(name)") == 1
+    assert mutated.count("local function greetCopy(name)") == 1
+    assert "localCopy function" not in mutated
+
+
 def test_elixir_swap_moves_whole_declarations():
     from tests.unit.construct_edit_matrix import find_entities, derive_swap_siblings
     source = (_CORPUS_ROOT / 'elixir/playground.ex').read_text(encoding='utf-8')

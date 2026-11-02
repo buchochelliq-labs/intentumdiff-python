@@ -322,16 +322,27 @@ class TestProtocolV2:
         differ._registry = object()
         sent: list[dict] = []
 
-        with patch("intentumdiff.core.commit_differ.CommitDiffer") as commit_differ:
-            commit_differ.return_value.diff_commit.return_value = CommitDiff(
-                old_ref="HEAD",
-                new_ref="",
-            )
+        # Non-diagnostic reviews are certified by Rust directly. Mock that
+        # boundary, not CommitDiffer.diff_commit, which is no longer invoked.
+        with (
+            patch("intentumdiff.core.commit_differ.CommitDiffer") as commit_differ,
+            patch(
+                "intentumdiff.rust_core.live_handle_review",
+                return_value={
+                    "commit_diff": CommitDiff(
+                        old_ref="HEAD", new_ref=""
+                    ).model_dump(mode="json")
+                },
+            ) as rust_review,
+        ):
             server._process_request({"op": "review", "seq": 8}, lambda obj: sent.append(obj))
 
         _, kwargs = commit_differ.call_args
         assert kwargs["config"].plugin_fuel == 100_000_000
         assert kwargs["registry"] is None
+        assert rust_review.call_count == 1
+        assert json.loads(rust_review.call_args.args[3])["plugin_fuel"] == 100_000_000
+        assert sent[0]["ok"] is True
         assert sent[0]["metadata"]["review_fuel_capped"] is True
         assert sent[0]["metadata"]["review_plugin_fuel"] == 100_000_000
 
@@ -476,13 +487,25 @@ class TestProcessRequest:
         assert sent[0]["metadata"]["language"] == "python"
 
     def test_streaming_returns_events_then_done(self) -> None:
-        from intentumdiff.core.models import ChangeStreamEvent, ChangeStreamPhase
+        """Only the completed diff may supply streamed FINAL events."""
+        from intentumdiff.core.models import Change, ChangeStreamPhase, ChangeType, SemanticDiff
 
-        event = ChangeStreamEvent(
-            phase=ChangeStreamPhase.STRUCTURAL, action="add", change=None
-        )
         differ = _make_differ()
-        differ.diff_stream_progressive.return_value = iter([event])
+        differ.diff.return_value = SemanticDiff(
+            old_filename="foo.py",
+            new_filename="foo.py",
+            language="python",
+            has_semantic_changes=True,
+            changes=[
+                Change(
+                    change_type=ChangeType.MODIFICATION,
+                    description="certified semantic edit",
+                )
+            ],
+        )
+        differ.diff_stream_progressive.side_effect = AssertionError(
+            "retired Python progressive stream must never run"
+        )
 
         from intentumdiff.live_server import LiveServer
 
@@ -498,8 +521,15 @@ class TestProcessRequest:
                 lambda obj: sent.append(obj),
             )
 
-        assert any("event" in m for m in sent), "Expected at least one event message"
+        assert len(sent) == 2
+        assert sent[0]["op"] == "diff" and sent[0]["ok"] is True
+        assert sent[0]["seq"] == 2
+        assert sent[0]["event"]["phase"] == ChangeStreamPhase.FINAL
+        assert sent[0]["event"]["action"] == "add"
+        assert sent[0]["event"]["change"]["change_type"] == "MODIFICATION"
         assert sent[-1] == {"op": "diff", "seq": 2, "ok": True, "done": True}
+        differ.diff.assert_called_once()
+        differ.diff_stream_progressive.assert_not_called()
 
     def test_file_not_found_returns_error(self) -> None:
         differ = _make_differ()
@@ -1591,3 +1621,24 @@ class TestMalformedRequests:
         )
         assert len(errors) == 1
         assert "error" in errors[0]
+
+
+# The socket transport must never change request bytes before Rust sees them (#235).
+def test_socket_invalid_utf8_is_rejected_before_scheduling() -> None:
+    server, _ = _make_server()
+    server_conn, client_conn = socket.socketpair()
+    try:
+        client_conn.settimeout(5)
+        client_conn.sendall(
+            b'{"op":"diff","seq":7,"path":"foo.py","content":"\xff"}\n'
+        )
+        client_conn.shutdown(socket.SHUT_WR)
+        with patch.object(server, "_schedule_request") as schedule:
+            server._handle_client(server_conn)
+            schedule.assert_not_called()
+        response = json.loads(client_conn.recv(4096).decode("ascii"))
+    finally:
+        server_conn.close()
+        client_conn.close()
+    assert response["ok"] is False
+    assert response["error"]["code"] == "invalid_utf8"

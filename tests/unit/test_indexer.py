@@ -246,7 +246,7 @@ def test_constructor_callback_used_as_default():
     with patch("intentumdiff.core.indexer.Path.rglob") as mock_rglob:
         mock_path = MagicMock()
         mock_path.is_file.return_value = True
-        mock_path.read_text.return_value = "x = 1"
+        mock_path.read_bytes.return_value = b"x = 1"
         mock_rglob.return_value = [mock_path]
         mock_path.relative_to.return_value = Path("x.py")
 
@@ -389,8 +389,9 @@ def test_index_directory(tmp_path: Path):
     (tmp_path / "a.py").write_text("x = 1")
     (tmp_path / "sub").mkdir()
     (tmp_path / "sub" / "b.py").write_text("y = 2")
-    # .png has no registered parser → PluginNotFoundError → skipped
-    (tmp_path / "img.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+    # The unsupported extension is still valid UTF-8, so parser selection
+    # (rather than host I/O decoding) classifies it as skipped.
+    (tmp_path / "img.png").write_text("not a supported source file", encoding="utf-8")
 
     differ = _make_stub_differ_for_extensions(".py")
     indexer = Indexer(differ)
@@ -399,6 +400,59 @@ def test_index_directory(tmp_path: Path):
     assert result.files_indexed == 2
     assert result.files_skipped == 1
     assert result.errors == []
+
+
+def test_index_directory_skips_recognized_binary_png_without_losing_source(
+    tmp_path: Path,
+) -> None:
+    """Only Rust-confirmed binary assets are excluded, not valid source files."""
+    source = "answer = 42\n"
+    (tmp_path / "main.py").write_bytes(source.encode("utf-8"))
+    (tmp_path / "logo.png").write_bytes(
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
+    )
+    differ = _make_stub_differ_for_extensions(".py")
+    result = Indexer(differ).index_directory(tmp_path)
+
+    assert result.files_indexed == 1
+    assert result.errors == []
+    assert result.files_skipped == 0
+    differ.parse.assert_called_once_with(source, "main.py")
+
+
+def test_index_directory_fails_closed_when_rust_detector_unavailable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A missing Rust content detector cannot authorize silent source skipping."""
+    from intentumdiff import content_type
+
+    (tmp_path / "main.py").write_text("answer = 42\n", encoding="utf-8")
+    differ = _make_stub_differ_for_extensions(".py")
+
+    def missing_engine(_data: bytes):
+        raise RuntimeError("missing Rust content detector")
+
+    monkeypatch.setattr(content_type, "detect_content_type", missing_engine)
+    with pytest.raises(RuntimeError, match="missing Rust content detector"):
+        Indexer(differ).index_directory(tmp_path)
+    differ.parse.assert_not_called()
+
+
+@pytest.mark.parametrize("filename", ["broken.py", "img.png"])
+def test_index_directory_rejects_undecodable_files_without_partial_success(
+    tmp_path: Path, filename: str
+):
+    """Malformed source bytes cannot turn a directory scan into a partial success."""
+    (tmp_path / "good.py").write_text("x = 1", encoding="utf-8")
+    (tmp_path / filename).write_bytes(bytes([0xFF, 0xFE]))
+    differ = _make_stub_differ_for_extensions(".py")
+    indexer = Indexer(differ)
+
+    with pytest.raises(RuntimeError, match="Failed to read directory index source"):
+        indexer.index_directory(tmp_path)
+
+    # A failed collection never publishes a successfully indexed subset.
+    differ.parse.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -476,3 +530,57 @@ def test_concurrent_index_files():
 
     assert errors == []
     assert len(results) == 6
+
+
+# ---------------------------------------------------------------------------
+# Git batch source I/O completeness (#172)
+# ---------------------------------------------------------------------------
+
+
+def test_collect_blob_files_retains_all_paths_for_shared_blob(tmp_path: Path) -> None:
+    """Two or more files with the same Git SHA must all reach the indexer."""
+    import subprocess
+
+    from intentumdiff.core.indexer import _collect_blob_files
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    def git(*args: str) -> None:
+        subprocess.run(
+            ["git", "-C", str(repo), *args],
+            check=True, capture_output=True, text=True,
+        )
+
+    git("init")
+    git("config", "user.name", "IntentumDiff CI")
+    git("config", "user.email", "test@example.invalid")
+
+    for filename, content in (
+        ("a.py", "same = 42\n"),
+        ("b.py", "different = 7\n"),
+        ("c.py", "same = 42\n"),
+    ):
+        (repo / filename).write_text(content, encoding="utf-8")
+    (repo / "opaque.bin").write_bytes(b"a\x00b")
+    git("add", ".")
+    git("commit", "-m", "shared content regression")
+
+    files, ignored = _collect_blob_files(str(repo), "HEAD", None)
+    assert files == [
+        ("a.py", "same = 42\n"),
+        ("b.py", "different = 7\n"),
+        ("c.py", "same = 42\n"),
+    ]
+    assert ignored == []
+
+    class IgnoreMiddle:
+        def is_ignored(self, path: str) -> bool:
+            return path == "b.py"
+
+    files, ignored = _collect_blob_files(str(repo), "HEAD", IgnoreMiddle())
+    assert files == [
+        ("a.py", "same = 42\n"),
+        ("c.py", "same = 42\n"),
+    ]
+    assert ignored == ["b.py"]

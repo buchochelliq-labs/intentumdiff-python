@@ -576,6 +576,20 @@ def _cmd_plugins_add(args: argparse.Namespace) -> None:
             "[yellow]Warning: security verification skipped (--skip-verify).[/yellow]"
         )
 
+    # Preserve existing pinned Wasm/dependency provenance before pip has any
+    # side effects.  A malformed manifest or dangling symlink is not an empty
+    # plugin inventory: refusing the update avoids deleting existing pins (#252).
+    existing_manifest: list[PluginSpec] = []
+    if args.save:
+        manifest_path = Path(args.file)
+        if manifest_path.exists() or manifest_path.is_symlink():
+            try:
+                existing_manifest = load_plugins_file(manifest_path)
+            except Exception as exc:
+                raise RuntimeError(
+                    f"Refusing to overwrite invalid plugins manifest {manifest_path}: {exc}"
+                ) from exc
+
     # ── 1. Consult the official registry for official plugins ─────────────────
     registry_entry: RegistryEntry | None = None
     if not args.repo and not skip_verify:
@@ -682,13 +696,9 @@ def _cmd_plugins_add(args: argparse.Namespace) -> None:
     # ── 6. Save to manifest ───────────────────────────────────────────────────
     if args.save:
         yaml_path = Path(args.file)
-        existing: list = []
-        if yaml_path.exists():
-            with suppress(Exception):
-                existing = load_plugins_file(yaml_path)
-        # Replace if already present, otherwise append
+        # Replace only the matching entry; retain all other pinned provenance.
         existing = [
-            s for s in existing
+            s for s in existing_manifest
             if s.name != spec.name and s.name != spec.package_name
         ]
         existing.append(spec)
@@ -900,25 +910,40 @@ def _cmd_plugins_remove(args: argparse.Namespace) -> None:
 
     name = args.plugin_name
     spec = PluginSpec(name=name)
+    manifest_path = Path(args.file) if args.save else None
+    existing_manifest: list[PluginSpec] | None = None
+    # --save is a pinned provenance change, not best-effort decoration. Check
+    # the existing manifest before any irreversible pip side effects (#257).
+    if manifest_path is not None and (
+        manifest_path.exists() or manifest_path.is_symlink()
+    ):
+        try:
+            existing_manifest = load_plugins_file(manifest_path)
+        except Exception as exc:
+            raise RuntimeError(
+                f"Refusing to uninstall with invalid plugins manifest {manifest_path}: {exc}"
+            ) from exc
+
     _console.print(f"Uninstalling [cyan]{spec.package_name}[/cyan] ...")
     rc = pip_uninstall(spec.package_name)
     if rc != 0:
         _err.print(f"[red]pip uninstall failed (exit code {rc})[/red]")
         sys.exit(rc)
 
-    if args.save:
-        yaml_path = Path(args.file)
-        if yaml_path.exists():
-            try:
-                specs = load_plugins_file(yaml_path)
-                specs = [
-                    s for s in specs
-                    if s.name != name and s.name != spec.package_name
-                ]
-                save_plugins_file(yaml_path, specs)
-                _console.print(f"[green]Removed from {yaml_path}[/green]")
-            except Exception as exc:
-                _err.print(f"[yellow]Warning: could not update {yaml_path}: {exc}[/yellow]")
+    if manifest_path is not None and existing_manifest is not None:
+        specs = [
+            s for s in existing_manifest
+            if s.name != name and s.name != spec.package_name
+        ]
+        try:
+            save_plugins_file(manifest_path, specs)
+        except Exception as exc:
+            # pip has already succeeded, but the manifest is not reconciled.
+            # Propagate a partial failure rather than print a false success.
+            raise RuntimeError(
+                f"Plugin uninstalled but could not update {manifest_path}: {exc}"
+            ) from exc
+        _console.print(f"[green]Removed from {manifest_path}[/green]")
 
     _console.print(f"[green]Plugin '{spec.package_name}' uninstalled.[/green]")
 
@@ -1062,20 +1087,10 @@ async def _two_pass_index(
 
     if not launchable:
         langs_str = ", ".join(sorted(detected)) or "none"
-        _console.print(
-            f"[dim]No LSP servers configured for detected languages "
-            f"({langs_str}).  Running plain index.[/dim]"
+        raise RuntimeError(
+            "--lsp was requested, but no LSP servers are configured for "
+            f"detected languages ({langs_str}); cannot certify type enrichment"
         )
-        result = await _index_with_progress(
-            indexer,
-            repo_path=repo_path,
-            ref=ref,
-            force=args.force,
-            lsp_clients={},
-            initial_total=_file_count,
-        )
-        _print_index_result(result)
-        return
 
     _console.print(
         f"[bold]Pass 1 complete[/bold] — "
@@ -1089,6 +1104,7 @@ async def _two_pass_index(
 
     launchers: dict[str, LspServerProcess] = {}
     clients: dict[str, AsyncLspClient] = {}
+    connection_failures: dict[str, str] = {}
 
     # Separate languages into "already running" vs "needs auto-start".
     manual: list[str] = []
@@ -1144,6 +1160,7 @@ async def _two_pass_index(
                 f"  [green]✓[/green] {lang}  (tcp, already running @ {cfg_lsp})"
             )
         except (Exception, asyncio.CancelledError) as exc:
+            connection_failures[lang] = str(exc)
             _err.print(f"  [yellow]⚠[/yellow]  {lang}: {exc} — skipped")
             _hint = entry.install_hint
             if _hint:
@@ -1152,6 +1169,8 @@ async def _two_pass_index(
     # Spawn approved auto-start servers.
     for lang in to_start:
         entry = user_entries.get(lang)
+        launcher: LspServerProcess | None = None
+        client: AsyncLspClient | None = None
         try:
             spec = entry.to_spec() if entry is not None else None
             launcher = LspServerProcess(lang, spec=spec)
@@ -1164,6 +1183,7 @@ async def _two_pass_index(
                 f"  [green]✓[/green] {lang}  ({cfg_lsp.transport}, auto-started)"
             )
         except (Exception, asyncio.CancelledError) as exc:
+            connection_failures[lang] = str(exc)
             _err.print(f"  [yellow]⚠[/yellow]  {lang}: {exc} — skipped")
             _hint = (
                 entry.install_hint
@@ -1172,24 +1192,38 @@ async def _two_pass_index(
             )
             if _hint:
                 _err.print(f"    [dim]Install: {_hint}[/dim]")
-            if lang in launchers:
+            # A launcher/client that failed before registration still owns
+            # resources; do not strand it while refusing partial enrichment.
+            if client is not None and lang not in clients:
                 with suppress(Exception):
-                    await launchers.pop(lang).stop()
+                    await client.shutdown()
+            if launcher is not None and lang not in launchers:
+                with suppress(Exception):
+                    await launcher.stop()
+
+    if connection_failures:
+        # One connected language must not mask another requested language's
+        # failed server: that would yield a seemingly complete un-enriched index.
+        for client in clients.values():
+            with suppress(Exception):
+                await client.shutdown()
+        for launcher in launchers.values():
+            with suppress(Exception):
+                await launcher.stop()
+        details = ", ".join(
+            f"{language}: {reason}"
+            for language, reason in sorted(connection_failures.items())
+        )
+        raise RuntimeError(
+            "--lsp was requested, but configured LSP servers failed to connect; "
+            f"cannot certify type enrichment ({details})"
+        )
 
     if not clients:
-        _console.print(
-            "[dim]No LSP servers connected; running plain index.[/dim]"
+        raise RuntimeError(
+            "--lsp was requested, but no configured LSP server connected; "
+            "cannot certify type enrichment"
         )
-        result = await _index_with_progress(
-            indexer,
-            repo_path=repo_path,
-            ref=ref,
-            force=args.force,
-            lsp_clients={},
-            initial_total=_file_count,
-        )
-        _print_index_result(result)
-        return
 
     # ── Pass 2: enrich with LSP ───────────────────────────────────────────────
     n = len(clients)
@@ -1329,6 +1363,10 @@ def _print_index_result(result: Any) -> None:
             f"[dim]Ignored {len(ignored_files)} file(s) via .diffignore[/dim]"
         )
 
+    # A partial index must not be presented to CI as successful (#193).
+    # Keep the per-file diagnostics above, but fail the process.
+    if result.errors:
+        raise SystemExit(1)
 
 
 

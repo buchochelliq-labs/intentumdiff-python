@@ -89,7 +89,7 @@ class PerforceVcsBackend(VcsBackend):
         """Return on-disk content of *path* (relative to the workspace root)."""
         full_path = safe_working_tree_path(self._root, path)
         try:
-            return full_path.read_text(encoding="utf-8", errors="replace")
+            return full_path.read_text(encoding="utf-8", errors="strict")
         except FileNotFoundError:
             return ""
 

@@ -143,6 +143,11 @@ class ParserAdapter:
         return self._plugin.wasm_path
 
     @property
+    def compiled_wasm_sha256(self) -> str | None:
+        """Identity of the exact compiled Wasm buffer, supplied by the loader."""
+        return self._plugin.compiled_wasm_sha256
+
+    @property
     def is_trusted(self) -> bool:
         return self._plugin.trusted
 
