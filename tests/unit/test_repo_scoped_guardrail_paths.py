@@ -9,6 +9,10 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+import pytest
+
+from intentumdiff.analysis.guardrails import _find_policy_path
+
 from intentumdiff.differ import SemanticDiffer
 from intentumdiff.sources.git_source import GitSource, WorkingTreeSource
 from intentumdiff.sources.live_buffer_source import LiveBufferSource
@@ -95,3 +99,45 @@ def test_real_rust_guardrail_enforces_subdirectory_policy_outside_repo_cwd(
             else "src/service.json"
         )
         assert diff.new_filename == expected_label
+
+
+@pytest.mark.parametrize("target_is_directory", [False, True])
+def test_git_history_uses_committed_blobs_not_current_external_symlink(
+    tmp_path: Path, monkeypatch, target_is_directory: bool
+) -> None:
+    """The checkout's current symlink must not veto a valid ref-to-ref review.
+
+    This checks both a file symlink (containment failure in #270) and a
+    directory symlink (policy discovery must not follow the final component).
+    """
+    repo, path = _repository(tmp_path)
+    external = tmp_path / ("external-directory" if target_is_directory else "external-file")
+    if target_is_directory:
+        external.mkdir()
+        (external / "intentumdiff.yaml").write_text(
+            POLICY.replace("guard.version", "external.version"), encoding="utf-8"
+        )
+    else:
+        external.write_text("unrelated external content", encoding="utf-8")
+    path.unlink()
+    try:
+        path.symlink_to(external, target_is_directory=target_is_directory)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"Host does not permit creating symlinks: {exc}")
+
+    unrelated = tmp_path / "unrelated-cwd"
+    unrelated.mkdir()
+    monkeypatch.chdir(unrelated)
+
+    source = GitSource(repo, "src/service.json", old_ref="HEAD~1", new_ref="HEAD")
+    old_policy_path, new_policy_path = source.guardrail_policy_paths()
+    assert old_policy_path == new_policy_path == str(path)
+    # A directory symlink as the checkout's leaf must not redirect discovery.
+    assert _find_policy_path(new_policy_path, None) == path.parent / "intentumdiff.yaml"
+
+    # Real Rust parsing/finalization/guardrail evaluation on immutable Git blobs.
+    # Neither source blob was changed by the uncommitted worktree symlink.
+    result = SemanticDiffer().diff(source)
+    assert result.new_filename == "src/service.json"
+    assert any(v.rule_id == "guard.version" for v in result.guardrail_violations)
+    assert all(v.rule_id != "external.version" for v in result.guardrail_violations)
