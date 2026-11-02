@@ -285,8 +285,14 @@ def _find_policy_path(filename: str, explicit_path: Path | None) -> Path | None:
     for start in starts:
         try:
             current = start.resolve()
-        except OSError:
-            current = Path.cwd()
+        except OSError as exc:
+            # A failed physical-path resolution is not permission to import
+            # a policy from another repository's process working directory.
+            # Report the host I/O failure instead of manufacturing a clean (or
+            # foreign-policy) guardrail result.
+            raise RuntimeError(
+                f"Unable to resolve guardrail policy search path {start}: {exc}"
+            ) from exc
         for directory in (current, *current.parents):
             if directory in seen:
                 continue
