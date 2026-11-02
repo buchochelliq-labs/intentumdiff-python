@@ -12,7 +12,6 @@ from pathlib import Path
 import pytest
 
 from intentumdiff.analysis.guardrails import _find_policy_path
-
 from intentumdiff.differ import SemanticDiffer
 from intentumdiff.sources.git_source import GitSource, WorkingTreeSource
 from intentumdiff.sources.live_buffer_source import LiveBufferSource
