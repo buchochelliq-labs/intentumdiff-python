@@ -271,7 +271,10 @@ def _find_policy_path(filename: str, explicit_path: Path | None) -> Path | None:
     starts: list[Path] = []
     raw = Path(filename)
     if filename and not filename.startswith("<"):
-        starts.append(raw if raw.is_dir() else raw.parent)
+        # The argument identifies a source *file*, even if its current checkout
+        # entry is a symlink to a directory.  Do not follow that final component
+        # into unrelated external policy directories for a historical Git diff.
+        starts.append(raw.parent)
     starts.append(Path.cwd())
 
     seen: set[Path] = set()
