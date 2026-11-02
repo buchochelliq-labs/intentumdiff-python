@@ -140,3 +140,29 @@ def test_git_history_uses_committed_blobs_not_current_external_symlink(
     assert result.new_filename == "src/service.json"
     assert any(v.rule_id == "guard.version" for v in result.guardrail_violations)
     assert all(v.rule_id != "external.version" for v in result.guardrail_violations)
+
+
+def test_historical_git_without_repo_policy_ignores_unrelated_cwd_policy(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """An unrelated cwd policy must not govern a physical source in another repo."""
+    repo, path = _repository(tmp_path)
+    (path.parent / "intentumdiff.yaml").unlink()
+    other = tmp_path / "unrelated-cwd"
+    other.mkdir()
+    foreign_policy = other / "intentumdiff.yaml"
+    foreign_policy.write_text(
+        POLICY.replace("guard.version", "foreign.version"), encoding="utf-8"
+    )
+    monkeypatch.chdir(other)
+
+    source = GitSource(repo, "src/service.json", old_ref="HEAD~1", new_ref="HEAD")
+    old_policy_path, new_policy_path = source.guardrail_policy_paths()
+    assert old_policy_path == new_policy_path == str(path)
+    assert _find_policy_path(new_policy_path, None) is None
+    # Relative/synthetic callers still intentionally discover from cwd.
+    assert _find_policy_path("local.json", None) == foreign_policy
+
+    result = SemanticDiffer().diff(source)
+    assert result.new_filename == "src/service.json"
+    assert not result.guardrail_violations

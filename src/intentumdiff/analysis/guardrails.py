@@ -274,8 +274,12 @@ def _find_policy_path(filename: str, explicit_path: Path | None) -> Path | None:
         # The argument identifies a source *file*, even if its current checkout
         # entry is a symlink to a directory.  Do not follow that final component
         # into unrelated external policy directories for a historical Git diff.
+        # For relative paths, the parent resolves against cwd already.  An
+        # absolute path must never fall back to an unrelated process cwd.
         starts.append(raw.parent)
-    starts.append(Path.cwd())
+    else:
+        # Synthetic/in-memory sources have no physical policy-search origin.
+        starts.append(Path.cwd())
 
     seen: set[Path] = set()
     for start in starts:
