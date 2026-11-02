@@ -166,3 +166,29 @@ def test_historical_git_without_repo_policy_ignores_unrelated_cwd_policy(
     result = SemanticDiffer().diff(source)
     assert result.new_filename == "src/service.json"
     assert not result.guardrail_violations
+
+
+def test_policy_resolution_failure_never_imports_foreign_cwd(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """An I/O error resolving a physical source must fail closed, not select cwd."""
+    repo, path = _repository(tmp_path)
+    (path.parent / "intentumdiff.yaml").unlink()
+    foreign = tmp_path / "unrelated-cwd"
+    foreign.mkdir()
+    (foreign / "intentumdiff.yaml").write_text(POLICY, encoding="utf-8")
+    monkeypatch.chdir(foreign)
+
+    # Reproduce the filesystem error branch deterministically (e.g. a host
+    # cannot resolve a repository parent) without requiring platform-specific
+    # permissions. Previously this selected the unrelated cwd policy.
+    original_resolve = Path.resolve
+
+    def fail_selected_parent(self: Path, *args, **kwargs) -> Path:
+        if self == path.parent:
+            raise OSError("selected repository path unavailable")
+        return original_resolve(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", fail_selected_parent)
+    with pytest.raises(RuntimeError, match="Unable to resolve guardrail policy search path"):
+        _find_policy_path(str(path), None)
