@@ -87,28 +87,27 @@ def test_certified_python_public_path_uses_rust_finalizer_not_python_engine(
     # (refine_changes / detect_refactorings / normalize_for_review / classify) were
     # DELETED with the transitional layer (issue #57 payoff, stage 4b) — the guarantee
     # is structural now; the assertions pin which Rust contract serves the path.
-    del monkeypatch
-    diff = SemanticDiffer(
-        DiffConfig(
-            experimental_rust_core=True,
-            extra_trivia_types=["__intentumdiff_test_noop__"],
-        )
-    ).diff_strings(
-        "def answer():\n    return 1\n",
-        "def answer():\n    return 1\n",
-        "example.py",
-        language_hint="python",
-    )
+    # An unsupported config override must now fail closed in Rust (Core #225).
+    # Drive the certified batch-decline path explicitly, without inventing a
+    # Python semantic fallback or weakening the public Rust-finalizer assertion.
+    from intentumdiff.rust_core import RustCoreBatchAttempt
 
-    # Issue #57 python flip: a non-default config makes the certified BATCH path
-    # decline, and the tier behind it is now the full-Rust 9-fin finalize routing
-    # (semantic_contract rust_finalize_review_v1), not the stage-11 hybrid that still
-    # ran python promote_moves. Either Rust contract satisfies the boundary; the
-    # monkeypatched failers above remain the real teeth (no python engine, ever).
-    assert diff.metadata["semantic_contract"] in {
-        "rust_finalized_v1",
-        "rust_finalize_review_v1",
-    }
+    del monkeypatch
+    with patch(
+        "intentumdiff.differ.try_rust_core_batch_diff",
+        return_value=RustCoreBatchAttempt(fallback_reason="test native finalizer route"),
+    ):
+        diff = SemanticDiffer(DiffConfig(experimental_rust_core=True)).diff_strings(
+            "def answer():\n    return 1\n",
+            "def answer():\n    return 1\n",
+            "example.py",
+            language_hint="python",
+        )
+
+    # The certified batch decline must route into the native Rust finalizer.
+    # A no-change result must still be certified by Rust, never manufactured
+    # by Python as a fallback or through a permissive config override.
+    assert diff.metadata["semantic_contract"] == "rust_finalize_review_v1"
     assert diff.metadata["engine_owner"] == "rust"
     assert diff.has_semantic_changes is False
 
