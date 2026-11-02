@@ -115,6 +115,12 @@ class VcsBackend(ABC):
     # Future: semantic-merge hooks (non-abstract stubs)
     # ------------------------------------------------------------------
 
+    def guardrail_policy_path(self, path: str) -> str:
+        """Physical policy context for a backend-relative historical file."""
+        from intentumdiff.vcs._safe_path import safe_policy_path
+
+        return safe_policy_path(self.resolve_root(), path)
+
     def get_merge_base(self, ref_a: str, ref_b: str) -> str:  # pragma: no cover
         """Return the common ancestor revision of *ref_a* and *ref_b*.
 

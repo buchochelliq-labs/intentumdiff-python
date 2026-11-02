@@ -36,7 +36,7 @@ import json
 import logging
 import os
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Iterator
+from typing import TYPE_CHECKING, Callable, Iterator
 
 from intentumdiff.core.models import CommitDiff, CrossFileChange, DiffConfig, SemanticDiff
 from intentumdiff.differ import SemanticDiffer
@@ -244,18 +244,20 @@ class CommitDiffer:
         sources: Iterator[tuple[str, str, str, str, object]],
         *,
         policy_root: str | os.PathLike[str],
+        policy_path_resolver: Callable[[str], str] | None = None,
     ) -> tuple[list[FileDiffResult], list[FileDiffError], int]:
         """Run the per-file pipeline over an iterator of changed sources."""
         results: list[FileDiffResult] = []
         errors: list[FileDiffError] = []
         changed_file_count = 0
+        policy_path = policy_path_resolver or (lambda path: safe_policy_path(policy_root, path))
         for old_content, new_content, old_path, new_path, staging_status in sources:
             changed_file_count += 1
             try:
                 file_diff = self._differ._run_pipeline(
                     old_content, new_content, old_path, None, new_filename=new_path,
-                    _policy_old_filename=safe_policy_path(policy_root, old_path),
-                    _policy_source_filename=safe_policy_path(policy_root, new_path or old_path),
+                    _policy_old_filename=policy_path(old_path),
+                    _policy_source_filename=policy_path(new_path or old_path),
                 )
                 if staging_status is not None:
                     file_diff = file_diff.model_copy(
@@ -381,7 +383,8 @@ class CommitDiffer:
                 yield old, new, path, new_path, None
 
         results, errors, changed_file_count = self._collect_file_diffs(
-            changed_sources(), policy_root=backend.resolve_root()
+            changed_sources(), policy_root=backend.resolve_root(),
+            policy_path_resolver=backend.guardrail_policy_path,
         )
         return self._finalize_commit_diff(
             results=results,

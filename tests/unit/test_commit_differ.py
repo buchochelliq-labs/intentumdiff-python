@@ -923,6 +923,7 @@ class TestDiffCommit:
         cd = self._make_differ()
         backend = SimpleNamespace(
             resolve_root=lambda: Path.cwd(),
+            guardrail_policy_path=lambda path: str(Path.cwd() / path),
             list_changed_files=lambda _old, _new: [
                 ChangedFile("good.py", "good.py", "modified"),
                 ChangedFile("bad.py", "bad.py", "modified"),
@@ -941,6 +942,7 @@ class TestDiffCommit:
         cd = self._make_differ()
         backend = SimpleNamespace(
             resolve_root=lambda: Path.cwd(),
+            guardrail_policy_path=lambda path: str(Path.cwd() / path),
             list_changed_files=lambda _old, _new: [
                 ChangedFile("image.png", "image.png", "modified", is_binary=True)
             ],

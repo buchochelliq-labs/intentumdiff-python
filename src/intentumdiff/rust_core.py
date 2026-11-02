@@ -1302,6 +1302,11 @@ def vcs_backend_resolve_root(vcs: str, repo_path: str) -> str:
     return _load_backend().vcs_backend_resolve_root(vcs, repo_path)
 
 
+def p4_policy_path(client_root: str, depot_path: str) -> str:
+    """Resolve a depot path's physical policy context in the shared Rust host."""
+    return json.loads(_load_backend().p4_policy_path_json(client_root, depot_path))["path"]
+
+
 def vcs_backend_get_blob(
     vcs: str, repo_path: str, path: str, ref: str, svn_repo_url: str | None = None
 ) -> str:

@@ -50,3 +50,25 @@ def test_historical_policy_does_not_follow_live_leaf_symlink(tmp_path, route):
     (tmp_path / 'config.json').symlink_to(tmp_path.parent / 'external.json')
     diffs = review(tmp_path, route)
     assert {v.rule_id for v in diffs[0].guardrail_violations} == {'immutable.version'}
+
+def test_perforce_uses_native_mapping_without_changing_depot_labels(tmp_path, monkeypatch):
+    from intentumdiff import rust_core
+    from intentumdiff.vcs.perforce_backend import PerforceVcsBackend
+    folder = tmp_path / 'remapped'
+    folder.mkdir()
+    (folder / 'intentumdiff.yaml').write_text(POLICY)
+    depot = '//depot/app/config.json'
+    seen = []
+    def mapping(root, path):
+        seen.append((root, path))
+        return str(folder / 'config.json')
+    monkeypatch.setattr(rust_core, 'p4_policy_path', mapping)
+    monkeypatch.setattr(rust_core, 'vcs_backend_changed_files', lambda *a: [
+        {'old_path': depot, 'new_path': depot, 'change_type': 'modified', 'is_binary': False}])
+    monkeypatch.setattr(rust_core, 'vcs_backend_get_blob',
+                        lambda vcs, root, path, ref: '{"version":1}' if ref == '1' else '{"version":2}')
+    result = CommitDiffer().diff_commit(old_ref='1', new_ref='2',
+        backend=PerforceVcsBackend(client_root=tmp_path))
+    assert result.file_diffs[0].old_filename == depot
+    assert {v.rule_id for v in result.guardrail_violations} == {'immutable.version'}
+    assert seen == [(str(tmp_path), depot), (str(tmp_path), depot)]
