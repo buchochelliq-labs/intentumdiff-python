@@ -239,11 +239,13 @@ def _sarif_location(violation: GuardrailViolation) -> dict[str, Any]:
 
 
 def _region(position: NodePosition) -> tuple[int, int, int, int]:
+    # Rust/C ABI positions are zero-based; SARIF and GitHub annotations are
+    # one-based. Clamping collapses line/column 0 and 1 into the same value.
     return (
-        max(1, position.start_line),
-        max(1, position.start_col),
-        max(1, position.end_line),
-        max(1, position.end_col),
+        position.start_line + 1,
+        position.start_col + 1,
+        position.end_line + 1,
+        position.end_col + 1,
     )
 
 
