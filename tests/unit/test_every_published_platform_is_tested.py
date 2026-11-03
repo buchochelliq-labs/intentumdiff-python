@@ -1,4 +1,4 @@
-"""No wheel is built for a platform the suite does not run on.
+"""No wheel is promoted for a platform the suite does not run on.
 
 This is issue #9's definition of done, encoded so it cannot quietly stop being true:
 
@@ -15,12 +15,13 @@ platform they target.
 Adding a wheel target is a one-line change to a file nobody reads alongside the test config.
 That is exactly the kind of drift a human reviewer misses and a comparison catches.
 
-Reads the workflow YAML directly - no network, no CI, no GitHub API.
+Reads the workflow YAML and promotion allowlist - no network or GitHub API.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
+import ast
 
 # PyYAML is a RUNTIME dependency of this package, not a dev extra, so it cannot be absent in
 # any environment where the tests can run at all. An importorskip here would only ever
@@ -62,42 +63,70 @@ def _matrix_os(job: dict) -> set[str]:
 
 
 def _jobs_producing_wheels() -> dict[str, dict]:
-    """Publish jobs whose steps build a wheel."""
-    publish = _load("publish.yml")
+    """CI jobs producing real, tested release wheels."""
     out = {}
-    for name, job in publish.get("jobs", {}).items():
-        blob = str(job.get("steps", ""))
-        if "maturin" in blob or "pip wheel" in blob or "build --wheel" in blob:
+    for name, job in _load("ci.yml").get("jobs", {}).items():
+        runs = "\n".join(str(s.get("run", "")) for s in job.get("steps", []))
+        if "maturin build" in runs or "pip wheel" in runs or "build --wheel" in runs:
             out[name] = job
     return out
 
 
-def test_we_can_see_both_sides() -> None:
-    """Guard the guard.
+def _approved_platforms() -> set[str]:
+    """Use the actual immutable promotion allowlist, independently of CI."""
+    source = (WORKFLOWS.parents[1] / "scripts" / "promote_reviewed_wheels.py").read_text()
+    tree = ast.parse(source)
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(
+            isinstance(target, ast.Name) and target.id == "PLATFORMS"
+            for target in node.targets
+        ):
+            mapping = ast.literal_eval(node.value)
+            assert isinstance(mapping, dict), "platform allowlist must be literal"
+            return set(mapping)
+    raise AssertionError("promotion allowlist missing")
 
-    Every assertion below compares two sets. If either came back empty - a renamed job, a
-    restructured matrix, a moved workflow - the comparison would pass while comparing nothing.
-    """
+
+def test_we_can_see_both_sides() -> None:
+    """Guard the guard: require nonempty build, test and publish sets."""
     built = set().union(*(_matrix_os(j) for j in _jobs_producing_wheels().values()))
     tested = _matrix_os(_load("ci.yml")["jobs"]["python-suite"])
+    approved = _approved_platforms()
 
-    assert built, "found no wheel-building job in publish.yml - has it been renamed?"
-    assert tested, "found no platforms in ci.yml's python-suite matrix"
-    assert len(built) >= 2, f"expected wheels for several platforms, found {sorted(built)}"
+    assert built, "found no wheel-building job in ci.yml"
+    assert tested, "found no full-suite test platforms"
+    assert approved, "found no approved publication platforms"
+    assert len(approved) >= 2, f"expected several platform wheels, found {sorted(approved)}"
 
 
 def test_every_platform_we_build_a_wheel_for_is_also_tested() -> None:
     built = set().union(*(_matrix_os(j) for j in _jobs_producing_wheels().values()))
     tested = _matrix_os(_load("ci.yml")["jobs"]["python-suite"])
-
-    untested = built - tested
-    assert not untested, (
-        "publish.yml builds a wheel for "
-        + ", ".join(sorted(untested))
-        + " but ci.yml never runs the suite there.\n"
-        "Either add the platform to ci.yml's python-suite matrix, or stop shipping a wheel "
-        "for it. An artefact nothing was tested on is a claim we have not earned (#9)."
+    approved = _approved_platforms()
+    assert built == tested == approved, (
+        "Wheel builders, full-suite platforms and publication allowlist diverge: "
+        f"built={sorted(built)}, tested={sorted(tested)}, approved={sorted(approved)}. "
+        "No platform may ship without its own built and tested wheel (#9)."
     )
+
+
+def test_publication_promotes_ci_wheels_without_building() -> None:
+    jobs = _load("publish.yml")["jobs"]
+    assert {"promote", "publish", "publish-testpypi"} <= set(jobs)
+    runs = "\n".join(
+        str(step.get("run", ""))
+        for job in jobs.values()
+        for step in job.get("steps", [])
+    )
+    assert "scripts/promote_reviewed_wheels.py metadata" in runs
+    assert "scripts/promote_reviewed_wheels.py wheels" in runs
+    assert "pip wheel" not in runs
+    assert "maturin build" not in runs
+    assert "build --wheel" not in runs
+    assert any(
+        step.get("with", {}).get("name") == "reviewed-pypi-wheels"
+        for step in jobs["promote"]["steps"]
+    ), "the approved source-byte artifact is not retained"
 
 
 def test_the_suite_leg_also_smokes_a_real_wheel() -> None:

@@ -114,40 +114,41 @@ def test_main_json_reports_results_and_nonzero_for_taken(monkeypatch, capsys) ->
 
 
 def test_publish_workflow_has_testpypi_trusted_publisher_lane() -> None:
+    """Promotion publishes previously tested bytes; manual runs cannot reach production."""
     workflow = (
         Path(__file__).resolve().parents[2] / ".github" / "workflows" / "publish.yml"
     ).read_text()
+    import yaml
+    jobs = yaml.safe_load(workflow)["jobs"]
+    production = jobs["publish"]
+    testpypi = jobs["publish-testpypi"]
 
-    assert "publish_testpypi:" in workflow
-    assert "testpypi_version:" in workflow
-    assert 'default: "0.0.1b1"' in workflow
-    assert "python scripts/set_release_version.py" in workflow
-    # The version reaches the verifier through the ENVIRONMENT, not through a template
-    # expansion pasted into the shell command. It originates in a workflow_dispatch
-    # input, so the `${{ }}` form was a code-injection vector in the workflow that
-    # publishes to PyPI (zizmor template-injection). Assert both halves: the safe form
-    # is present, and the unsafe one has not crept back.
-    assert '--expected-version "$INTENTUMDIFF_EXPECTED_VERSION"' in workflow
-    assert "--expected-version ${{ env.INTENTUMDIFF_EXPECTED_VERSION }}" not in workflow
-    assert "name: Publish to TestPyPI" in workflow
+    assert production["needs"] == "promote"
+    assert production["if"] == (
+        "github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')"
+    )
+    assert testpypi["needs"] == "promote"
+    assert testpypi["if"] == (
+        "github.event_name == 'workflow_dispatch' && inputs.publish_testpypi && !inputs.dry_run"
+    )
     assert "name: testpypi" in workflow
     assert "repository-url: https://test.pypi.org/legacy/" in workflow
-    assert "if: github.event_name == 'workflow_dispatch' && inputs.publish_testpypi" in workflow
-    assert "artifact: Windows-arm64" in workflow
-    # The arm64 wheel is built on a native arm64 runner, not cross-compiled from x64:
-    # the cross build could not produce a working cffi cdylib. So the load-bearing fact
-    # is the runner label, and the '--target aarch64-pc-windows-msvc' flag is gone by
-    # design. Assert both halves so a silent revert to cross-compiling is caught.
-    assert "windows-11-arm" in workflow
-    assert "aarch64-pc-windows-msvc" not in workflow
-    assert '--expected-platform-pattern "win_arm64"' in workflow
-    assert "dist-${{ matrix.artifact }}" in workflow
-    # Same reasoning as --expected-version above: the manifest path is built from an
-    # env var inside the shell, not from a template expansion spliced into the command.
-    # (`dist-${{ matrix.artifact }}` on the line above is fine - that is an action
-    # input, not a shell command, so there is nothing to inject into.)
-    assert 'artifacts-${ARTIFACT_NAME}.sha256' in workflow
-    assert "artifacts-${{ matrix.artifact }}.sha256" not in workflow
+    assert "dry_run:" in workflow and "default: true" in workflow
+
+    assert "python scripts/promote_reviewed_wheels.py metadata" in workflow
+    assert "python scripts/promote_reviewed_wheels.py wheels" in workflow
+    assert "artifact-ids: ${{ steps.candidate.outputs.artifact_ids }}" in workflow
+    assert "run-id: ${{ env.REVIEWED_RUN_ID }}" in workflow
+    assert "REVIEWED_SOURCE_SHA:" in workflow
+    assert "REVIEWED_CORE_SHA:" in workflow
+    assert "REVIEWED_WHEELS_JSON:" in workflow
+    assert "sha256sum --check reviewed-wheels.sha256" in workflow
+    assert "name: reviewed-pypi-wheels" in workflow
+    for tag in (".*manylinux.*x86_64.*", "macosx_.*", "win_amd64", "win_arm64"):
+        assert f'--expected-platform-pattern "{tag}"' in workflow
+    assert "maturin build" not in workflow
+    assert "pip wheel " not in workflow
+    assert "python scripts/set_release_version.py" not in workflow
     assert "attest-build-provenance" not in workflow
     assert "attestations: write" not in workflow
     assert "attestations: true" not in workflow
