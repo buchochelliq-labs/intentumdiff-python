@@ -286,8 +286,11 @@ def create_app() -> Any:
         x_hub_signature_256: str | None = Header(default=None),
     ) -> dict[str, Any]:
         body = await request.body()
-        secret = request.app.state.webhook_secret if hasattr(request.app.state, "webhook_secret") else ""
-        if secret and not verify_webhook_signature(secret, body, x_hub_signature_256):
+        # A missing signing key must never disable authentication by accident.
+        secret = getattr(request.app.state, "webhook_secret", None)
+        if not isinstance(secret, str) or not secret:
+            raise HTTPException(status_code=503, detail="webhook signing secret not configured")
+        if not verify_webhook_signature(secret, body, x_hub_signature_256):
             raise HTTPException(status_code=401, detail="invalid signature")
         try:
             payload = decode_webhook_body(body)
