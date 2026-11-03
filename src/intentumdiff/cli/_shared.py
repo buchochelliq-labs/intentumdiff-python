@@ -23,6 +23,7 @@ import os
 import shlex
 import sys
 import time
+from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
@@ -322,16 +323,19 @@ def _render(diff: SemanticDiff, fmt: str, output: str | None, fuel: int | None =
     if fmt == "terminal" and not output:
         _render_terminal(diff)
         return
+    _write_output(_render_text(diff, fmt, fuel=fuel), output)
 
+
+def _render_text(diff: SemanticDiff, fmt: str, fuel: int | None = None) -> str:
+    """Render one diff to text for a file or a machine-readable stream (every format except
+    interactive terminal output). Multi-file callers combine these and write once (#280)."""
     if fmt == "terminal":
         from intentumdiff.rust_core import render_cli_review
 
-        Path(output).write_text(render_cli_review(diff, width=80, color=False), encoding="utf-8")
-        return
+        return render_cli_review(diff, width=80, color=False)
 
     if fmt == "json":
-        _write_output(diff.model_dump_json(indent=2), output)
-        return
+        return diff.model_dump_json(indent=2)
 
     # For patch / html / llm — delegate to the matching Wasm renderer plugin
     from intentumdiff.plugins.loader import load_plugin
@@ -362,8 +366,7 @@ def _render(diff: SemanticDiff, fmt: str, output: str | None, fuel: int | None =
         plugin_fuel = fuel if fuel is not None else 100_000_000
         adaptive_fuel = max(plugin_fuel, 20_000_000 + len(diff_json) * 100)
         pl = load_plugin(candidates[0], adaptive_fuel)
-        result = pl.call_render(diff_json)
-        _write_output(result, output)
+        return pl.call_render(diff_json)
     except Exception as exc:
         _err.print(f"[red]Renderer error: {exc}[/red]")
         sys.exit(1)
@@ -404,6 +407,31 @@ def _render_with_profile(
     started = time.perf_counter()
     _render(diff, args.format, args.output, fuel=fuel)
     _emit_phase_profiles(diff, render_ms=(time.perf_counter() - started) * 1000)
+
+
+def _render_many_with_profile(
+    diffs: list[SemanticDiff],
+    args: argparse.Namespace,
+    *,
+    fuel: int | None = None,
+    title: Callable[[SemanticDiff], str] | None = None,
+) -> None:
+    """Render several diffs as ONE document (#280): `--format json` is always a JSON array
+    (matching the empty-result `[]`), and every other format joins the per-file renders, so
+    `--output` keeps every file instead of each diff overwriting the last. *title* labels each
+    file in the plain-text terminal render, which does not name the file itself."""
+    parts: list[str] = []
+    for diff in diffs:
+        started = time.perf_counter()
+        text = _render_text(diff, args.format, fuel=fuel)
+        if args.format == "terminal" and title is not None:
+            text = f"== {title(diff)} ==\n{text}"
+        parts.append(text)
+        _emit_phase_profiles(diff, render_ms=(time.perf_counter() - started) * 1000)
+    if args.format == "json":
+        _write_output("[\n" + ",\n".join(parts) + "\n]", args.output)
+    else:
+        _write_output("\n".join(parts), args.output)
 
 
 def _has_immutable_guardrail(diff: SemanticDiff) -> bool:

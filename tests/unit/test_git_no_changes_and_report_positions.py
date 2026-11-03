@@ -130,3 +130,65 @@ def test_git_rule_title_preserves_literal_status_and_filename() -> None:
     stream = StringIO()
     Console(file=stream, width=65, force_terminal=False, color_system=None).rule(title)
     assert "[red]x.py [staged]" in stream.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# #280 follow-up — several changed files: one machine-readable document, nothing dropped
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def two_changed_files(clean_repo: Path) -> Path:
+    (clean_repo / "a.py").write_text("x = 2\n", encoding="utf-8")
+    (clean_repo / "b.py").write_text("y = 1\n", encoding="utf-8")
+    _git(clean_repo, "add", "b.py")
+    return clean_repo
+
+
+def _filenames(payload: list[dict]) -> set[str]:
+    return {d.get("new_filename") or d.get("old_filename") for d in payload}
+
+
+def test_git_json_with_several_files_prints_one_array(
+    two_changed_files: Path, capsys, monkeypatch
+) -> None:
+    # Before: stdout was one JSON object per file, concatenated - not a JSON document.
+    monkeypatch.chdir(two_changed_files)
+    assert _run_cli("git", "--format", "json") == 0
+    out = capsys.readouterr().out
+    try:
+        payload = json.loads(out)
+    except json.JSONDecodeError as exc:
+        pytest.fail(f"--format json printed invalid JSON for two changed files: {exc}")
+    assert isinstance(payload, list), "git --format json must always be an array, like the empty []"
+    assert _filenames(payload) == {"a.py", "b.py"}
+
+
+def test_git_json_output_file_keeps_every_file(
+    two_changed_files: Path, tmp_path: Path, monkeypatch
+) -> None:
+    # Before: each diff overwrote --output, so only the last file survived.
+    monkeypatch.chdir(two_changed_files)
+    report = tmp_path / "report.json"
+    assert _run_cli("git", "--format", "json", "--output", str(report)) == 0
+    payload = json.loads(report.read_text(encoding="utf-8"))
+    assert isinstance(payload, list)
+    assert _filenames(payload) == {"a.py", "b.py"}
+
+
+def test_git_json_single_file_is_a_one_element_array(clean_repo: Path, capsys, monkeypatch) -> None:
+    monkeypatch.chdir(clean_repo)
+    (clean_repo / "a.py").write_text("x = 2\n", encoding="utf-8")
+    assert _run_cli("git", "--format", "json") == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert isinstance(payload, list) and _filenames(payload) == {"a.py"}
+
+
+def test_git_terminal_output_file_keeps_every_file(
+    two_changed_files: Path, tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.chdir(two_changed_files)
+    report = tmp_path / "review.txt"
+    assert _run_cli("git", "--output", str(report)) == 0
+    text = report.read_text(encoding="utf-8")
+    assert "a.py" in text and "b.py" in text, text

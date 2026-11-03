@@ -65,6 +65,7 @@ from intentumdiff.cli._shared import (  # noqa: F401
     _parse_fuel,
     _record_diagnostics_db,
     _render,
+    _render_many_with_profile,
     _render_with_profile,
     _resolve_repo_root,
     _warn_if_unlimited_fuel,
@@ -214,10 +215,19 @@ def _cmd_git(args: argparse.Namespace) -> None:
                 _record_diagnostics_db([], args)
                 _exit_if_guardrail_result_fails(result)
                 return
-            for diff in diffs:
-                if args.format == "terminal" and not args.output:
+            if args.format == "terminal" and not args.output:
+                for diff in diffs:
                     _console.rule(_git_file_rule_title(diff))
-                _render_with_profile(diff, args, fuel=differ._config.plugin_fuel)
+                    _render_with_profile(diff, args, fuel=differ._config.plugin_fuel)
+            else:
+                # One document for machine formats and files (#280): a JSON array, or the
+                # joined per-file renders, so no diff overwrites another in --output.
+                _render_many_with_profile(
+                    diffs,
+                    args,
+                    fuel=differ._config.plugin_fuel,
+                    title=lambda diff: _git_file_rule_title(diff).plain,
+                )
             result = _emit_guardrail_reports(diffs, args)
             _record_diagnostics_db(diffs, args)
             _exit_if_guardrail_result_fails(result)
