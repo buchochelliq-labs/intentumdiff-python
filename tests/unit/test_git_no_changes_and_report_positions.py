@@ -106,3 +106,27 @@ def test_github_annotation_converts_zero_based_positions() -> None:
 
     text = render_guardrail_annotations(_violation_at(2, 4))
     assert "line=3" in text and "col=5" in text, text
+
+
+# ---------------------------------------------------------------------------
+# #285 — Rich markup must not swallow staging status or style filenames
+# ---------------------------------------------------------------------------
+
+
+def test_git_rule_title_preserves_literal_status_and_filename() -> None:
+    from types import SimpleNamespace
+
+    from rich.console import Console
+    from rich.text import Text
+    from io import StringIO
+    from intentumdiff.cli._commands import _git_file_rule_title
+
+    diff = SimpleNamespace(
+        new_filename="[red]x.py", old_filename=None, staging_status="staged"
+    )
+    title = _git_file_rule_title(diff)
+    assert isinstance(title, Text)
+    assert title.plain == "[red]x.py [staged]"
+    stream = StringIO()
+    Console(file=stream, width=65, force_terminal=False, color_system=None).rule(title)
+    assert "[red]x.py [staged]" in stream.getvalue()

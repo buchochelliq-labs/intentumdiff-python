@@ -35,6 +35,7 @@ except ModuleNotFoundError:  # pragma: no cover - exercised only in minimal dev 
 
 from rich.panel import Panel
 from rich.table import Table
+from rich.text import Text
 
 from intentumdiff import (
     FileSource,
@@ -104,6 +105,13 @@ def _cmd_assets_git(args: argparse.Namespace) -> None:
         options=_asset_options_from_args(args),
     )
     _emit_asset_payload(payload, json_output=args.json)
+
+
+def _git_file_rule_title(diff: SemanticDiff) -> Text:
+    """Build a literal Rich rule title; filenames and Git statuses are data, not markup."""
+    label = diff.staging_status or ""
+    name = diff.new_filename or diff.old_filename or "(unknown file)"
+    return Text(f"{name} [{label}]" if label else name)
 
 
 def _cmd_git(args: argparse.Namespace) -> None:
@@ -208,11 +216,7 @@ def _cmd_git(args: argparse.Namespace) -> None:
                 return
             for diff in diffs:
                 if args.format == "terminal" and not args.output:
-                    label = diff.staging_status or ""
-                    rule_title = diff.new_filename or diff.old_filename
-                    if label:
-                        rule_title = f"{rule_title} [{label}]"
-                    _console.rule(rule_title)
+                    _console.rule(_git_file_rule_title(diff))
                 _render_with_profile(diff, args, fuel=differ._config.plugin_fuel)
             result = _emit_guardrail_reports(diffs, args)
             _record_diagnostics_db(diffs, args)
