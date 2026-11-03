@@ -23,6 +23,7 @@ import os
 import shlex
 import sys
 import time
+from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
@@ -322,16 +323,19 @@ def _render(diff: SemanticDiff, fmt: str, output: str | None, fuel: int | None =
     if fmt == "terminal" and not output:
         _render_terminal(diff)
         return
+    _write_output(_render_text(diff, fmt, fuel=fuel), output)
 
+
+def _render_text(diff: SemanticDiff, fmt: str, fuel: int | None = None) -> str:
+    """Render one diff to text for a file or a machine-readable stream (every format except
+    interactive terminal output). Multi-file callers combine these and write once (#280)."""
     if fmt == "terminal":
         from intentumdiff.rust_core import render_cli_review
 
-        Path(output).write_text(render_cli_review(diff, width=80, color=False), encoding="utf-8")
-        return
+        return render_cli_review(diff, width=80, color=False)
 
     if fmt == "json":
-        _write_output(diff.model_dump_json(indent=2), output)
-        return
+        return diff.model_dump_json(indent=2)
 
     # For patch / html / llm — delegate to the matching Wasm renderer plugin
     from intentumdiff.plugins.loader import load_plugin
@@ -362,8 +366,7 @@ def _render(diff: SemanticDiff, fmt: str, output: str | None, fuel: int | None =
         plugin_fuel = fuel if fuel is not None else 100_000_000
         adaptive_fuel = max(plugin_fuel, 20_000_000 + len(diff_json) * 100)
         pl = load_plugin(candidates[0], adaptive_fuel)
-        result = pl.call_render(diff_json)
-        _write_output(result, output)
+        return pl.call_render(diff_json)
     except Exception as exc:
         _err.print(f"[red]Renderer error: {exc}[/red]")
         sys.exit(1)
@@ -404,6 +407,69 @@ def _render_with_profile(
     started = time.perf_counter()
     _render(diff, args.format, args.output, fuel=fuel)
     _emit_phase_profiles(diff, render_ms=(time.perf_counter() - started) * 1000)
+
+
+def _combine_html_reviews(pages: list[tuple[str, str]]) -> str:
+    """One valid HTML document with independent, sandboxed renderer pages.
+
+    The Wasm HTML renderer emits a complete HTML document per diff. Joining
+    those documents produces malformed HTML; using sandboxed srcdoc frames
+    retains each renderer's own CSS without reinterpreting any diff semantics.
+    """
+    from html import escape
+
+    if len(pages) <= 1:
+        return pages[0][1] if pages else ""
+    frames = []
+    for filename, document in pages:
+        name = escape(filename)
+        attribute = escape(filename, quote=True)
+        content = escape(document, quote=True)
+        frames.append(
+            '<section class="review"><h2>' + name + '</h2>'
+            '<iframe title="' + attribute + '" sandbox="allow-scripts" '
+            'loading="lazy" srcdoc="' + content + '"></iframe></section>'
+        )
+    return (
+        '<!doctype html>\n<html lang="en"><head><meta charset="utf-8">'
+        '<title>IntentumDiff Git review</title>'
+        '<style>body{font:16px system-ui,sans-serif;margin:1.5rem}'
+        'section.review{margin:1.5rem 0;border:1px solid #888;border-radius:6px;'
+        'padding:1rem}iframe{display:block;width:100%;height:70vh;border:0}'
+        'h2{font-size:1.1rem}</style></head><body>\n'
+        + '\n'.join(frames) + '\n</body></html>\n'
+    )
+
+
+def _render_many_with_profile(
+    diffs: list[SemanticDiff],
+    args: argparse.Namespace,
+    *,
+    fuel: int | None = None,
+    title: Callable[[SemanticDiff], str] | None = None,
+) -> None:
+    """Render several diffs as one document without dropping any file (#280).
+
+    JSON is always an array. HTML embeds each original Wasm-rendered page in a
+    sandboxed frame. Other formats join renders, with per-file titles for
+    terminal output to a file.
+    """
+    parts: list[str] = []
+    for diff in diffs:
+        started = time.perf_counter()
+        text = _render_text(diff, args.format, fuel=fuel)
+        if args.format == "terminal" and title is not None:
+            text = f"== {title(diff)} ==\n{text}"
+        parts.append(text)
+        _emit_phase_profiles(diff, render_ms=(time.perf_counter() - started) * 1000)
+    if args.format == "json":
+        _write_output("[\n" + ",\n".join(parts) + "\n]", args.output)
+    elif args.format == "html":
+        labels = [title(diff) if title is not None else f"Diff {i + 1}"
+                  for i, diff in enumerate(diffs)]
+        _write_output(_combine_html_reviews(list(zip(labels, parts, strict=True))), args.output)
+    else:
+        _write_output("\n".join(parts), args.output)
 
 
 def _has_immutable_guardrail(diff: SemanticDiff) -> bool:

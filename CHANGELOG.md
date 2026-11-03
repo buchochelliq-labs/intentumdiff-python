@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.0.2 — release candidate (not published)
+
+### CLI output contract
+
+- `intentumdiff git --format json` now returns **one JSON array** for zero, one, or
+  multiple changed files. The former single-file bare JSON object is replaced by
+  a one-element array; consumers of this format must handle the uniform array schema.
+- `intentumdiff git --output` writes all changed files rather than repeatedly
+  overwriting the report with the final diff. Multi-file HTML output is one
+  document with isolated renderer frames, not concatenated HTML pages.
+
 ## v0.0.2b1 — 2026-08-09
 
 A beta, because 0.0.1 was published without anyone installing it and using it. That release
