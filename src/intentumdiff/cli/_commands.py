@@ -188,7 +188,23 @@ def _cmd_git(args: argparse.Namespace) -> None:
                 new_ref=new_ref,
             )
             if not diffs:
-                _console.print("[green]No parseable changes found.[/green]")
+                # No semantic result exists to render, but machine consumers must
+                # still receive a valid empty result and requested report files.
+                # Keep the human status on stderr so stdout stays machine-readable.
+                if args.format == "terminal":
+                    if args.output:
+                        _write_output("No parseable changes found.\n", args.output)
+                    else:
+                        _err.print("[green]No parseable changes found.[/green]")
+                elif args.format == "json":
+                    _write_output("[]", args.output)
+                elif args.output:
+                    # Empty patch/HTML/LLM output is an empty document, not a
+                    # fabricated per-file semantic diff.
+                    _write_output("", args.output)
+                result = _emit_guardrail_reports([], args)
+                _record_diagnostics_db([], args)
+                _exit_if_guardrail_result_fails(result)
                 return
             for diff in diffs:
                 if args.format == "terminal" and not args.output:

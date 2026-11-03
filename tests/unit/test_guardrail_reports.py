@@ -82,8 +82,8 @@ def test_github_annotations_escape_special_fields() -> None:
 
     assert rendered.startswith("::error ")
     assert "file=config.yaml" in rendered
-    assert "line=3" in rendered
-    assert "col=2" in rendered
+    assert "line=4" in rendered
+    assert "col=3" in rendered
     assert "Host changed: prod, keep 100%25%0Anow%0Dplease" in rendered
     assert "title=immutable guardrail prod-host" in rendered
 
@@ -106,8 +106,8 @@ def test_sarif_output_contains_rule_result_and_region() -> None:
     assert sarif_result["level"] == "error"
     assert sarif_result["ruleId"] == "prod-host"
     assert location["artifactLocation"]["uri"] == "config.yaml"
-    assert location["region"]["startLine"] == 3
-    assert location["region"]["startColumn"] == 2
+    assert location["region"]["startLine"] == 4
+    assert location["region"]["startColumn"] == 3
 
 
 def test_sarif_location_allows_missing_position() -> None:
