@@ -382,6 +382,12 @@ class TestDiffCommit:
         # calc.py should be parsed — python parser is available
         assert len(diffs) >= 1
         assert all(hasattr(d, "has_semantic_changes") for d in diffs)
+        # Oracle (Core #229): `a + b` -> `a - b` is a behaviour change. Asserting only that a
+        # result exists let the engine report it as style-only for the whole 0.0.2 cycle.
+        (calc,) = [d for d in diffs if (d.new_filename or d.old_filename) == "calc.py"]
+        assert calc.has_semantic_changes is True
+        assert calc.is_style_only is False
+        assert calc.changes, "operator change produced no changes"
 
     def test_diff_commit_style_only_change(self, tmp_path):
         """Adding a comment only → style-only diff."""
