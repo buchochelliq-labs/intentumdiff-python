@@ -409,6 +409,38 @@ def _render_with_profile(
     _emit_phase_profiles(diff, render_ms=(time.perf_counter() - started) * 1000)
 
 
+def _combine_html_reviews(pages: list[tuple[str, str]]) -> str:
+    """One valid HTML document with independent, sandboxed renderer pages.
+
+    The Wasm HTML renderer emits a complete HTML document per diff. Joining
+    those documents produces malformed HTML; using sandboxed srcdoc frames
+    retains each renderer's own CSS without reinterpreting any diff semantics.
+    """
+    from html import escape
+
+    if len(pages) <= 1:
+        return pages[0][1] if pages else ""
+    frames = []
+    for filename, document in pages:
+        name = escape(filename)
+        attribute = escape(filename, quote=True)
+        content = escape(document, quote=True)
+        frames.append(
+            '<section class="review"><h2>' + name + '</h2>'
+            '<iframe title="' + attribute + '" sandbox="allow-scripts" '
+            'loading="lazy" srcdoc="' + content + '"></iframe></section>'
+        )
+    return (
+        '<!doctype html>\n<html lang="en"><head><meta charset="utf-8">'
+        '<title>IntentumDiff Git review</title>'
+        '<style>body{font:16px system-ui,sans-serif;margin:1.5rem}'
+        'section.review{margin:1.5rem 0;border:1px solid #888;border-radius:6px;'
+        'padding:1rem}iframe{display:block;width:100%;height:70vh;border:0}'
+        'h2{font-size:1.1rem}</style></head><body>\n'
+        + '\n'.join(frames) + '\n</body></html>\n'
+    )
+
+
 def _render_many_with_profile(
     diffs: list[SemanticDiff],
     args: argparse.Namespace,
@@ -416,10 +448,12 @@ def _render_many_with_profile(
     fuel: int | None = None,
     title: Callable[[SemanticDiff], str] | None = None,
 ) -> None:
-    """Render several diffs as ONE document (#280): `--format json` is always a JSON array
-    (matching the empty-result `[]`), and every other format joins the per-file renders, so
-    `--output` keeps every file instead of each diff overwriting the last. *title* labels each
-    file in the plain-text terminal render, which does not name the file itself."""
+    """Render several diffs as one document without dropping any file (#280).
+
+    JSON is always an array. HTML embeds each original Wasm-rendered page in a
+    sandboxed frame. Other formats join renders, with per-file titles for
+    terminal output to a file.
+    """
     parts: list[str] = []
     for diff in diffs:
         started = time.perf_counter()
@@ -430,6 +464,10 @@ def _render_many_with_profile(
         _emit_phase_profiles(diff, render_ms=(time.perf_counter() - started) * 1000)
     if args.format == "json":
         _write_output("[\n" + ",\n".join(parts) + "\n]", args.output)
+    elif args.format == "html":
+        labels = [title(diff) if title is not None else f"Diff {i + 1}"
+                  for i, diff in enumerate(diffs)]
+        _write_output(_combine_html_reviews(list(zip(labels, parts, strict=True))), args.output)
     else:
         _write_output("\n".join(parts), args.output)
 

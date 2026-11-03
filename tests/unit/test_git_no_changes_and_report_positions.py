@@ -192,3 +192,41 @@ def test_git_terminal_output_file_keeps_every_file(
     assert _run_cli("git", "--output", str(report)) == 0
     text = report.read_text(encoding="utf-8")
     assert "a.py" in text and "b.py" in text, text
+
+
+def test_multifile_html_review_is_one_document_and_preserves_wasm_pages() -> None:
+    """Separate full HTML documents must not be concatenated into invalid markup."""
+    from html.parser import HTMLParser
+
+    from intentumdiff.cli._shared import _combine_html_reviews
+
+    pages = [
+        ("[red]a.py", '<!doctype html><html><head><style>p{color:red}</style></head>'
+         '<body><p>first &amp; change</p></body></html>'),
+        ("b.py", '<!doctype html><html><body><p>second diff</p></body></html>'),
+    ]
+    document = _combine_html_reviews(pages)
+    assert document.lower().count("<html") == 1
+    assert document.lower().count("</html>") == 1
+    assert document.lower().count("<!doctype html>") == 1
+    assert "[red]a.py" in document
+    assert document.count("<iframe ") == 2
+
+    class Frames(HTMLParser):
+        def __init__(self) -> None:
+            super().__init__()
+            self.documents: list[str] = []
+            self.titles: list[str] = []
+
+        def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+            if tag == "iframe":
+                attributes = dict(attrs)
+                assert attributes["sandbox"] == "allow-scripts"
+                self.documents.append(attributes["srcdoc"] or "")
+                self.titles.append(attributes["title"] or "")
+
+    parser = Frames()
+    parser.feed(document)
+    assert parser.titles == ["[red]a.py", "b.py"]
+    assert parser.documents == [page for _, page in pages]
+    assert _combine_html_reviews(pages[:1]) == pages[0][1]
