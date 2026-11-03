@@ -940,12 +940,24 @@ class LoadedPlugin:
         if not unlimited:
             try:
                 self._store.set_fuel(fuel)
-            except WasmtimeError:
+            except WasmtimeError as exc:
+                # Never dispatch an unmetered guest; this store is tainted.
                 status = "fuel_set_failed"
-                logger.warning(
-                    "set_fuel failed for plugin %r — fuel cap may not be active",
-                    self._wasm_path,
+                self._tainted = True
+                self._record_telemetry(
+                    func_name=func_name,
+                    fuel_budget=fuel,
+                    fuel_unlimited=False,
+                    fuel_consumed=None,
+                    fuel_remaining=None,
+                    elapsed_ms=(_time.perf_counter() - started) * 1000.0,
+                    status=status,
+                    args=args,
                 )
+                raise PluginSecurityError(
+                    self._wasm_path,
+                    f"required Wasm fuel cap could not be applied: {exc}",
+                ) from exc
 
         try:
             # Two-level lookup: interface instance → function
@@ -1202,7 +1214,13 @@ def load_plugin(
         # after the balloon.
         store.set_limits(memory_size=_plugin_memory_limit_bytes())
         if not _unlimited:
-            store.set_fuel(fuel)
+            try:
+                store.set_fuel(fuel)
+            except WasmtimeError as exc:
+                # Do not instantiate without the mandatory CPU budget.
+                raise PluginSecurityError(
+                    str(path), f"required Wasm fuel cap could not be applied during load: {exc}"
+                ) from exc
 
         instance = linker.instantiate(store, component)
 
