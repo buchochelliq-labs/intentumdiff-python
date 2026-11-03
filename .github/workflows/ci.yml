@@ -193,7 +193,7 @@ jobs:
         env:
           # Candidate acceptance must exercise the same optimized native profile as
           # publication, not inherit the editable test install's development profile.
-          MATURIN_PEP517_ARGS: "--profile release"
+          MATURIN_PEP517_ARGS: "--profile release --compatibility pypi"
 
       - name: Record candidate artifact identities
         if: env.HAS_SPLIT_TOKEN == 'true'

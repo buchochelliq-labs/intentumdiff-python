@@ -1,243 +1,109 @@
-name: Build platform wheels
-
-# Builds native IntentumDiff wheels and publishes verified release wheels to PyPI
-# from version tags after the PyPI Trusted Publishing gate is configured.
+name: Promote independently reviewed platform wheels
+# No wheel is rebuilt, repaired, or retagged in the publication workflow.
 on:
   push:
     tags:
       - "v[0-9]*.[0-9]*.[0-9]*"
   workflow_dispatch:
     inputs:
-      publish_testpypi:
-        description: "Publish verified wheels to TestPyPI"
-        required: false
-        default: false
+      dry_run:
+        description: "Verify immutable wheels without publishing"
         type: boolean
-      testpypi_version:
-        description: "TestPyPI-only rehearsal version; use a new value if TestPyPI has tombstoned filenames"
-        required: false
-        default: "0.0.1b1"
+        default: true
+      publish_testpypi:
+        description: "Explicit TestPyPI upload of reviewed wheels (requires dry_run=false)"
+        type: boolean
+        default: false
+      candidate_run_id:
+        description: "Successful release-branch CI run ID"
+        type: string
+      candidate_source_sha:
+        description: "40-character tested Python Git SHA"
+        type: string
+      candidate_core_sha:
+        description: "40-character tested Rust Core SHA"
+        type: string
+      candidate_wheels_json:
+        description: 'JSON: four runner names mapped to {"id":artifact_ID,"sha256":wheel_SHA256}'
         type: string
 
-# Deny by default (zizmor excessive-permissions): with no workflow-level block, jobs
-# inherit the repository default, which can be read-write. Every job here declares the
-# permissions it actually needs (build-wheels: contents:read; publish/publish-testpypi
-# add id-token:write for Trusted Publishing), so nothing relies on the inherited grant.
 permissions: {}
-
 jobs:
-  build-wheels:
-    name: Build ${{ matrix.artifact }} wheel
-    runs-on: ${{ matrix.os }}
+  promote:
+    name: Verify and retain exact reviewed PyPI wheels
+    runs-on: ubuntu-latest
     permissions:
       contents: read
+      actions: read
     env:
-      # Only the TestPyPI rehearsal carries its version as an input. A tag release
-      # derives it from the tag in the step below: a literal here silently goes stale the
-      # moment the project version moves, and the release then fails at the verify gate
-      # having already built every wheel correctly.
-      INTENTUMDIFF_EXPECTED_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_testpypi && inputs.testpypi_version || '' }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            artifact: Linux-x64
-            rust_targets: wasm32-wasip2
-            maturin_target: ""
-          - os: macos-latest
-            artifact: macOS
-            rust_targets: wasm32-wasip2
-            maturin_target: ""
-          - os: windows-latest
-            artifact: Windows-x64
-            rust_targets: wasm32-wasip2
-            maturin_target: ""
-          # NATIVE arm64 runner, not a cross-build from windows-latest. `-b cffi` makes
-          # maturin EXECUTE a target-matching interpreter to generate the cffi
-          # declarations, and an arm64 python.exe cannot run on an x64 host (the emulation
-          # only goes the other way), so cross-compiling this leg fails at:
-          #   'python.exe' reports a platform 'win-amd64' (architecture 'x86_64'),
-          #   while the Rust target is 'aarch64'. Skipping.
-          # No linker flag fixes that - `--zig` is for the Linux/macOS cross-builds and
-          # cannot target *-pc-windows-msvc anyway (zig ships the -gnu ABI). Building on
-          # the matching architecture removes the cross-compile entirely.
-          - os: windows-11-arm
-            artifact: Windows-arm64
-            rust_targets: wasm32-wasip2
-            maturin_target: ""
-
+      GH_TOKEN: ${{ github.token }}
+      REVIEWED_RUN_ID: ${{ inputs.candidate_run_id || vars.INTENTUMDIFF_PYPI_RUN_ID }}
+      REVIEWED_SOURCE_SHA: ${{ inputs.candidate_source_sha || vars.INTENTUMDIFF_PYPI_SOURCE_SHA }}
+      REVIEWED_CORE_SHA: ${{ inputs.candidate_core_sha || vars.INTENTUMDIFF_PYPI_CORE_SHA }}
+      REVIEWED_WHEELS_JSON: ${{ inputs.candidate_wheels_json || vars.INTENTUMDIFF_PYPI_WHEELS_JSON }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-
-      - name: Install Rust 1.95.0
-        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # stable
-        with:
-          toolchain: 1.95.0
-          targets: ${{ matrix.rust_targets }}
-
-      - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-
-      # zizmor template-injection: every `${{ }}` below used to be expanded straight into
-      # the shell command, which splices the value into the script GitHub generates. The
-      # version ultimately comes from a workflow_dispatch input, so it is attacker-shaped
-      # (write-access-gated, but this workflow publishes to PyPI — the one place not to
-      # leave that open). Pass values through the environment instead, where the shell
-      # sees them as data. `shell: bash` because this job also runs the Windows matrix
-      # legs, whose default shell is pwsh and would not read $VAR.
-      - name: Stamp TestPyPI rehearsal version
-        if: github.event_name == 'workflow_dispatch' && inputs.publish_testpypi
-        shell: bash
-        run: python scripts/set_release_version.py "$INTENTUMDIFF_EXPECTED_VERSION"
-
-      # The tag is the release's identity, so take the expected version from it rather
-      # than a literal. Also assert it agrees with pyproject: if they disagree, the wheel
-      # filename and the tag tell different stories about what shipped, and PyPI keeps
-      # whichever got uploaded forever.
-      - name: Derive the expected version from the tag
+      - name: Tag matches the version of reviewed source
         if: startsWith(github.ref, 'refs/tags/v')
         shell: bash
         env:
           GIT_TAG: ${{ github.ref_name }}
         run: |
-          tag="${GIT_TAG#v}"
-          # Compare NORMALISED versions, not strings. Every IntentumDiff component is tagged
-          # with one estate-wide string (v0.0.2-beta.1) so the release does not look like
-          # several different releases, but PEP 440's canonical spelling is 0.0.2b1 and that is
-          # what pyproject and the wheel filename must carry. They are the SAME version —
-          # Version("0.0.2-beta.1") == Version("0.0.2b1") — and a string compare would reject a
-          # perfectly correct pairing.
-          #
-          # This still fails closed on a real mismatch: 0.0.3 vs 0.0.2 does not normalise away.
-          python - "$tag" <<'PY'
-          import pathlib, sys, tomllib
-          from packaging.version import InvalidVersion, Version
-
-          tag_raw = sys.argv[1]
-          project_raw = tomllib.loads(
-              pathlib.Path("pyproject.toml").read_text(encoding="utf-8")
-          )["project"]["version"]
-          try:
-              tag, project = Version(tag_raw), Version(project_raw)
-          except InvalidVersion as exc:
-              sys.exit(f"::error::version is not PEP 440 parseable: {exc}")
-          print(f"tag={tag_raw} ({tag})  pyproject={project_raw} ({project})")
-          if tag != project:
-              sys.exit(
-                  f"::error::tag {tag_raw} normalises to {tag}, which does not match the "
-                  f"pyproject version {project_raw} ({project})"
-              )
-          PY
-          echo "INTENTUMDIFF_EXPECTED_VERSION=$(python -c "from packaging.version import Version; print(Version('$tag'))")" >> "$GITHUB_ENV"
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+          set -euo pipefail
+          declared=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          tag=$(printf '%s' "$GIT_TAG" | cut -c2-)
+          [ "$tag" = "$declared" ] || { echo "::error::tag/version mismatch" >&2; exit 1; }
+      - name: Verify source tree, successful four-platform CI and exact artifact IDs
+        id: candidate
+        run: python scripts/promote_reviewed_wheels.py metadata
+      - name: Download only four approved CI artifact IDs
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          # Release artifacts must not be built from restorable caches (zizmor
-          # cache-poisoning, issue #76).
-          enable-cache: false
-
-      # This repo does NOT build components from source - it has no build.py and no parser
-      # crates. It is the thin binding: the engine checkout and the parser components are
-      # PROVISIONED, each component verified against the SHA-256 pinned in
-      # intentumdiff-registry. Mirrors the ci.yml sequence, which is the one that works.
-      - name: Authenticate cross-repo git deps
-        # Private sibling repos are git dependencies and GITHUB_TOKEN is repo-scoped, so
-        # the org-scoped token is what lets the engine checkout resolve.
-        # windows-latest defaults to PowerShell; this step is POSIX shell.
-        shell: bash
-        env:
-          SPLIT_REPO_TOKEN: ${{ secrets.SPLIT_REPO_TOKEN }}
+          artifact-ids: ${{ steps.candidate.outputs.artifact_ids }}
+          run-id: ${{ env.REVIEWED_RUN_ID }}
+          github-token: ${{ github.token }}
+          path: reviewed-dist/
+          merge-multiple: false
+      - name: Verify source, Core, release profile, per-platform hashes and PyPI tags
         run: |
-          if [ -n "$SPLIT_REPO_TOKEN" ]; then
-            git config --global url."https://x-access-token:${SPLIT_REPO_TOKEN}@github.com/".insteadOf "https://github.com/"
-            echo "cross-repo git auth configured"
-          else
-            echo "::warning::SPLIT_REPO_TOKEN not set - private cross-repo dependencies will fail to fetch"
-          fi
-
-      - name: Provision build inputs (engine + parser components)
-        # Fail-closed: a missing or checksum-unverified component stops the release here
-        # rather than shipping a wheel with languages that resolve to 'unknown'.
-        env:
-          GIT_TERMINAL_PROMPT: "0"
-          GH_TOKEN: ${{ secrets.SPLIT_REPO_TOKEN }}
-        run: |
-          pip install "pyyaml>=6.0"
-          python scripts/provision_build_inputs.py --from-parser-artifacts
-
-      - name: Install maturin
-        run: uv tool install "maturin==1.14.1"
-
-      # `-b cffi` makes maturin shell out to the TARGET interpreter to generate the cffi
-      # declarations, so cffi must be importable there - by this python, not by maturin's
-      # isolated uv tool environment. Without it every wheel leg dies at
-      # "ModuleNotFoundError: No module named 'cffi'". ci.yml already does this; the
-      # release lane was the one place that did not.
-      - name: Install cffi for the wheel build
-        run: python -m pip install --upgrade pip cffi
-
-      # PyO3-free release wheel (#82/B.6): a bare cdylib shipped as a data file that the Python
-      # package loads via ctypes over the C ABI. `--no-default-features` drops the `python`/pyo3
-      # feature; `-b cffi` builds + packages the cdylib (maturin embeds cbindgen to emit the C
-      # header — restricted to functions by crates/rust-core-host/cbindgen.toml so cffi's macro
-      # parser is happy — and its generated cffi wrapper is unused: rust_core.py ctypes-loads the
-      # cdylib directly).
-      - name: Build native IntentumDiff wheel (pyo3-free cdylib)
-        shell: bash
-        # The matrix carries a TARGET TRIPLE, not a fragment of a command line, and the
-        # flag is assembled here into a quoted array. The previous version passed
-        # $MATURIN_TARGET_ARGS unquoted so the empty case would vanish rather than become
-        # a stray empty argument - but that is SC2086 (word splitting), which actionlint
-        # fails on. Putting the matrix value back into the command as a `${{ }}`
-        # expansion would clear SC2086 and reintroduce the zizmor template-injection
-        # instead. An array satisfies both: empty expands to nothing, non-empty stays a
-        # single argument.
-        run: |
-          target_args=()
-          if [ -n "$MATURIN_TARGET" ]; then
-            target_args=(--target "$MATURIN_TARGET")
-          fi
-          maturin build --release --no-default-features -b cffi \
-            --out dist --compatibility pypi "${target_args[@]}"
-        env:
-          CARGO_TARGET_DIR: ${{ github.workspace }}/target-intentumdiff-rust-wheel
-          MATURIN_TARGET: ${{ matrix.maturin_target }}
-
-      - name: Verify wheel contents and size budget
-        shell: bash
-        run: >
-          python scripts/verify_intentumdiff_wheel.py dist
-          --max-wheel-mb 75
-          --max-release-mb 75
-          --expected-version "$INTENTUMDIFF_EXPECTED_VERSION"
-
-      - name: Record artifact checksums
-        shell: bash
-        env:
-          ARTIFACT_NAME: ${{ matrix.artifact }}
-        run: >
-          python scripts/verify_artifacts.py
-          --root dist
-          --manifest "dist/artifacts-${ARTIFACT_NAME}.sha256"
-          record
-          --patterns "*.whl"
-
-      - name: Upload dist artefacts
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+          python scripts/promote_reviewed_wheels.py wheels
+          python scripts/verify_intentumdiff_wheel.py publish-dist \
+            --max-wheel-mb 75 --max-release-mb 250 \
+            --expected-name intentumdiff-python \
+            --expected-version "$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")" \
+            --expected-platform-pattern ".*manylinux.*x86_64.*" \
+            --expected-platform-pattern "macosx_.*" \
+            --expected-platform-pattern "win_amd64" \
+            --expected-platform-pattern "win_arm64"
+          sha256sum --check reviewed-wheels.sha256
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: dist-${{ matrix.artifact }}
+          name: reviewed-pypi-wheels
           path: |
-            dist/
-
+            publish-dist/*.whl
+            reviewed-wheels.sha256
+          if-no-files-found: error
+          retention-days: 30
+      - name: Record promotion provenance
+        shell: bash
+        run: |
+          {
+            echo "### Reviewed, immutable wheels (not rebuilt)"
+            echo ""
+            echo "Source: $REVIEWED_SOURCE_SHA"
+            echo "Core: $REVIEWED_CORE_SHA"
+            echo "CI run: $REVIEWED_RUN_ID"
+            echo ""
+            cat reviewed-wheels.sha256
+          } >> "$GITHUB_STEP_SUMMARY"
   publish:
-    name: Publish to PyPI
-    needs: build-wheels
+    name: Publish approved wheels to PyPI
+    needs: promote
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     environment:
@@ -247,61 +113,20 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          pattern: dist-*
-          path: downloaded-dist/
-          merge-multiple: true
-
-      - name: Prepare release wheels for publishing
-        run: python scripts/prepare_release_dist.py downloaded-dist publish-dist
-
-      - name: Verify downloaded artifact checksums before publishing
-        shell: bash
-        run: |
-          shopt -s nullglob
-          manifests=(downloaded-dist/artifacts-*.sha256)
-          if [ "${#manifests[@]}" -eq 0 ]; then
-            echo "No artifact checksum manifests found in downloaded-dist" >&2
-            exit 1
-          fi
-          for manifest in "${manifests[@]}"; do
-            python scripts/verify_artifacts.py --root publish-dist --manifest "$manifest" verify
-          done
-
-      # Same reasoning as the build job: derive from the tag, never a literal.
-      - name: Derive the expected version from the tag
-        shell: bash
-        env:
-          GIT_TAG: ${{ github.ref_name }}
-        run: echo "INTENTUMDIFF_EXPECTED_VERSION=${GIT_TAG#v}" >> "$GITHUB_ENV"
-
-      - name: Verify downloaded wheels before publishing
-        shell: bash
-        run: >
-          python scripts/verify_intentumdiff_wheel.py publish-dist
-          --max-wheel-mb 75
-          --max-release-mb 250
-          --expected-name intentumdiff-python
-          --expected-version "$INTENTUMDIFF_EXPECTED_VERSION"
-          --expected-platform-pattern ".*manylinux.*x86_64.*"
-          --expected-platform-pattern "macosx_.*"
-          --expected-platform-pattern "win_amd64"
-          --expected-platform-pattern "win_arm64"
-
+          name: reviewed-pypi-wheels
+          path: ./
+      - name: Reverify immutable bytes in publish job
+        run: sha256sum --check reviewed-wheels.sha256
       - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
           packages-dir: publish-dist/
           attestations: false
-
   publish-testpypi:
-    name: Publish to TestPyPI
-    needs: build-wheels
-    if: github.event_name == 'workflow_dispatch' && inputs.publish_testpypi
+    name: Explicitly publish reviewed bytes to TestPyPI
+    needs: promote
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_testpypi && !inputs.dry_run
     runs-on: ubuntu-latest
     environment:
       name: testpypi
@@ -309,43 +134,13 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    env:
-      INTENTUMDIFF_EXPECTED_VERSION: ${{ inputs.testpypi_version }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          pattern: dist-*
-          path: downloaded-dist/
-          merge-multiple: true
-
-      - name: Prepare release wheels for publishing
-        run: python scripts/prepare_release_dist.py downloaded-dist publish-dist
-
-      - name: Verify downloaded artifact checksums before TestPyPI publishing
-        shell: bash
-        run: |
-          shopt -s nullglob
-          manifests=(downloaded-dist/artifacts-*.sha256)
-          if [ "${#manifests[@]}" -eq 0 ]; then
-            echo "No artifact checksum manifests found in downloaded-dist" >&2
-            exit 1
-          fi
-          for manifest in "${manifests[@]}"; do
-            python scripts/verify_artifacts.py --root publish-dist --manifest "$manifest" verify
-          done
-
-      - name: Verify downloaded wheels before TestPyPI publishing
-        shell: bash
-        run: >
-          python scripts/verify_intentumdiff_wheel.py publish-dist
-          --max-wheel-mb 75
-          --max-release-mb 250
-          --expected-version "$INTENTUMDIFF_EXPECTED_VERSION"
-
+          name: reviewed-pypi-wheels
+          path: ./
+      - name: Reverify immutable bytes in TestPyPI job
+        run: sha256sum --check reviewed-wheels.sha256
       - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
           packages-dir: publish-dist/
