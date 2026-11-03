@@ -136,3 +136,26 @@ def test_gist_url_parser_accepts_only_github_gist_urls() -> None:
     with pytest.raises(ValueError):
         parse_gist_url("https://example.com/owner/abcdef123456")
 
+
+
+def test_github_app_webhook_rejects_unsigned_or_unconfigured_requests() -> None:
+    """#283: absence of the secret or signature is never implicit authentication opt-out."""
+    fastapi_testclient = pytest.importorskip("fastapi.testclient")
+    app = create_app()
+    client = fastapi_testclient.TestClient(app)
+    body = b'{"repository":{"full_name":"owner/repo"},"pull_request":{"number":7}}'
+    headers = {"X-GitHub-Event": "pull_request", "Content-Type": "application/json"}
+
+    # Missing key denies all events even when they include a signature header.
+    unconfigured = client.post("/github/webhook", content=body, headers=headers)
+    assert unconfigured.status_code == 503
+    assert unconfigured.json()["detail"] == "webhook signing secret not configured"
+
+    app.state.webhook_secret = ""
+    empty = client.post("/github/webhook", content=body, headers=headers)
+    assert empty.status_code == 503
+
+    app.state.webhook_secret = "configured-secret"
+    unsigned = client.post("/github/webhook", content=body, headers=headers)
+    assert unsigned.status_code == 401
+    assert unsigned.json()["detail"] == "invalid signature"
