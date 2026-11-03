@@ -378,10 +378,18 @@ class TestDiffCommit:
         differ = SemanticDiffer()
         diffs = differ.diff_commit(repo_path=tmp_path, old_ref="HEAD~1", new_ref="HEAD")
 
+        # Source oracle (#229/#282): + -> - changes behaviour. Merely
+        # comparing public Python with native Rust would miss a shared defect.
         assert isinstance(diffs, list)
-        # calc.py should be parsed — python parser is available
-        assert len(diffs) >= 1
-        assert all(hasattr(d, "has_semantic_changes") for d in diffs)
+        assert len(diffs) == 1
+        diff = diffs[0]
+        assert diff.has_semantic_changes is True, diff.model_dump_json()
+        assert diff.is_style_only is False, diff.model_dump_json()
+        assert any(
+            change.change_type == "MODIFICATION"
+            or getattr(change.change_type, "value", None) == "MODIFICATION"
+            for change in diff.changes
+        ), diff.model_dump_json()
 
     def test_diff_commit_style_only_change(self, tmp_path):
         """Adding a comment only → style-only diff."""
