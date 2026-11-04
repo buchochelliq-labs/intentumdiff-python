@@ -80,7 +80,7 @@ if TYPE_CHECKING:
     from intentumdiff.differ import SemanticDiffer
     from rich.console import Console as RichConsole
 
-from intentumdiff.core.models import ChangeStreamEvent, EditDelta
+from intentumdiff.core.models import ChangeStreamEvent, ChangeStreamPhase, EditDelta
 from intentumdiff.sources.live_buffer_source import LiveBufferSource
 
 logger = logging.getLogger(__name__)
@@ -124,6 +124,14 @@ class _ParsedRequest:
     stream: bool | None = None
 
 
+class _RustLiveDecline(RuntimeError):
+    """Transport the Rust Core's typed incomplete-result response unchanged."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
 def _make_socket_dir() -> str:
     """Return (and create) a private directory for the server's socket file."""
     runtime_dir = os.environ.get("XDG_RUNTIME_DIR", "")
@@ -144,10 +152,37 @@ def _make_socket_dir() -> str:
     return sock_dir
 
 
+# AF_UNIX addresses are a fixed-size struct field, not a string: sun_path is 104 bytes on
+# macOS and 108 on Linux, INCLUDING the NUL. Exceeding it raises "AF_UNIX path too long" at
+# bind() - not at connect, so the server simply never starts.
+#
+# macOS makes this easy to hit without doing anything unusual: TMPDIR there is a per-session
+# path like /var/folders/xy/9k4n.../T/, and this module then adds a per-pid directory and a
+# 16-character token. A GitHub macOS runner blows the limit outright, and so does any user
+# whose temp path is a little long.
+_SUN_PATH_MAX = 104 if sys.platform == "darwin" else 108
+
+
 def _make_socket_path(pid: int, token: str) -> str:
-    """Return a private socket path incorporating a random token."""
-    sock_dir = _make_socket_dir()
-    return os.path.join(sock_dir, f"intentumdiff-live-{token[:16]}.sock")
+    """Return a private socket path incorporating a random token.
+
+    Falls back to a shorter base if the preferred path would not fit in sun_path. The
+    fallback keeps the security properties that matter - an owner-only directory and an
+    unguessable name - and trades only the length of the token.
+    """
+    path = os.path.join(_make_socket_dir(), f"intentumdiff-live-{token[:16]}.sock")
+    if len(os.fsencode(path)) < _SUN_PATH_MAX:
+        return path
+
+    # Shortest base that is private per user and short on every POSIX system we support.
+    short = os.path.join(tempfile.gettempdir() if len(tempfile.gettempdir()) < 12 else "/tmp",
+                         f"imd-{pid}")
+    os.makedirs(short, mode=0o700, exist_ok=True)  # nosemgrep: python.lang.security.audit.insecure-file-permissions.insecure-file-permissions
+    try:
+        os.chmod(short, 0o700)  # nosemgrep: python.lang.security.audit.insecure-file-permissions.insecure-file-permissions
+    except OSError:
+        pass
+    return os.path.join(short, f"{token[:8]}.sock")
 
 
 def _has_unix_socket() -> bool:
@@ -734,7 +769,16 @@ class LiveServer:
                             _write_line_bytes(conn, {"error": "request line too large"})
                             buf = b""
                             break
-                        line = line_bytes.decode("utf-8", errors="replace").strip()
+                        try:
+                            line = line_bytes.decode("utf-8", errors="strict").strip()
+                        except UnicodeDecodeError:
+                            _write_line_bytes(
+                                conn,
+                                self._error_response(
+                                    0, "invalid_utf8", "Request line must be valid UTF-8"
+                                ),
+                            )
+                            continue
                         if not line:
                             continue
                         try:
@@ -905,9 +949,16 @@ class LiveServer:
         use_stream = self._stream_analysis if request.stream is None else request.stream
         try:
             if use_stream:
-                for event in self._differ.diff_stream_progressive(source):
+                # Stream transport shares the SAME Rust-certified complete diff
+                # and typed decline contract as non-streaming. Emit only FINAL
+                # events from that result; never finalize a fallback as success.
+                diff = self._compute_diff(source, request)
+                for change in diff.changes:
                     if self._is_stale(request):
                         return
+                    event = ChangeStreamEvent(
+                        phase=ChangeStreamPhase.FINAL, action="add", change=change
+                    )
                     send_fn({
                         "op": "diff",
                         "seq": request.seq,
@@ -935,6 +986,8 @@ class LiveServer:
                         "guardrail_violation_count": len(diff.guardrail_violations),
                     },
                 })
+        except _RustLiveDecline as exc:
+            send_fn(self._error_response(request.seq, exc.code, str(exc), op="diff"))
         except FileNotFoundError as exc:
             send_fn(
                 self._error_response(
@@ -960,10 +1013,10 @@ class LiveServer:
     ) -> Any:
         """Return the ``SemanticDiff`` for a non-streaming request.
 
-        The native handler in the Rust core serves Python files end-to-end (certified batch,
-        #100 A2.5 Phase A1); it returns the diff JSON, which is rebuilt through the DTO so
-        normalisation matches the Python path exactly. Any other language, or a non-certified
-        outcome, falls back to the Python differ pipeline unchanged.
+        The Rust handler returns a certified diff DTO or a typed/legacy decline.
+        Declines and fallback-marked/incomplete DTOs never become successful live
+        semantic reviews. Explicit diagnostics may use the routed Rust pipeline,
+        but its incomplete results are likewise rejected.
         """
         from intentumdiff import rust_core
         from intentumdiff.core.models import SemanticDiff
@@ -980,9 +1033,47 @@ class LiveServer:
                 self._differ._config.model_dump_json(),
                 _wasm_dir(),
             )
+            if "fallback_code" in native:
+                # Rust owns completeness: a typed decline is an error, never
+                # permission to recover a purportedly successful Python diff.
+                raise _RustLiveDecline(
+                    str(native["fallback_code"]),
+                    str(native.get("fallback") or "Rust Core declined an incomplete diff"),
+                )
             if "diff" in native:
-                return SemanticDiff.model_validate(native["diff"])
-        return self._differ.diff(source)
+                # Validate raw Rust inventories and flags before Pydantic can
+                # default omitted arrays/booleans into manufactured success.
+                # This is the existing batch transport validator, not a
+                # second Python semantic evaluator.
+                try:
+                    rust_core._require_complete_batch_diff_dto(native["diff"])
+                except (TypeError, ValueError) as exc:
+                    raise _RustLiveDecline(
+                        "native_diff_uncertified",
+                        f"{request.path}: malformed Rust Core live diff: {exc}",
+                    ) from exc
+                diff = SemanticDiff.model_validate(native["diff"])
+                if diff.is_fallback or diff.parse_errors:
+                    raise _RustLiveDecline(
+                        "native_parse_incomplete",
+                        f"{request.path}: Rust Core returned an incomplete diff "
+                        f"({'; '.join(diff.parse_errors) or 'source fallback'})",
+                    )
+                return diff
+            # A legacy untyped decline is NOT permission to turn an uncertified
+            # native result into a successful Python-path semantic review.
+            raise _RustLiveDecline(
+                "native_diff_uncertified",
+                f"{request.path}: {native.get('fallback') or 'Rust Core returned no certified diff'}",
+            )
+        diff = self._differ.diff(source)
+        if diff.is_fallback or diff.parse_errors:
+            raise _RustLiveDecline(
+                "native_parse_incomplete",
+                f"{request.path}: diagnostic diff is incomplete "
+                f"({'; '.join(diff.parse_errors) or 'source fallback'})",
+            )
+        return diff
 
     def _compute_review(
         self,
@@ -993,10 +1084,10 @@ class LiveServer:
     ) -> Any:
         """Return the ``CommitDiff`` for a non-streaming review.
 
-        The native handler serves all-Python certified commits from the core (#100 A2.5 Phase A2),
-        returning the CommitDiff JSON (rebuilt through the DTO for parity); any other case (mixed
-        language, working-tree review, diagnostics, or a non-certified batch) falls back to the
-        Python ``CommitDiffer.diff_commit``.
+        The Rust Core certifies the non-streamed commit review and Python only
+        validates/transports its DTO. Native declines must not fall through to
+        another success path. Explicit diagnostics use routed Rust-backed review;
+        the final completeness check also applies to that result.
         """
         from intentumdiff import rust_core
         from intentumdiff.core.models import CommitDiff
@@ -1009,8 +1100,33 @@ class LiveServer:
                 review_config.model_dump_json(),
                 _wasm_dir(),
             )
+            if "fallback_code" in native:
+                raise _RustLiveDecline(
+                    str(native["fallback_code"]),
+                    str(native.get("fallback") or "Rust Core declined an incomplete commit review"),
+                )
             if "commit_diff" in native:
+                # Reuse the certified commit-byte contract. Validation happens
+                # on the raw native object, before Pydantic can supply empty
+                # file inventories or coerce malformed semantic flags.
+                try:
+                    raw_commit = json.dumps(
+                        native["commit_diff"], separators=(",", ":")
+                    ).encode("utf-8")
+                    rust_core._require_native_commit_diff_json(raw_commit, "live review")
+                except (rust_core._InvalidNativeCommitDto, TypeError, ValueError) as exc:
+                    raise _RustLiveDecline(
+                        "native_review_uncertified",
+                        f"{new_ref or 'working tree'}: malformed Rust Core live review: {exc}",
+                    ) from exc
                 return CommitDiff.model_validate(native["commit_diff"])
+            # A native refusal must not become a fabricated successful review
+            # through a second, routed Python orchestration path.
+            raise _RustLiveDecline(
+                "native_review_uncertified",
+                f"{new_ref or 'working tree'}: "
+                f"{native.get('fallback') or 'Rust Core returned no certified commit review'}",
+            )
         return commit_differ.diff_commit(
             repo_path=self._repo_path, old_ref=old_ref, new_ref=new_ref
         )
@@ -1047,8 +1163,39 @@ class LiveServer:
         if op == "cancel":
             send_fn(self._cancel_request(request, seq))
             return True
-        send_fn(self._error_response(seq, "unknown_op", f"unknown op: {op!r}", op=str(op)))
+        if op == "asset_diff":
+            send_fn(self._asset_diff_request(request, seq))
+            return True
+        # `invalid_op`, not `unknown_op`: the native server has always answered an unrouted op
+        # with that code, and it is the spelling the extension lists as non-retryable — so the
+        # python server's own spelling made the extension auto-retry a request that can never
+        # succeed. Two servers on one protocol have to name the same failure the same way.
+        send_fn(self._error_response(seq, "invalid_op", f"unknown op: {op!r}", op=str(op)))
         return True
+
+    def _asset_diff_request(self, request: dict[str, Any], seq: int) -> dict[str, Any]:
+        """Perceptual image diff — the engine does the pixel work, this only marshals the request.
+
+        The extension previously synthesised an asset "review" and never asked for artifacts,
+        so the panel always reported PERCEPTUAL DIFF PENDING while the engine sat there able
+        to answer. This is the missing call.
+
+        Two request shapes, both engine-served:
+
+        * ``path`` (+ optional ``ref``) — one tracked image against a git ref. This is what a
+          reviewing editor has: a repo-relative path and a base. The *before* bytes are in the
+          object store, and materialising them is git work, so the engine does it.
+        * ``before_path`` + ``after_path`` — two files that already exist on disk.
+
+        Request parsing, the path-containment guard and the self-ignoring artifact cache live in
+        the core's ``live_handle_asset_diff``, so this server and the native live-server binary
+        answer from ONE implementation. A second copy here would be a second place for the
+        containment rule to drift — and the rule is what stops a protocol method that accepts
+        file paths from becoming an arbitrary-file reader.
+        """
+        from intentumdiff import rust_core
+
+        return rust_core.live_handle_asset_diff(self._repo_path, self._ref, request, seq)
 
     def _process_review_request(
         self,
@@ -1100,6 +1247,20 @@ class LiveServer:
                 commit_diff = self._compute_review(
                     review_config, commit_differ, old_ref, new_ref
                 )
+            # Streamed file events are provisional. Rust's completeness flags
+            # must be checked before publishing an ok:true whole-commit result.
+            incomplete_files = [
+                f"{item.new_filename or item.old_filename}: "
+                f"{'; '.join(item.parse_errors) or 'source fallback'}"
+                for item in commit_diff.file_diffs
+                if item.is_fallback or item.parse_errors
+            ]
+            if commit_diff.parse_errors or incomplete_files:
+                raise _RustLiveDecline(
+                    "native_parse_incomplete",
+                    "Incomplete commit review: "
+                    + "; ".join([*commit_diff.parse_errors, *incomplete_files]),
+                )
             with self._lock:
                 if seq < self._latest_review_seq:
                     return
@@ -1123,6 +1284,8 @@ class LiveServer:
             })
         except _ReviewCancelled:
             return
+        except _RustLiveDecline as exc:
+            send_fn(self._error_response(seq, exc.code, str(exc), op="review"))
         except Exception as exc:
             logger.warning(
                 "LiveServer review error for seq=%d: %s",

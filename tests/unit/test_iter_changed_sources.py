@@ -21,6 +21,7 @@ from intentumdiff.sources.git_source import (
     collect_working_tree_python_sources_fast,
     iter_changed_sources,
 )
+from tests.unit.platform_gates import powershell_unavailable
 
 
 # ---------------------------------------------------------------------------
@@ -377,10 +378,18 @@ class TestDiffCommit:
         differ = SemanticDiffer()
         diffs = differ.diff_commit(repo_path=tmp_path, old_ref="HEAD~1", new_ref="HEAD")
 
+        # Source oracle (#229/#282): + -> - changes behaviour. Merely
+        # comparing public Python with native Rust would miss a shared defect.
         assert isinstance(diffs, list)
-        # calc.py should be parsed — python parser is available
-        assert len(diffs) >= 1
-        assert all(hasattr(d, "has_semantic_changes") for d in diffs)
+        assert len(diffs) == 1
+        diff = diffs[0]
+        assert diff.has_semantic_changes is True, diff.model_dump_json()
+        assert diff.is_style_only is False, diff.model_dump_json()
+        assert any(
+            change.change_type == "MODIFICATION"
+            or getattr(change.change_type, "value", None) == "MODIFICATION"
+            for change in diff.changes
+        ), diff.model_dump_json()
 
     def test_diff_commit_style_only_change(self, tmp_path):
         """Adding a comment only → style-only diff."""
@@ -396,18 +405,42 @@ class TestDiffCommit:
         assert len(diffs) == 1
         assert diffs[0].is_style_only
 
-    def test_diff_commit_skips_unparseable_files(self, tmp_path):
-        """Binary or unknown-language files must be silently skipped."""
-        from intentumdiff.differ import SemanticDiffer
+    def test_diff_commit_missing_parser_for_changed_text_fails_closed(self, tmp_path):
+        """A real changed CSV path must not vanish if its parser is unavailable."""
+        from unittest.mock import patch
+        from intentumdiff.plugins.exceptions import PluginNotFoundError
 
         repo = _make_repo(tmp_path)
         _commit_file(repo, "data.csv", "a,b\n1,2\n", "v1")
         _commit_file(repo, "data.csv", "a,b\n1,3\n", "v2")
 
         differ = SemanticDiffer()
-        # Should not raise even though .csv has no parser
-        diffs = differ.diff_commit(repo_path=tmp_path, old_ref="HEAD~1", new_ref="HEAD")
-        assert isinstance(diffs, list)
+        with patch.object(
+            SemanticDiffer,
+            "_run_pipeline",
+            side_effect=PluginNotFoundError("CSV parser unavailable"),
+        ):
+            with pytest.raises(RuntimeError, match=r"data\.csv") as caught:
+                differ.diff_commit(repo_path=tmp_path, old_ref="HEAD~1", new_ref="HEAD")
+
+        assert isinstance(caught.value.__cause__, PluginNotFoundError)
+
+    def test_diff_commit_explicit_binary_is_excluded_by_source_collector(self, tmp_path):
+        """Binary is a deliberate exclusion, unlike missing parsers for text."""
+        repo = _make_repo(tmp_path)
+        binary = Path(tmp_path) / "image.png"
+        header = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
+        binary.write_bytes(header)
+        repo.index.add(["image.png"])
+        repo.index.commit("binary v1")
+        binary.write_bytes(header + b"\x01")
+        repo.index.add(["image.png"])
+        repo.index.commit("binary v2")
+
+        assert list(iter_changed_sources(tmp_path, "HEAD~1", "HEAD")) == []
+        assert SemanticDiffer().diff_commit(
+            repo_path=tmp_path, old_ref="HEAD~1", new_ref="HEAD"
+        ) == []
 
     def test_diff_commit_uses_default_refs(self, tmp_path):
         """diff_commit defaults old_ref to HEAD, new_ref to working tree.
@@ -598,6 +631,8 @@ class TestDiffCommit:
         assert diff.staging_status == "staged"
         assert "summarizeOrder" in _semantic_labels(diff, ChangeType.ADDITION)
         assert "summarizeOrder" not in _semantic_labels(diff, ChangeType.MOVE)
+
+    @powershell_unavailable
 
     def test_multi_file_commit_preserves_insert_and_move_intent(self, tmp_path):
         repo = _make_repo_with_bare_origin(tmp_path)

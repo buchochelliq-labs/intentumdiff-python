@@ -37,6 +37,7 @@ class _ServerState:
     ref: str
     debounce: float
     diff_cache: dict[str, SemanticDiff] = field(default_factory=dict)
+    source_cache: dict[str, tuple[str, str]] = field(default_factory=dict)
     pending_tasks: dict[str, asyncio.Task] = field(default_factory=dict)
     supports_codelens_refresh: bool = False
 
@@ -44,6 +45,17 @@ class _ServerState:
 # ---------------------------------------------------------------------------
 # URI helpers
 # ---------------------------------------------------------------------------
+
+class WorkspaceContainmentError(ValueError):
+    """A URI resolved outside the workspace root, or used explicit traversal.
+
+    A distinct type because this is a REFUSAL, not a fault: the server did its job. Logged and
+    reported separately from internal errors so an operator can tell "someone asked for a path
+    outside the workspace and we blocked it" from "the diff engine threw".
+
+    Subclasses ValueError deliberately - callers that already catch ValueError keep working.
+    """
+
 
 def uri_to_path(uri: str, workspace_root: Path | None = None) -> Path:
     """Convert a ``file://`` URI to a :class:`~pathlib.Path`.
@@ -57,7 +69,7 @@ def uri_to_path(uri: str, workspace_root: Path | None = None) -> Path:
     path = Path(unquote(parsed.path))
     # Reject explicit traversal components
     if ".." in path.parts:
-        raise ValueError(f"Path traversal rejected in URI: {uri!r}")
+        raise WorkspaceContainmentError(f"Path traversal rejected in URI: {uri!r}")
     # On Windows, urlparse puts a leading '/' before the drive letter —
     # strip it so Path('C:/foo') is constructed correctly.
     if path.parts and path.parts[0] in ("/", "\\") and len(path.parts) > 1:
@@ -72,11 +84,39 @@ def uri_to_path(uri: str, workspace_root: Path | None = None) -> Path:
         try:
             resolved.relative_to(root_resolved)
         except ValueError:
-            raise ValueError(
+            raise WorkspaceContainmentError(
                 f"URI {uri!r} resolves to {resolved!r} which is outside the "
                 f"workspace root {root_resolved!r}."
             )
     return resolved
+
+
+
+def _invalidate_failed_review(server, state: _ServerState, uri: str) -> None:
+    """Fail closed at the LSP transport: old Rust results are no longer current."""
+    from lsprotocol import types as lsp_types
+
+    # Remove old CodeLens source before attempting I/O (publishing can itself fail).
+    state.diff_cache.pop(uri, None)
+    state.source_cache.pop(uri, None)
+    server.publish_diagnostics(uri, [
+        lsp_types.Diagnostic(
+            range=lsp_types.Range(
+                start=lsp_types.Position(line=0, character=0),
+                end=lsp_types.Position(line=0, character=0),
+            ),
+            severity=lsp_types.DiagnosticSeverity.Error,
+            message="IntentumDiff semantic review failed; previous results are invalid.",
+            source="intentumdiff",
+        )
+    ])
+    if state.supports_codelens_refresh:
+        try:
+            server.lsp.send_request("workspace/codeLens/refresh", None)
+        except Exception:  # noqa: BLE001 - result stays invalidated.
+            log.debug("intentumdiff: failed CodeLens invalidation refresh", exc_info=True)
+
+
 
 
 # ---------------------------------------------------------------------------
@@ -109,18 +149,23 @@ async def _compute_and_push(
         await asyncio.sleep(state.debounce)
 
         loop = asyncio.get_running_loop()
-        diff = await loop.run_in_executor(
-            None, _do_diff, state, server, uri, content
+        result = await loop.run_in_executor(
+            None, _do_diff, state, server, uri, content, True
         )
-        if diff is None:
+        if result is None:
+            # A failed Rust/Wasm review must not leave previously cached semantic
+            # CodeLens or diagnostics visible as though the current edit passed.
+            _invalidate_failed_review(server, state, uri)
             return
 
+        diff, old_source, new_source = result
         state.diff_cache[uri] = diff
+        state.source_cache[uri] = (old_source, new_source)
 
         # Publish diagnostics (push model — no client request needed).
         from intentumdiff.lsp_server._diagnostics import semantic_diff_to_diagnostics
 
-        diags = semantic_diff_to_diagnostics(diff)
+        diags = semantic_diff_to_diagnostics(diff, new_source=new_source)
         server.publish_diagnostics(uri, diags)
 
         # Ask the client to refresh code-lens decorations when supported.
@@ -137,6 +182,12 @@ async def _compute_and_push(
         raise  # propagate cancellation — do not swallow
     except Exception as exc:  # noqa: BLE001
         log.warning("intentumdiff: unhandled error during diff for %s: %s", uri, exc)
+        # Even transport/publishing faults invalidate old semantic data. Never
+        # expose a stale successful review after the current review failed.
+        try:
+            _invalidate_failed_review(server, state, uri)
+        except Exception:  # noqa: BLE001 - preserve the original failure log.
+            log.warning("intentumdiff: failed to publish review error for %s", uri, exc_info=True)
 
 
 # ---------------------------------------------------------------------------
@@ -148,7 +199,8 @@ def _do_diff(
     server,
     uri: str,
     content: str,
-) -> SemanticDiff | None:
+    include_sources: bool = False,
+) -> SemanticDiff | tuple[SemanticDiff, str, str] | None:
     """Compute a ``SemanticDiff`` synchronously.
 
     Intended to be called via ``loop.run_in_executor`` so the event loop is
@@ -167,8 +219,14 @@ def _do_diff(
             file_path=str(rel_path),
             live_content=content,
             ref=state.ref,
+            cache_snapshot=include_sources,
         )
-        return state.differ.diff(source)
+        diff = state.differ.diff(source)
+        if include_sources:
+            # The differ and LSP mapping must see the same old Git snapshot.
+            old_source, new_source, _, _ = source.get_content()
+            return diff, old_source, new_source
+        return diff
 
     except Exception as exc:  # noqa: BLE001
         log.warning("intentumdiff: diff failed for %s: %s", uri, exc)

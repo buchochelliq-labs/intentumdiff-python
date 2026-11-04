@@ -1,0 +1,46 @@
+"""An exact engine SHA, not a moving branch, must be provisionable for CI."""
+import runpy
+import subprocess
+from pathlib import Path
+
+
+def test_stage_core_accepts_immutable_commit(tmp_path, monkeypatch):
+    script = Path(__file__).resolve().parents[2] / "scripts" / "provision_build_inputs.py"
+    stage = runpy.run_path(str(script))["stage_core"]
+    source = tmp_path / "source"
+    source.mkdir()
+    def git(*args):
+        return subprocess.check_output(["git", "-C", str(source), *args], text=True).strip()
+    git("init")
+    git("config", "user.name", "Test")
+    git("config", "user.email", "test@example.invalid")
+    manifest = source / "crates/rust-core-host/Cargo.toml"
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text("candidate one")
+    git("add", ".")
+    git("commit", "-m", "first candidate")
+    sha = git("rev-parse", "HEAD")
+    manifest.write_text("candidate two")
+    git("commit", "-am", "later candidate")
+    destination = tmp_path / "staged"
+    monkeypatch.delenv("INTENTUMDIFF_CORE_DIR", raising=False)
+    monkeypatch.setitem(stage.__globals__, "CORE_REPO", str(source))
+    monkeypatch.setitem(stage.__globals__, "CORE_REF", sha)
+    monkeypatch.setitem(stage.__globals__, "CORE_DEST", destination)
+    stage(None)
+    assert (destination / "crates/rust-core-host/Cargo.toml").read_text() == "candidate one"
+    assert subprocess.check_output(["git", "-C", str(destination), "rev-parse", "HEAD"], text=True).strip() == sha
+
+
+def test_registry_uses_reviewed_immutable_commit():
+    script = Path(__file__).resolve().parents[2] / "scripts" / "provision_build_inputs.py"
+    namespace = runpy.run_path(str(script))
+    expected = "277a297a1088dbefd261dedb264b41b029a5d1a5"  # Registry #13 verified source-span candidate
+    seen = []
+    def get(url, **kwargs):
+        seen.append(url)
+        assert url.endswith("/registry.yaml?ref=" + expected)
+        assert kwargs["accept"] == "application/vnd.github.raw"
+        return b"plugins: {}"
+    assert namespace["load_reviewed_registry"](get, "https://api.github.com", "buchochelliq-labs") == {"plugins": {}}
+    assert len(seen) == 1

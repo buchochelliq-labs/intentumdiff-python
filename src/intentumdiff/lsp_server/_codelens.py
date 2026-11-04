@@ -1,67 +1,34 @@
-"""
-intentumdiff.lsp_server._codelens
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+"""Rust-owned LSP CodeLens presentation, with correct source-side UTF-16 spans.
 
-Translate a ``SemanticDiff`` into a list of LSP ``CodeLens`` objects.
+Rust owns which changes become lenses, their titles, and byte→UTF-16
+coordinates. This thin Python module only converts Rust JSON to lsprotocol DTOs.
 """
-
 from __future__ import annotations
 
 from lsprotocol import types as lsp_types
+from lsprotocol.converters import get_converter
 
-from intentumdiff.core.models import Change, ChangeType, SemanticDiff, SemanticNode
-
-# Change types that are surfaced as code lenses.
-_CODELENS_CHANGE_TYPES: frozenset[str] = frozenset({
-    ChangeType.REFACTORING,
-    ChangeType.MOVE,
-    ChangeType.MOVE_TO_MODULE,
-    ChangeType.CROSS_FILE_RENAME,
-    ChangeType.REORDER,
-})
+from intentumdiff.core.models import SemanticDiff, SemanticNode
+from intentumdiff.rust_core import _c_abi_call
 
 
-def node_to_lsp_range(node: SemanticNode) -> lsp_types.Range:
-    """Convert a ``SemanticNode``'s position to an LSP ``Range`` (0-indexed)."""
-    pos = node.position
-    return lsp_types.Range(
-        start=lsp_types.Position(line=pos.start_line, character=pos.start_col),
-        end=lsp_types.Position(line=pos.end_line, character=pos.end_col),
+def node_to_lsp_range(node: SemanticNode, source: str) -> lsp_types.Range:
+    """Convert only through the source-aware Rust C ABI, never guess columns."""
+    value = _c_abi_call("lsp_utf16_range", node.model_dump_json(), source)
+    if not isinstance(value, dict):
+        raise ValueError("Rust LSP range must be an object")
+    return get_converter().structure(value, lsp_types.Range)
+
+
+def semantic_diff_to_codelens(
+    diff: SemanticDiff, *, old_source: str, new_source: str,
+) -> list[lsp_types.CodeLens]:
+    """Decode Rust's source-anchored CodeLens inventory without Python policy."""
+    value = _c_abi_call(
+        "lsp_server_codelens_utf16", diff.model_dump_json(),
+        old_source, new_source,
     )
-
-
-def _codelens_title(change: Change) -> str:
-    """Build the display title for a code-lens entry."""
-    if change.refactoring_kind is not None:
-        return f"\u21bb {change.refactoring_kind.name}: {change.description}"
-    ct = change.change_type
-    name = ct.name if isinstance(ct, ChangeType) else str(ct)
-    return f"\u27f3 {name}: {change.description}"
-
-
-def semantic_diff_to_codelens(diff: SemanticDiff) -> list[lsp_types.CodeLens]:
-    """Translate *diff* into a list of display-only LSP code lenses.
-
-    Emitted for changes whose ``change_type`` is in
-    ``{REFACTORING, MOVE, MOVE_TO_MODULE, CROSS_FILE_RENAME, REORDER}``.
-    The ``command`` field is left empty (display-only; no action on click).
-    """
-    lenses: list[lsp_types.CodeLens] = []
-
-    for change in diff.changes:
-        if change.change_type not in _CODELENS_CHANGE_TYPES:
-            continue
-        node = change.new_node or change.old_node
-        if node is None:
-            continue
-        lenses.append(
-            lsp_types.CodeLens(
-                range=node_to_lsp_range(node),
-                command=lsp_types.Command(
-                    title=_codelens_title(change),
-                    command="",
-                ),
-            )
-        )
-
-    return lenses
+    if not isinstance(value, list):
+        raise ValueError("Rust LSP CodeLens must be an array")
+    converter = get_converter()
+    return [converter.structure(row, lsp_types.CodeLens) for row in value]

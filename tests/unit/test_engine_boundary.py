@@ -24,14 +24,8 @@ _PYTHON_ENGINE_IMPORT_RE = re.compile(
     re.MULTILINE,
 )
 
-# The #92 shell-vs-engine classification, encoded as the ratchet ceiling. Every path below
-# is flagged ONLY because it imports an `intentumdiff.analysis.*` submodule (or, for
-# cst_serializer, `tree_sitter`) — and each such import is provably SHELL, not engine: the
-# transitional refinement/presentation layer and core/engine.py (the Python GumTree) were
-# deleted at the #57 payoff, so nothing here runs matching/diff/refine/finalize in Python.
-# The full classification table lives in docs/ENGINE_BOUNDARY_AUDIT.md (#92 DoD). When a path
-# below stops importing analysis (the module deletes, or the import moves to rust_core), drop
-# it here — the scanner self-verifies the ceiling can only tighten.
+# Split-repo boundary ratchet: only imports of Python analysis modules / the retired
+# Python engine count here. Parser-source and tree-sitter ownership live outside this binding repo.
 _KNOWN_PYTHON_ENGINE_DEBT_PATHS = {
     # Schema detection/registration/descriptor-validation shell (issue #63): the resolver and
     # the user-schema registry cross-import within intentumdiff.analysis. No matching-engine
@@ -54,11 +48,6 @@ _KNOWN_PYTHON_ENGINE_DEBT_PATHS = {
     # Commit orchestration: imports analysis.cross_file, whose detect_cross_file_changes is a
     # thin marshal into the Rust core (try_rust_diff_symbol_tables) — no Python engine.
     "src/intentumdiff/core/commit_differ.py",
-    # CST serialization: imports `tree_sitter.Node` as a TYPE to shape the filtered-CST JSON
-    # the Rust core ingests. Parse-adjacency IO, not diff/match logic. The remaining genuine
-    # engine-adjacency here (the tree_sitter dependency) is tracked for the Phase-B parse-side
-    # consolidation, not a Python-engine violation.
-    "src/intentumdiff/core/cst_serializer.py",
     # The public API / VCS / config / orchestration facade — imports the analysis SHELL
     # submodules above (compile_commands metadata, diagnostics, guardrails, schema_resolver,
     # text_review, user_schemas). Every processing call inside routes to the Rust core.
@@ -66,8 +55,6 @@ _KNOWN_PYTHON_ENGINE_DEBT_PATHS = {
 }
 
 _KNOWN_PYTHON_TREE_SITTER_DEPS: set[str] = set()
-
-_KNOWN_INTERPRET_CST_CRATES: set[str] = set()
 
 
 def test_issue_specific_engine_helpers_stay_out_of_python_layer() -> None:
@@ -100,28 +87,27 @@ def test_certified_python_public_path_uses_rust_finalizer_not_python_engine(
     # (refine_changes / detect_refactorings / normalize_for_review / classify) were
     # DELETED with the transitional layer (issue #57 payoff, stage 4b) — the guarantee
     # is structural now; the assertions pin which Rust contract serves the path.
-    del monkeypatch
-    diff = SemanticDiffer(
-        DiffConfig(
-            experimental_rust_core=True,
-            extra_trivia_types=["__intentumdiff_test_noop__"],
-        )
-    ).diff_strings(
-        "def answer():\n    return 1\n",
-        "def answer():\n    return 1\n",
-        "example.py",
-        language_hint="python",
-    )
+    # An unsupported config override must now fail closed in Rust (Core #225).
+    # Drive the certified batch-decline path explicitly, without inventing a
+    # Python semantic fallback or weakening the public Rust-finalizer assertion.
+    from intentumdiff.rust_core import RustCoreBatchAttempt
 
-    # Issue #57 python flip: a non-default config makes the certified BATCH path
-    # decline, and the tier behind it is now the full-Rust 9-fin finalize routing
-    # (semantic_contract rust_finalize_review_v1), not the stage-11 hybrid that still
-    # ran python promote_moves. Either Rust contract satisfies the boundary; the
-    # monkeypatched failers above remain the real teeth (no python engine, ever).
-    assert diff.metadata["semantic_contract"] in {
-        "rust_finalized_v1",
-        "rust_finalize_review_v1",
-    }
+    del monkeypatch
+    with patch(
+        "intentumdiff.differ.try_rust_core_batch_diff",
+        return_value=RustCoreBatchAttempt(fallback_reason="test native finalizer route"),
+    ):
+        diff = SemanticDiffer(DiffConfig(experimental_rust_core=True)).diff_strings(
+            "def answer():\n    return 1\n",
+            "def answer():\n    return 1\n",
+            "example.py",
+            language_hint="python",
+        )
+
+    # The certified batch decline must route into the native Rust finalizer.
+    # A no-change result must still be certified by Rust, never manufactured
+    # by Python as a fallback or through a permissive config override.
+    assert diff.metadata["semantic_contract"] == "rust_finalize_review_v1"
     assert diff.metadata["engine_owner"] == "rust"
     assert diff.has_semantic_changes is False
 
@@ -229,22 +215,14 @@ def test_strict_rust_gate_allows_commit_batch_decline_to_native(monkeypatch) -> 
     assert all(not d.is_fallback for d in diffs)
 
 
-def test_strict_rust_gate_blocks_token_fallback(monkeypatch) -> None:
+def test_strict_rust_gate_accepts_rust_source_fallback(monkeypatch) -> None:
+    from contextlib import closing
     monkeypatch.setenv(STRICT_GATE_ENV, "1")
-
-    with pytest.raises(
-        RuntimeError,
-        match=(
-            r"Rust-only engine gate prevented fallback: "
-            "parse errors require Rust token-level fallback"
-        ),
-    ):
-        SemanticDiffer(DiffConfig(experimental_rust_core=False)).diff_strings(
-            "def broken(",
-            "def broken(",
-            "broken.py",
-            language_hint="python",
-        )
+    with closing(SemanticDiffer(DiffConfig())) as differ:
+        diff = differ.diff_strings("def broken(", "def broken(x", "broken.py", language_hint="python")
+    assert diff.is_fallback
+    assert diff.metadata["engine_owner"] == "rust"
+    assert diff.has_semantic_changes
 
 
 def _strict_gate_enabled() -> bool:
@@ -255,27 +233,6 @@ def _relative(path: Path) -> str:
     return path.relative_to(REPO_ROOT).as_posix()
 
 
-@pytest.mark.skipif(
-    not (REPO_ROOT / "docs" / "ENGINE_BOUNDARY_AUDIT.md").exists(),
-    reason="monorepo release docs not present (the #82 split python repo authors its docs fresh)",
-)
-def test_engine_boundary_docs_are_the_release_source_of_truth() -> None:
-    audit = (REPO_ROOT / "docs" / "ENGINE_BOUNDARY_AUDIT.md").read_text(encoding="utf8")
-    architecture = (REPO_ROOT / "docs" / "RUST_PYTHON_ENGINE_ARCHITECTURE.md").read_text(
-        encoding="utf8"
-    )
-    main_architecture = (REPO_ROOT / "docs" / "ARCHITECTURE.md").read_text(encoding="utf8")
-    backlog = (REPO_ROOT / "docs" / "BACKLOG.md").read_text(encoding="utf8")
-
-    assert "source of truth" in architecture
-    assert "ENGINE_BOUNDARY_AUDIT.md" in architecture
-    assert "Engine boundary note" in main_architecture
-    assert "ENGINE_BOUNDARY_AUDIT.md" in main_architecture
-    assert "INTENTUMDIFF_ENFORCE_RUST_ONLY_ENGINE=1" in audit
-    assert "INTENTUMDIFF_ENFORCE_RUST_ONLY_ENGINE=1" in backlog
-    assert "Python remains the correctness oracle" not in architecture
-    assert "Rust must remain opt-in" not in architecture
-
 
 def test_python_engine_dependency_debt_is_ratcheted() -> None:
     current_debt = {
@@ -284,15 +241,6 @@ def test_python_engine_dependency_debt_is_ratcheted() -> None:
         if _PYTHON_ENGINE_IMPORT_RE.search(path.read_text(encoding="utf8"))
     }
 
-    # The strict gate does NOT tighten this ratchet to the empty set. Every remaining path
-    # imports an `intentumdiff.analysis` submodule (or, for cst_serializer, `tree_sitter`) for
-    # SHELL reasons only — guardrail reporting, diagnostics, text-review presentation, schema
-    # resolution, CST marshalling — while the Python GumTree ENGINE itself was deleted at the
-    # #57 payoff (see the classification table above and docs/ENGINE_BOUNDARY_AUDIT.md).
-    # Emptying the ceiling means physically removing/relocating `intentumdiff.analysis`, which
-    # is Phase-C (repo-split) work tracked in docs/BACKLOG.md, not part of retiring the engine
-    # fallback (#90/#91). Both modes therefore assert the same monotonic, can-only-tighten
-    # ceiling; the ratchet still fails loudly if a NEW engine-adjacent import creeps in.
     assert current_debt <= _KNOWN_PYTHON_ENGINE_DEBT_PATHS
 
 
@@ -309,15 +257,3 @@ def test_python_tree_sitter_runtime_dependencies_are_ratcheted() -> None:
     else:
         assert current_deps <= _KNOWN_PYTHON_TREE_SITTER_DEPS
 
-
-def test_first_party_interpret_cst_parser_debt_is_ratcheted() -> None:
-    current_crates = {
-        path.parent.parent.name
-        for path in (REPO_ROOT / "crates").glob("*-parser/src/lib.rs")
-        if "ParserMode::InterpretCst" in path.read_text(encoding="utf8")
-    }
-
-    if _strict_gate_enabled():
-        assert current_crates == set()
-    else:
-        assert current_crates <= _KNOWN_INTERPRET_CST_CRATES

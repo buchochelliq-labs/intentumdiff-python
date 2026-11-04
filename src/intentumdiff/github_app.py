@@ -35,6 +35,14 @@ class GitHubAppReviewResult:
     summary_markdown: str
     html_report: str
 
+    def __post_init__(self) -> None:
+        for name in ("checked_files", "semantic_changes", "guardrail_violations"):
+            value = getattr(self, name)
+            if type(value) is not int or value < 0:
+                raise GitHubAppError(f"Review {name} must be a non-negative integer")
+        if type(self.passed) is not bool:
+            raise GitHubAppError("Review passed must be a boolean")
+
 
 def verify_webhook_signature(secret: str, body: bytes, signature_header: str | None) -> bool:
     """Return True when *signature_header* matches GitHub's sha256 HMAC."""
@@ -107,6 +115,8 @@ def build_check_run_payload(
     passed: bool,
     details_url: str | None = None,
 ) -> dict[str, Any]:
+    if type(passed) is not bool:
+        raise GitHubAppError("Review passed must be a boolean")
     conclusion = "success" if passed else "failure"
     payload: dict[str, Any] = {
         "name": name,
@@ -124,15 +134,23 @@ def build_check_run_payload(
 
 
 def build_review_result_from_payload(payload: Mapping[str, Any]) -> GitHubAppReviewResult:
-    """Build deterministic local review artifacts from injectable webhook payload data."""
+    """Render explicit review evidence; never infer a successful engine result."""
 
     review = payload.get("intentumdiff_review")
     if not isinstance(review, Mapping):
-        review = {}
-    checked_files = _non_negative_int(review.get("checked_files"), default=0)
-    semantic_changes = _non_negative_int(review.get("semantic_changes"), default=0)
-    guardrail_violations = _non_negative_int(review.get("guardrail_violations"), default=0)
-    passed = bool(review.get("passed", semantic_changes == 0 and guardrail_violations == 0))
+        raise GitHubAppError("Explicit intentumdiff_review evidence is required")
+    evidence = GitHubAppReviewResult(
+        checked_files=review.get("checked_files"),
+        semantic_changes=review.get("semantic_changes"),
+        guardrail_violations=review.get("guardrail_violations"),
+        passed=review.get("passed"),
+        summary_markdown="",
+        html_report="",
+    )
+    checked_files = evidence.checked_files
+    semantic_changes = evidence.semantic_changes
+    guardrail_violations = evidence.guardrail_violations
+    passed = evidence.passed
     summary_markdown = render_github_app_summary(
         checked_files=checked_files,
         semantic_changes=semantic_changes,
@@ -251,14 +269,6 @@ def decode_webhook_body(body: bytes) -> dict[str, Any]:
     return payload
 
 
-def _non_negative_int(value: Any, *, default: int) -> int:
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        return default
-    return max(parsed, 0)
-
-
 def create_app() -> Any:
     """Create the optional FastAPI app without making FastAPI a core dependency."""
 
@@ -276,12 +286,18 @@ def create_app() -> Any:
         x_hub_signature_256: str | None = Header(default=None),
     ) -> dict[str, Any]:
         body = await request.body()
-        secret = request.app.state.webhook_secret if hasattr(request.app.state, "webhook_secret") else ""
-        if secret and not verify_webhook_signature(secret, body, x_hub_signature_256):
+        # A missing signing key must never disable authentication by accident.
+        secret = getattr(request.app.state, "webhook_secret", None)
+        if not isinstance(secret, str) or not secret:
+            raise HTTPException(status_code=503, detail="webhook signing secret not configured")
+        if not verify_webhook_signature(secret, body, x_hub_signature_256):
             raise HTTPException(status_code=401, detail="invalid signature")
-        payload = decode_webhook_body(body)
-        if x_github_event == "pull_request":
-            return build_pull_request_check_response(payload)
+        try:
+            payload = decode_webhook_body(body)
+            if x_github_event == "pull_request":
+                return build_pull_request_check_response(payload)
+        except (GitHubAppError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         return {"ok": True, "event": x_github_event}
 
     return app

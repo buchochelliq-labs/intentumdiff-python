@@ -36,7 +36,7 @@ import json
 import logging
 import os
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Iterator
+from typing import TYPE_CHECKING, Callable, Iterator
 
 from intentumdiff.core.models import CommitDiff, CrossFileChange, DiffConfig, SemanticDiff
 from intentumdiff.differ import SemanticDiffer
@@ -45,6 +45,8 @@ from intentumdiff.core.index import SemanticIndex
 from intentumdiff.plugins.exceptions import PluginError, PluginNotFoundError
 from intentumdiff.sources.git_source import iter_changed_sources
 from intentumdiff.vcs.base import VcsBackend
+from intentumdiff.vcs.git_cli import resolve_repo_root
+from intentumdiff.vcs._safe_path import safe_policy_path
 
 if TYPE_CHECKING:
     from intentumdiff.core.models import SemanticNode
@@ -135,15 +137,9 @@ class CommitDiffer:
         if backend is not None:
             return self._diff_with_backend(backend, old_ref, new_ref)
 
-        # Pre-pass: collect git-deletion paths and any new .gitignore content so
-        # we can tag SemanticDiff objects whose deletion was triggered by a .gitignore
-        # rule change rather than actual code removal.
-        deleted_paths, gitignore_spec = self._collect_gitignore_state(
-            repo_path, old_ref, new_ref
-        )
-
         results, errors, changed_file_count = self._collect_file_diffs(
-            iter_changed_sources(repo_path, old_ref, new_ref)
+            iter_changed_sources(repo_path, old_ref, new_ref),
+            policy_root=resolve_repo_root(repo_path),
         )
 
         return self._finalize_commit_diff(
@@ -152,8 +148,6 @@ class CommitDiffer:
             changed_file_count=changed_file_count,
             old_ref=old_ref,
             new_ref=new_ref,
-            deleted_paths=deleted_paths,
-            gitignore_spec=gitignore_spec,
         )
 
     def iter_file_diffs(
@@ -165,8 +159,7 @@ class CommitDiffer:
         """
         Yield per-file diffs one at a time for progressive/streaming review.
 
-        Performs the gitignore pre-pass (so deletions are classifiable) and
-        then yields each changed source's :class:`FileDiffResult` (on success)
+        Yields each changed source's :class:`FileDiffResult` (on success)
         or :class:`FileDiffError` (when no parser is available or the pipeline
         failed). Cross-file analysis is NOT performed here — callers that need
         a complete :class:`CommitDiff` should collect the results and pass them
@@ -175,31 +168,23 @@ class CommitDiffer:
         Always uses the git backend (the ``backend`` parameter of
         :meth:`diff_commit` is not supported by this streaming entry point).
         """
-        def _looks_binary(text: str) -> bool:
-            # Content is decoded with errors="replace"; a NUL byte (valid UTF-8
-            # U+0000) survives and reliably marks binary/image assets, as does a
-            # high ratio of U+FFFD replacement characters. Feeding such content to
-            # a text parser (the generic catch-all) explodes the CST — e.g. a PNG
-            # producing >100 MB of output that the plugin host then rejects.
-            head = text[:8192]
-            if not head:
-                return False
-            if "\x00" in head:
-                return True
-            return head.count("�") / len(head) > 0.1
+        from intentumdiff.content_type import is_text_bytes
 
-        for source in iter_changed_sources(repo_path, old_ref, new_ref):
+        policy_root = resolve_repo_root(repo_path)
+        for source in iter_changed_sources(policy_root, old_ref, new_ref):
             old_content, new_content, old_path, new_path, staging_status = source
             # Backstop: primary content-based routing happens at the git read
-            # boundary (magic-byte detection); this NUL-byte check catches any
+            # boundary (magic-byte detection); the same Rust detector catches any
             # binary that reaches the streaming path through another route,
             # before it explodes the text parser.
-            if _looks_binary(new_content) or _looks_binary(old_content):
+            if not is_text_bytes(new_content.encode("utf-8")) or not is_text_bytes(old_content.encode("utf-8")):
                 logger.debug("Skipping %r — binary/non-text asset", old_path)
                 continue
             try:
                 file_diff = self._differ._run_pipeline(
-                    old_content, new_content, old_path, None, new_filename=new_path
+                    old_content, new_content, old_path, None, new_filename=new_path,
+                    _policy_old_filename=safe_policy_path(policy_root, old_path),
+                    _policy_source_filename=safe_policy_path(policy_root, new_path or old_path),
                 )
                 if staging_status is not None:
                     file_diff = file_diff.model_copy(
@@ -241,17 +226,10 @@ class CommitDiffer:
         """
         Build a complete :class:`CommitDiff` from streamed per-file results.
 
-        Applies the gitignore-deletion tagging (when *repo_path* is supplied so
-        the pre-pass can run), runs cross-file analysis, and assembles the
+        Preserves engine-produced file evidence, runs cross-file analysis, and assembles the
         terminal ``CommitDiff``. This is the counterpart to
         :meth:`iter_file_diffs`.
         """
-        deleted_paths: set[str] = set()
-        gitignore_spec = None
-        if repo_path is not None:
-            deleted_paths, gitignore_spec = self._collect_gitignore_state(
-                repo_path, old_ref, new_ref
-            )
         changed_file_count = len(results) + len(errors)
         return self._finalize_commit_diff(
             results=results,
@@ -259,23 +237,27 @@ class CommitDiffer:
             changed_file_count=changed_file_count,
             old_ref=old_ref,
             new_ref=new_ref,
-            deleted_paths=deleted_paths,
-            gitignore_spec=gitignore_spec,
         )
 
     def _collect_file_diffs(
         self,
         sources: Iterator[tuple[str, str, str, str, object]],
+        *,
+        policy_root: str | os.PathLike[str],
+        policy_path_resolver: Callable[[str], str] | None = None,
     ) -> tuple[list[FileDiffResult], list[FileDiffError], int]:
         """Run the per-file pipeline over an iterator of changed sources."""
         results: list[FileDiffResult] = []
         errors: list[FileDiffError] = []
         changed_file_count = 0
+        policy_path = policy_path_resolver or (lambda path: safe_policy_path(policy_root, path))
         for old_content, new_content, old_path, new_path, staging_status in sources:
             changed_file_count += 1
             try:
                 file_diff = self._differ._run_pipeline(
-                    old_content, new_content, old_path, None, new_filename=new_path
+                    old_content, new_content, old_path, None, new_filename=new_path,
+                    _policy_old_filename=policy_path(old_path),
+                    _policy_source_filename=policy_path(new_path or old_path),
                 )
                 if staging_status is not None:
                     file_diff = file_diff.model_copy(
@@ -320,8 +302,6 @@ class CommitDiffer:
         changed_file_count: int,
         old_ref: str,
         new_ref: str,
-        deleted_paths: set[str] | None = None,
-        gitignore_spec=None,
     ) -> CommitDiff:
         """Assemble the terminal CommitDiff from per-file results + errors."""
         file_diffs = [result.file_diff for result in results]
@@ -331,17 +311,17 @@ class CommitDiffer:
             if error.kind == "pipeline_error"
         ]
 
-        self._raise_if_all_parsers_failed(changed_file_count, file_diffs, parse_errors)
-
-        # Tag diffs whose file deletion was caused by a .gitignore rule addition.
-        if gitignore_spec is not None and deleted_paths:
-            file_diffs = [
-                fd.model_copy(update={"gitignore_excluded": True})
-                if fd.old_filename in deleted_paths
-                and gitignore_spec.match_file(fd.old_filename)
-                else fd
-                for fd in file_diffs
-            ]
+        self._raise_if_all_parsers_failed(
+            changed_file_count, file_diffs, parse_errors, file_errors=errors
+        )
+        if errors:
+            details = "; ".join(
+                f"{err.old_path}: {err.kind}: {err.reason}" for err in errors
+            )
+            raise RuntimeError(
+                f"Commit diff incomplete ({len(errors)} of {changed_file_count} text files failed): "
+                f"{details}"
+            )
 
         # Build semantic indexes for changed files only.
         old_file_contents = [
@@ -356,8 +336,14 @@ class CommitDiffer:
         if old_file_contents:
             old_index = self._build_index(old_file_contents)
             new_index = self._build_index(new_file_contents)
-            if old_index is not None and new_index is not None:
-                cross_file_changes = self._detect_cross_file(old_index, new_index)
+            # Both source sets are nonempty. An absent index means incomplete
+            # cross-file semantics, not an honest "no cross-file changes" result.
+            if old_index is None or new_index is None:
+                raise RuntimeError(
+                    "Commit semantic index incomplete: missing old or new index "
+                    "for changed text files"
+                )
+            cross_file_changes = self._detect_cross_file(old_index, new_index)
 
         return CommitDiff(
             old_ref=old_ref,
@@ -382,69 +368,30 @@ class CommitDiffer:
         old_ref: str,
         new_ref: str,
     ) -> CommitDiff:
-        """
-        Run a full semantic diff using an arbitrary :class:`VcsBackend`.
+        """Apply the same fail-closed Rust-backed per-file route to every VCS."""
 
-        Called by :meth:`diff_commit` when a *backend* is provided.  The
-        gitignore pre-pass is skipped because it is git-specific.
-        """
-        changed_files = backend.list_changed_files(old_ref, new_ref)
+        def changed_sources() -> Iterator[tuple[str, str, str, str, object]]:
+            for changed in backend.list_changed_files(old_ref, new_ref):
+                if changed.is_binary:
+                    continue
+                path = changed.old_path or changed.new_path
+                if path is None:
+                    raise ValueError("VCS backend returned a changed text file without a path")
+                new_path = changed.new_path or path
+                old = backend.get_blob(changed.old_path, old_ref) if changed.old_path else ""
+                new = backend.get_blob(changed.new_path, new_ref) if changed.new_path else ""
+                yield old, new, path, new_path, None
 
-        file_diffs = []
-        parse_errors: list[str] = []
-        old_file_contents: list[tuple[str, str, str]] = []
-        new_file_contents: list[tuple[str, str, str]] = []
-        changed_file_count = 0
-
-        for cf in changed_files:
-            if cf.is_binary:
-                continue
-            changed_file_count += 1
-
-            old_path = cf.old_path or cf.new_path
-            new_path = cf.new_path or cf.old_path
-
-            if old_path is None:
-                continue
-
-            old_content = backend.get_blob(old_path, old_ref) if cf.old_path else ""
-            new_content = backend.get_blob(new_path, new_ref) if cf.new_path else ""  # type: ignore[arg-type]
-
-            try:
-                file_diff = self._differ._run_pipeline(
-                    old_content, new_content, old_path, None, new_filename=new_path
-                )
-                file_diffs.append(file_diff)
-                old_file_contents.append((old_path, file_diff.language, old_content))
-                new_file_contents.append(
-                    (new_path or old_path, file_diff.language, new_content)
-                )
-            except PluginNotFoundError:
-                logger.debug("Skipping %r — no parser available", old_path)
-            except (PluginError, ValueError, RuntimeError) as exc:
-                logger.warning("Failed to diff %r: %s", old_path, exc)
-                parse_errors.append(f"{old_path}: {exc}")
-
-        self._raise_if_all_parsers_failed(changed_file_count, file_diffs, parse_errors)
-
-        cross_file_changes: list[CrossFileChange] = []
-        if old_file_contents:
-            old_index = self._build_index(old_file_contents)
-            new_index = self._build_index(new_file_contents)
-            if old_index is not None and new_index is not None:
-                cross_file_changes = self._detect_cross_file(old_index, new_index)
-
-        return CommitDiff(
+        results, errors, changed_file_count = self._collect_file_diffs(
+            changed_sources(), policy_root=backend.resolve_root(),
+            policy_path_resolver=backend.guardrail_policy_path,
+        )
+        return self._finalize_commit_diff(
+            results=results,
+            errors=errors,
+            changed_file_count=changed_file_count,
             old_ref=old_ref,
             new_ref=new_ref,
-            guardrail_violations=[
-                violation
-                for file_diff in file_diffs
-                for violation in file_diff.guardrail_violations
-            ],
-            file_diffs=file_diffs,
-            cross_file_changes=cross_file_changes,
-            parse_errors=parse_errors,
         )
 
     def _raise_if_all_parsers_failed(
@@ -452,6 +399,8 @@ class CommitDiffer:
         changed_file_count: int,
         file_diffs: list,
         parse_errors: list[str],
+        *,
+        file_errors: list[FileDiffError] | None = None,
     ) -> None:
         """Fail loudly when changed files exist but no parser plugin loaded."""
         if changed_file_count <= 0 or file_diffs or parse_errors:
@@ -462,87 +411,16 @@ class CommitDiffer:
         summary = summary_fn()
         if summary:
             raise RuntimeError(summary)
-
-    def _collect_gitignore_state(
-        self,
-        repo_path: "str | os.PathLike[str]",
-        old_ref: str,
-        new_ref: str,
-    ) -> "tuple[set[str], object]":
-        """
-        Lightweight pre-scan of the commit diff.
-
-        Returns a 2-tuple ``(deleted_paths, gitignore_spec)``:
-
-        * ``deleted_paths`` — set of file paths that git marks as deleted (change
-          type ``"D"``).  Used later to distinguish genuine deletions from files
-          evicted by a ``.gitignore`` rule change.
-        * ``gitignore_spec`` — a compiled ``pathspec.PathSpec`` built from the
-          *new* content of any ``.gitignore`` file modified in this commit, or
-          ``None`` when no ``.gitignore`` changed.  Only root-level and
-          subdirectory ``.gitignore`` files that appear in the commit diff are
-          considered; ``.git/info/exclude`` is outside the commit tree and is
-          therefore ignored.
-        """
-        deleted_paths: set[str] = set()
-        gitignore_spec = None
-        try:
-            import subprocess
-
-            from intentumdiff.sources.git_source import _parse_name_status_z
-            from intentumdiff.vcs.git_cli import resolve_repo_root, run_git_bytes
-
-            root = resolve_repo_root(repo_path)
-            # old -> new (or old -> working tree when new_ref is ""); a=old, b=new,
-            # matching the former old_commit.diff(None|new_commit).
-            args = ["diff", "--name-status", "-z", old_ref]
-            if new_ref:
-                args.append(new_ref)
-            for code, a_path, b_path in _parse_name_status_z(run_git_bytes(root, args)):
-                if code[:1] == "D":
-                    deleted_paths.add(a_path)
-
-                # Capture the new .gitignore content for root or subdir gitignore files.
-                if code[:1] in ("A", "M") and (
-                    b_path == ".gitignore" or b_path.endswith("/.gitignore")
-                ):
-                    raw: str | None = None
-                    if new_ref:  # commit-to-commit: read the new blob
-                        try:
-                            raw = run_git_bytes(
-                                root, ["cat-file", "blob", f"{new_ref}:{b_path}"]
-                            ).decode("utf-8", errors="replace")
-                        except subprocess.CalledProcessError:
-                            raw = None
-                    else:  # working-tree mode: read from disk
-                        from pathlib import Path as _Path
-                        disk_gi = _Path(root) / b_path
-                        if disk_gi.exists():
-                            try:
-                                raw = disk_gi.read_text(encoding="utf-8", errors="replace")
-                            except OSError:
-                                pass
-                    if raw is not None:
-                        try:
-                            import pathspec as _pathspec  # lazy import
-                            # For subdirectory gitignore files (e.g. src/.gitignore),
-                            # prepend the directory so patterns are matched against
-                            # full repo-relative paths.
-                            gitignore_dir = b_path[: -len(".gitignore")].rstrip("/")
-                            if gitignore_dir:
-                                lines = [
-                                    f"{gitignore_dir}/{ln}" if ln and not ln.startswith("#")
-                                    else ln
-                                    for ln in raw.splitlines()
-                                ]
-                            else:
-                                lines = raw.splitlines()
-                            gitignore_spec = _pathspec.PathSpec.from_lines("gitignore", lines)
-                        except Exception as exc:  # pragma: no cover
-                            logger.debug("Failed to parse .gitignore blob: %s", exc)
-        except Exception as exc:
-            logger.debug("gitignore pre-pass failed: %s", exc)
-        return deleted_paths, gitignore_spec
+        # Preserve concrete failing paths when the registry cannot supply a richer
+        # parser-load diagnostic. A generic error hides the failed file and masks
+        # actionable evidence from the fail-closed commit boundary.
+        details = (
+            ": " + "; ".join(f"{error.old_path}: {error.reason}" for error in file_errors)
+            if file_errors else ""
+        )
+        raise RuntimeError(
+            "Commit diff incomplete: no parser succeeded for changed text files" + details
+        )
 
     def _build_index(
         self, file_contents: list[tuple[str, str, str]]
@@ -552,20 +430,27 @@ class CommitDiffer:
         triples.
 
         The symbol/reference tables are built by the Rust core
-        (index-engine-lib) inside ``SemanticIndex.build()``. Returns ``None`` if
-        no files could be parsed.
+        (index-engine-lib) inside ``SemanticIndex.build()``. Every changed text
+        file must contribute a tree; skipping one would silently remove its
+        cross-file evidence. Only an intentionally empty input list has no index.
         """
+        if not file_contents:
+            return None
+
         index = SemanticIndex()
         for filename, language, content in file_contents:
             try:
                 tree = self._parse_to_tree(filename, language, content)
-                if tree is not None:
-                    index.add_tree(filename, language, tree)
-            except Exception as exc:
-                logger.debug("Could not parse %r for index: %s", filename, exc)
-
-        if not index._files:  # type: ignore[attr-defined]  # pylint: disable=protected-access
-            return None
+            except (PluginNotFoundError, PluginError, ValueError, RuntimeError) as exc:
+                raise RuntimeError(
+                    f"Commit semantic index incomplete for {filename!r}: {exc}"
+                ) from exc
+            if tree is None:
+                raise RuntimeError(
+                    f"Commit semantic index incomplete for {filename!r}: "
+                    "parser returned no semantic tree"
+                )
+            index.add_tree(filename, language, tree)
 
         index.build()
         return index
@@ -582,18 +467,18 @@ class CommitDiffer:
         """
         Parse *content* to a SemanticNode tree.
 
-        Re-uses the ``SemanticDiffer`` parser pipeline so both FullParse and
-        host-CST parser plugins can participate in commit-wide symbol indexing.
+        Re-uses the ``SemanticDiffer`` FullParse parser pipeline for
+        commit-wide symbol indexing. Missing parsers must propagate to the
+        caller so a complete commit review cannot silently omit a text file.
         """
-        try:
-            tree, _language = self._differ.parse(
-                content,
-                filename,
-                language_hint=language,
-            )
-            return tree
-        except PluginNotFoundError:
-            return None
-        except Exception as exc:
-            logger.debug("parse_to_tree failed for %r: %s", filename, exc)
-            return None
+        # Match the existing source-diff and native Rust empty-side contract. Some
+        # parsers reject empty input; that is not a missing symbol-table failure.
+        if not content:
+            from intentumdiff._differ_presentation import _empty_semantic_tree
+            return _empty_semantic_tree(language)
+        tree, _language = self._differ.parse(
+            content,
+            filename,
+            language_hint=language,
+        )
+        return tree

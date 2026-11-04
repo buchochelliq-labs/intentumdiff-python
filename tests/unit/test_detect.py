@@ -285,3 +285,36 @@ class TestDetectionResult:
     def test_confidence_range_enforced(self):
         with pytest.raises(Exception):
             DetectionResult(language="x", grammar_id="y", confidence=1.5)
+
+
+def test_content_detection_rejects_undeclared_language():
+    parser = _fake_parser("python", ["python"], detects_as="ruby")
+    with pytest.raises(RuntimeError, match="undeclared language"):
+        _differ_with_parsers(parser).detect_all("def example(): pass")
+
+
+def test_content_detection_keeps_preferred_generic_last():
+    generic = _fake_parser("generic", ["generic"], detects_as="generic", priority=1000)
+    specific = _fake_parser("python", ["python"], detects_as="python", priority=1)
+    results = _differ_with_parsers(generic, specific).detect_all("def example(): pass", preferred_plugins={"generic":"generic"})
+    assert [r.language for r in results] == ["python", "generic"]
+
+
+def test_content_detection_sample_is_bounded_in_utf8_bytes():
+    parser = _fake_parser("python", ["python"], detects_as="python")
+    source = "a" * 4095 + "\U0001f600" + "tail"
+    _differ_with_parsers(parser).detect_all(source)
+    parser.detect_language.assert_called_once_with("", "a" * 4095)
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+def test_content_probe_fuel_exhaustion_is_terminal(explicit):
+    from intentumdiff.plugins.exceptions import PluginFuelExhausted
+    first = _fake_parser("first", ["python"], priority=200)
+    second = _fake_parser("second", ["python"], detects_as="python")
+    failure = PluginFuelExhausted("first", 1)
+    first.detect_language.side_effect = failure
+    with pytest.raises(PluginFuelExhausted) as raised:
+        _differ_with_parsers(first, second).detect_all("def f(): pass", plugin_id="first" if explicit else None)
+    assert raised.value is failure
+    second.detect_language.assert_not_called()

@@ -35,6 +35,7 @@ except ModuleNotFoundError:  # pragma: no cover - exercised only in minimal dev 
 
 from rich.panel import Panel
 from rich.table import Table
+from rich.text import Text
 
 from intentumdiff import (
     FileSource,
@@ -64,6 +65,7 @@ from intentumdiff.cli._shared import (  # noqa: F401
     _parse_fuel,
     _record_diagnostics_db,
     _render,
+    _render_many_with_profile,
     _render_with_profile,
     _resolve_repo_root,
     _warn_if_unlimited_fuel,
@@ -106,8 +108,15 @@ def _cmd_assets_git(args: argparse.Namespace) -> None:
     _emit_asset_payload(payload, json_output=args.json)
 
 
+def _git_file_rule_title(diff: SemanticDiff) -> Text:
+    """Build a literal Rich rule title; filenames and Git statuses are data, not markup."""
+    label = diff.staging_status or ""
+    name = diff.new_filename or diff.old_filename or "(unknown file)"
+    return Text(f"{name} [{label}]" if label else name)
+
+
 def _cmd_git(args: argparse.Namespace) -> None:
-    from intentumdiff.sources.git_source import _REF_STAGED, _REF_UNPUSHED
+    from intentumdiff.sources.git_source import StagedSource, _REF_STAGED, _REF_UNPUSHED
     from intentumdiff.vcs.git_cli import NotAGitRepositoryError
 
     repo_path = args.repo  # '.' when not supplied
@@ -144,11 +153,7 @@ def _cmd_git(args: argparse.Namespace) -> None:
                     ref=old_ref,
                 )
             elif new_ref == _REF_STAGED:
-                # Staged single-file: use WorkingTreeSource pointing at the index.
-                # WorkingTreeSource reads the committed version for old_content and
-                # the on-disk file for new_content — for staged-only accuracy the
-                # user should rely on commit-wide mode or pass an explicit --new ref.
-                source = WorkingTreeSource(
+                source = StagedSource(
                     repo_path=repo_path,
                     file_path=args.file,
                     ref=old_ref,
@@ -192,16 +197,37 @@ def _cmd_git(args: argparse.Namespace) -> None:
                 new_ref=new_ref,
             )
             if not diffs:
-                _console.print("[green]No parseable changes found.[/green]")
+                # No semantic result exists to render, but machine consumers must
+                # still receive a valid empty result and requested report files.
+                # Keep the human status on stderr so stdout stays machine-readable.
+                if args.format == "terminal":
+                    if args.output:
+                        _write_output("No parseable changes found.\n", args.output)
+                    else:
+                        _err.print("[green]No parseable changes found.[/green]")
+                elif args.format == "json":
+                    _write_output("[]", args.output)
+                elif args.output:
+                    # Empty patch/HTML/LLM output is an empty document, not a
+                    # fabricated per-file semantic diff.
+                    _write_output("", args.output)
+                result = _emit_guardrail_reports([], args)
+                _record_diagnostics_db([], args)
+                _exit_if_guardrail_result_fails(result)
                 return
-            for diff in diffs:
-                if args.format == "terminal" and not args.output:
-                    label = diff.staging_status or ""
-                    rule_title = diff.new_filename or diff.old_filename
-                    if label:
-                        rule_title = f"{rule_title} [{label}]"
-                    _console.rule(rule_title)
-                _render_with_profile(diff, args, fuel=differ._config.plugin_fuel)
+            if args.format == "terminal" and not args.output:
+                for diff in diffs:
+                    _console.rule(_git_file_rule_title(diff))
+                    _render_with_profile(diff, args, fuel=differ._config.plugin_fuel)
+            else:
+                # One document for machine formats and files (#280): a JSON array, or the
+                # joined per-file renders, so no diff overwrites another in --output.
+                _render_many_with_profile(
+                    diffs,
+                    args,
+                    fuel=differ._config.plugin_fuel,
+                    title=lambda diff: _git_file_rule_title(diff).plain,
+                )
             result = _emit_guardrail_reports(diffs, args)
             _record_diagnostics_db(diffs, args)
             _exit_if_guardrail_result_fails(result)
@@ -242,8 +268,9 @@ def _cmd_file(args: argparse.Namespace) -> None:
         config_start_path=args.new_file,
         guardrails_policy=getattr(args, "guardrails_policy", None),
     )
+    diff = differ.diff(source)
     if args.stream:
-        for change in differ.diff_stream(source):
+        for change in diff.changes:
             ct_str = (
                 change.change_type.value
                 if hasattr(change.change_type, "value")
@@ -254,11 +281,10 @@ def _cmd_file(args: argparse.Namespace) -> None:
                 line += f"  [{change.text_diff}]"
             _console.print(line)
     else:
-        diff = differ.diff(source)
         _render_with_profile(diff, args, fuel=differ._config.plugin_fuel)
-        result = _emit_guardrail_reports(diff, args)
-        _record_diagnostics_db(diff, args)
-        _exit_if_guardrail_result_fails(result)
+    result = _emit_guardrail_reports(diff, args)
+    _record_diagnostics_db(diff, args)
+    _exit_if_guardrail_result_fails(result)
 
 
 def _cmd_patch(args: argparse.Namespace) -> None:
@@ -411,6 +437,34 @@ def _cmd_diagnostics_query(args: argparse.Namespace) -> None:
 def _cmd_guardrails_check(args: argparse.Namespace) -> None:
     from intentumdiff.vcs.git_cli import NotAGitRepositoryError
 
+    # Validate the policy BEFORE diffing anything.
+    #
+    # The policy used to be loaded lazily, per changed file. With no changed files it was
+    # never loaded at all, so `guardrails check --policy typo.yaml` printed
+    # "Guardrail check passed: 0 file(s) checked" and exited 0 - with nothing on stderr.
+    # A typo in the path was indistinguishable from a clean run, on a gate whose documented
+    # purpose is stopping API keys changing unreviewed. It failed OPEN.
+    #
+    # A gate must verify it can do its job before reporting that it did.
+    if args.guardrails_policy is not None:
+        from pathlib import Path as _Path
+
+        from intentumdiff.analysis.guardrails import load_guardrail_policy
+
+        try:
+            policy = load_guardrail_policy("", explicit_path=_Path(args.guardrails_policy))
+        except (OSError, ValueError) as exc:
+            _err.print(f"[red]Guardrail policy could not be loaded: {exc}[/red]")
+            sys.exit(2)
+        if not policy.rules:
+            # Loaded, parsed, and protects nothing. Reporting "passed" for that is the same
+            # false assurance as failing to load it.
+            _err.print(
+                f"[red]Guardrail policy {args.guardrails_policy} defines no protected "
+                f"entries, so this check cannot fail. Add rules, or drop --policy.[/red]"
+            )
+            sys.exit(2)
+
     try:
         differ = _differ(
             args.fuel,
@@ -454,7 +508,11 @@ def _cmd_plugins_list(_args: argparse.Namespace) -> None:
 
     # Resolve the core package provenance string once for built-in rows
     import importlib.metadata as _meta
-    for _dist_name in ("intentumdiff",):
+    # The DISTRIBUTION name, which is not the import name: this package publishes as
+    # `intentumdiff-python` while `import intentumdiff` is the package. Looking up only the
+    # import name silently fell through to the bare "IntentumDiff" fallback, so every
+    # built-in plugin row lost its version.
+    for _dist_name in ("intentumdiff-python", "intentumdiff_python", "intentumdiff"):
         try:
             _core_dist = _meta.distribution(_dist_name)
             _core_prov = (
@@ -543,6 +601,20 @@ def _cmd_plugins_add(args: argparse.Namespace) -> None:
         _err.print(
             "[yellow]Warning: security verification skipped (--skip-verify).[/yellow]"
         )
+
+    # Preserve existing pinned Wasm/dependency provenance before pip has any
+    # side effects.  A malformed manifest or dangling symlink is not an empty
+    # plugin inventory: refusing the update avoids deleting existing pins (#252).
+    existing_manifest: list[PluginSpec] = []
+    if args.save:
+        manifest_path = Path(args.file)
+        if manifest_path.exists() or manifest_path.is_symlink():
+            try:
+                existing_manifest = load_plugins_file(manifest_path)
+            except Exception as exc:
+                raise RuntimeError(
+                    f"Refusing to overwrite invalid plugins manifest {manifest_path}: {exc}"
+                ) from exc
 
     # ── 1. Consult the official registry for official plugins ─────────────────
     registry_entry: RegistryEntry | None = None
@@ -650,13 +722,9 @@ def _cmd_plugins_add(args: argparse.Namespace) -> None:
     # ── 6. Save to manifest ───────────────────────────────────────────────────
     if args.save:
         yaml_path = Path(args.file)
-        existing: list = []
-        if yaml_path.exists():
-            with suppress(Exception):
-                existing = load_plugins_file(yaml_path)
-        # Replace if already present, otherwise append
+        # Replace only the matching entry; retain all other pinned provenance.
         existing = [
-            s for s in existing
+            s for s in existing_manifest
             if s.name != spec.name and s.name != spec.package_name
         ]
         existing.append(spec)
@@ -868,25 +936,40 @@ def _cmd_plugins_remove(args: argparse.Namespace) -> None:
 
     name = args.plugin_name
     spec = PluginSpec(name=name)
+    manifest_path = Path(args.file) if args.save else None
+    existing_manifest: list[PluginSpec] | None = None
+    # --save is a pinned provenance change, not best-effort decoration. Check
+    # the existing manifest before any irreversible pip side effects (#257).
+    if manifest_path is not None and (
+        manifest_path.exists() or manifest_path.is_symlink()
+    ):
+        try:
+            existing_manifest = load_plugins_file(manifest_path)
+        except Exception as exc:
+            raise RuntimeError(
+                f"Refusing to uninstall with invalid plugins manifest {manifest_path}: {exc}"
+            ) from exc
+
     _console.print(f"Uninstalling [cyan]{spec.package_name}[/cyan] ...")
     rc = pip_uninstall(spec.package_name)
     if rc != 0:
         _err.print(f"[red]pip uninstall failed (exit code {rc})[/red]")
         sys.exit(rc)
 
-    if args.save:
-        yaml_path = Path(args.file)
-        if yaml_path.exists():
-            try:
-                specs = load_plugins_file(yaml_path)
-                specs = [
-                    s for s in specs
-                    if s.name != name and s.name != spec.package_name
-                ]
-                save_plugins_file(yaml_path, specs)
-                _console.print(f"[green]Removed from {yaml_path}[/green]")
-            except Exception as exc:
-                _err.print(f"[yellow]Warning: could not update {yaml_path}: {exc}[/yellow]")
+    if manifest_path is not None and existing_manifest is not None:
+        specs = [
+            s for s in existing_manifest
+            if s.name != name and s.name != spec.package_name
+        ]
+        try:
+            save_plugins_file(manifest_path, specs)
+        except Exception as exc:
+            # pip has already succeeded, but the manifest is not reconciled.
+            # Propagate a partial failure rather than print a false success.
+            raise RuntimeError(
+                f"Plugin uninstalled but could not update {manifest_path}: {exc}"
+            ) from exc
+        _console.print(f"[green]Removed from {manifest_path}[/green]")
 
     _console.print(f"[green]Plugin '{spec.package_name}' uninstalled.[/green]")
 
@@ -1030,20 +1113,10 @@ async def _two_pass_index(
 
     if not launchable:
         langs_str = ", ".join(sorted(detected)) or "none"
-        _console.print(
-            f"[dim]No LSP servers configured for detected languages "
-            f"({langs_str}).  Running plain index.[/dim]"
+        raise RuntimeError(
+            "--lsp was requested, but no LSP servers are configured for "
+            f"detected languages ({langs_str}); cannot certify type enrichment"
         )
-        result = await _index_with_progress(
-            indexer,
-            repo_path=repo_path,
-            ref=ref,
-            force=args.force,
-            lsp_clients={},
-            initial_total=_file_count,
-        )
-        _print_index_result(result)
-        return
 
     _console.print(
         f"[bold]Pass 1 complete[/bold] — "
@@ -1057,6 +1130,7 @@ async def _two_pass_index(
 
     launchers: dict[str, LspServerProcess] = {}
     clients: dict[str, AsyncLspClient] = {}
+    connection_failures: dict[str, str] = {}
 
     # Separate languages into "already running" vs "needs auto-start".
     manual: list[str] = []
@@ -1112,6 +1186,7 @@ async def _two_pass_index(
                 f"  [green]✓[/green] {lang}  (tcp, already running @ {cfg_lsp})"
             )
         except (Exception, asyncio.CancelledError) as exc:
+            connection_failures[lang] = str(exc)
             _err.print(f"  [yellow]⚠[/yellow]  {lang}: {exc} — skipped")
             _hint = entry.install_hint
             if _hint:
@@ -1120,6 +1195,8 @@ async def _two_pass_index(
     # Spawn approved auto-start servers.
     for lang in to_start:
         entry = user_entries.get(lang)
+        launcher: LspServerProcess | None = None
+        client: AsyncLspClient | None = None
         try:
             spec = entry.to_spec() if entry is not None else None
             launcher = LspServerProcess(lang, spec=spec)
@@ -1132,6 +1209,7 @@ async def _two_pass_index(
                 f"  [green]✓[/green] {lang}  ({cfg_lsp.transport}, auto-started)"
             )
         except (Exception, asyncio.CancelledError) as exc:
+            connection_failures[lang] = str(exc)
             _err.print(f"  [yellow]⚠[/yellow]  {lang}: {exc} — skipped")
             _hint = (
                 entry.install_hint
@@ -1140,24 +1218,38 @@ async def _two_pass_index(
             )
             if _hint:
                 _err.print(f"    [dim]Install: {_hint}[/dim]")
-            if lang in launchers:
+            # A launcher/client that failed before registration still owns
+            # resources; do not strand it while refusing partial enrichment.
+            if client is not None and lang not in clients:
                 with suppress(Exception):
-                    await launchers.pop(lang).stop()
+                    await client.shutdown()
+            if launcher is not None and lang not in launchers:
+                with suppress(Exception):
+                    await launcher.stop()
+
+    if connection_failures:
+        # One connected language must not mask another requested language's
+        # failed server: that would yield a seemingly complete un-enriched index.
+        for client in clients.values():
+            with suppress(Exception):
+                await client.shutdown()
+        for launcher in launchers.values():
+            with suppress(Exception):
+                await launcher.stop()
+        details = ", ".join(
+            f"{language}: {reason}"
+            for language, reason in sorted(connection_failures.items())
+        )
+        raise RuntimeError(
+            "--lsp was requested, but configured LSP servers failed to connect; "
+            f"cannot certify type enrichment ({details})"
+        )
 
     if not clients:
-        _console.print(
-            "[dim]No LSP servers connected; running plain index.[/dim]"
+        raise RuntimeError(
+            "--lsp was requested, but no configured LSP server connected; "
+            "cannot certify type enrichment"
         )
-        result = await _index_with_progress(
-            indexer,
-            repo_path=repo_path,
-            ref=ref,
-            force=args.force,
-            lsp_clients={},
-            initial_total=_file_count,
-        )
-        _print_index_result(result)
-        return
 
     # ── Pass 2: enrich with LSP ───────────────────────────────────────────────
     n = len(clients)
@@ -1297,6 +1389,10 @@ def _print_index_result(result: Any) -> None:
             f"[dim]Ignored {len(ignored_files)} file(s) via .diffignore[/dim]"
         )
 
+    # A partial index must not be presented to CI as successful (#193).
+    # Keep the per-file diagnostics above, but fail the process.
+    if result.errors:
+        raise SystemExit(1)
 
 
 
@@ -1938,6 +2034,17 @@ def _add_output_args(p: argparse.ArgumentParser) -> None:
         default="terminal",
         metavar="FORMAT",
         help="Output format: terminal (default), json, patch, html, llm",
+    )
+    # `--json` is the spelling people reach for first, and reaching for it used to fail with
+    # "unrecognized arguments: --json" even though JSON output existed the whole time behind
+    # `--format json`. An error that denies a feature you actually ship is worse than a missing
+    # feature, because it teaches the user the tool cannot do it.
+    p.add_argument(
+        "--json",
+        dest="format",
+        action="store_const",
+        const="json",
+        help="Shorthand for --format json.",
     )
     p.add_argument(
         "--output", "-o",

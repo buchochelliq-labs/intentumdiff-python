@@ -10,6 +10,7 @@ from intentumdiff import SemanticDiffer
 from intentumdiff.core.models import ChangeGroupKind, ChangeType
 
 from tests.unit.diff_sanity import assert_no_identical_positioned_source_modifications
+from tests.unit.platform_gates import powershell_unavailable
 
 
 KNOWN_EXAMPLE_CONTRACT_GAPS: dict[str, str] = {}
@@ -90,7 +91,7 @@ def test_supported_language_example_contract(
     [
         "rust",
         "elixir",
-        "powershell",
+        pytest.param("powershell", marks=powershell_unavailable),
         "sql",
         "yaml",
         "xml",

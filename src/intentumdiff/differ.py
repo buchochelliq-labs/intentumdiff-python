@@ -25,6 +25,7 @@ The ``SemanticDiffer`` class is the primary public API object.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
 import threading
@@ -64,27 +65,6 @@ from intentumdiff._differ_gate import (
     _validate_git_ref as _validate_git_ref,
 )
 from intentumdiff._differ_presentation import (
-    _GENERIC_STRING_LABELS as _GENERIC_STRING_LABELS,
-)
-from intentumdiff._differ_presentation import (
-    _NAMED_ENTITY_NODE_TYPES as _NAMED_ENTITY_NODE_TYPES,
-)
-from intentumdiff._differ_presentation import (
-    _all_semantic_nodes as _all_semantic_nodes,
-)
-from intentumdiff._differ_presentation import (
-    _annotate_text_diffs as _annotate_text_diffs,
-)
-from intentumdiff._differ_presentation import (
-    _changes_to_stream_events as _changes_to_stream_events,
-)
-from intentumdiff._differ_presentation import (
-    _clean_string_literal_label as _clean_string_literal_label,
-)
-from intentumdiff._differ_presentation import (
-    _compute_structural_hash_for_tree as _compute_structural_hash_for_tree,
-)
-from intentumdiff._differ_presentation import (
     _count_cst_nodes as _count_cst_nodes,
 )
 from intentumdiff._differ_presentation import (
@@ -100,22 +80,10 @@ from intentumdiff._differ_presentation import (
     _has_error_node as _has_error_node,
 )
 from intentumdiff._differ_presentation import (
-    _is_markdown_filename as _is_markdown_filename,
-)
-from intentumdiff._differ_presentation import (
-    _is_named_entity_node as _is_named_entity_node,
-)
-from intentumdiff._differ_presentation import (
-    _markdown_section_body_hashes as _markdown_section_body_hashes,
-)
-from intentumdiff._differ_presentation import (
     _markdown_section_heading_rename_presentation as _markdown_section_heading_rename_presentation,
 )
 from intentumdiff._differ_presentation import (
     _markdown_section_move_presentation as _markdown_section_move_presentation,
-)
-from intentumdiff._differ_presentation import (
-    _markdown_sections as _markdown_sections,
 )
 from intentumdiff._differ_presentation import (
     _node_to_dict as _node_to_dict,
@@ -124,28 +92,13 @@ from intentumdiff._differ_presentation import (
     _root_structural_hash as _root_structural_hash,
 )
 from intentumdiff._differ_presentation import (
-    _semantic_parent_map as _semantic_parent_map,
-)
-from intentumdiff._differ_presentation import (
-    _slice_source_text as _slice_source_text,
-)
-from intentumdiff._differ_presentation import (
-    _surface_changed_in_place_entities as _surface_changed_in_place_entities,
-)
-from intentumdiff._differ_presentation import (
     _token_fallback_diff as _token_fallback_diff,
 )
 from intentumdiff._differ_presentation import (
     _validate_tree_ids as _validate_tree_ids,
 )
 from intentumdiff._differ_runtime import (
-    _ADDED_FILE_STATUSES as _ADDED_FILE_STATUSES,
-)
-from intentumdiff._differ_runtime import (
     _DEFAULT_PLUGIN_FUEL as _DEFAULT_PLUGIN_FUEL,
-)
-from intentumdiff._differ_runtime import (
-    _DELETED_FILE_STATUSES as _DELETED_FILE_STATUSES,
 )
 from intentumdiff._differ_runtime import (
     _EXPLICIT_FUEL_EXHAUSTION_TEST_CAP as _EXPLICIT_FUEL_EXHAUSTION_TEST_CAP,
@@ -205,10 +158,6 @@ from intentumdiff.analysis.schema_resolver import (
     schema_cache_fingerprint,
     schema_resolution_metadata,
 )
-from intentumdiff.analysis.text_review import (
-    PresentationResult,
-    normalize_generic_text_for_review,
-)
 from intentumdiff.analysis.user_schemas import (
     load_user_schema_profiles,
     user_xml_dialects_payload,
@@ -226,6 +175,7 @@ from intentumdiff.core.models import (
     SemanticDiff,
     SemanticNode,
 )
+from intentumdiff.plugins.adapter import ParserAdapter
 from intentumdiff.plugins.exceptions import (
     PluginFuelExhausted,
     PluginNotFoundError,
@@ -235,8 +185,6 @@ from intentumdiff.plugins.loader import _strip_trivia_impl
 from intentumdiff.plugins.registry import PluginRegistry
 from intentumdiff.rust_core import (
     RustCoreCommitJsonAttempt,
-    apply_invariances,
-    build_style_only_evidence,
     enrich_node_facts,
     try_register_user_xml_dialects,
     try_rust_core_batch_diff,
@@ -246,6 +194,7 @@ from intentumdiff.rust_core import (
     try_rust_profile_label_enrichment,
 )
 from intentumdiff.sources.base import Source
+from intentumdiff.sources.file_source import FileSource as FileSource  # compatibility re-export
 
 logger = logging.getLogger(__name__)
 
@@ -274,8 +223,8 @@ class SemanticDiffer:
         self._parallel_executor_workers: int | None = None
         self._parallel_executor_lock = threading.Lock()
         self._parallel_worker_local = threading.local()
-        # Per-grammar wasm binary hash, computed once and memoised.
-        self._wasm_hash_cache: dict[str, str] = {}
+        # Parser digest identity includes the actual on-disk artifact, never grammar alone.
+        self._wasm_hash_cache: dict[tuple[str, int, int, int, int, int], str] = {}
 
         # ── Cache / analytics setup ───────────────────────────────────────
         if cache is not None:
@@ -491,13 +440,29 @@ class SemanticDiffer:
         profiler = self._new_profiler()
         with profiler.phase("source_loading"):
             old_content, new_content, filename, language_hint = source.get_content()
-        return self._run_pipeline(
+        # Resolve host filesystem identity separately from public display labels.
+        # Source adapters validate repo roots/paths; only Rust evaluates the
+        # discovered guardrail policies against the semantic changes.
+        policy_context = getattr(source, "guardrail_policy_paths", None)
+        policy_old_filename, policy_source_filename = (
+            policy_context() if callable(policy_context) else (None, None)
+        )
+        diff = self._run_pipeline(
             old_content,
             new_content,
             filename,
             language_hint,
+            _policy_source_filename=policy_source_filename,
+            _policy_old_filename=policy_old_filename,
             _profiler=profiler,
         )
+        # The pipeline works from the single filename language detection needs. A source
+        # comparing two differently named files knows both, so restore them here rather
+        # than threading a second name through every construction site.
+        names = source.display_names()
+        if names is not None:
+            diff = diff.model_copy(update={"old_filename": names[0], "new_filename": names[1]})
+        return diff
 
     def diff_strings(
         self,
@@ -594,9 +559,9 @@ class SemanticDiffer:
         """
         Parse *content* as *filename* and return ``(SemanticNode, language)``.
 
-        This runs pipeline stages 1–7 (language detection, preprocessing,
-        tree-sitter parsing, trivia stripping, and Wasm plugin dispatch) and
-        respects the parse-tree cache if one is configured.
+        A FullParse Rust/Wasm plugin owns parsing; Python handles plugin dispatch
+        and the optional parse-tree cache. Legacy Python-hosted CST processing is
+        deliberately rejected.
 
         Raises :class:`~intentumdiff.plugins.exceptions.PluginNotFoundError`
         when no registered parser supports *filename*.
@@ -619,22 +584,7 @@ class SemanticDiffer:
         parser, language = self._registry.detect_parser(filename, content, language_hint)
         adaptive_fuel = self._config.plugin_fuel
 
-        if parser.parser_mode == "interpret-cst":
-            content = parser.preprocess_source(content)
-            cst_json = self._parse(content, parser, language, filename)
-            if len(cst_json) > self._config.max_cst_bytes:
-                raise ValueError(
-                    f"CST JSON for {filename!r} is {len(cst_json):,} characters, "
-                    f"exceeding the limit of {self._config.max_cst_bytes:,} "
-                    "(DiffConfig.max_cst_bytes)."
-                )
-            trivia_types = list(parser.trivia_node_types) + self._config.extra_trivia_types
-            filtered = _strip_trivia_impl(cst_json, trivia_types)
-            cst_nodes = _count_cst_nodes(filtered)
-            adaptive_fuel = _fuel_budget(self._config.plugin_fuel, 20_000_000 + cst_nodes * 200_000)
-            input_ = filtered
-        else:
-            input_ = content
+        input_ = self._parse(content, parser, language, filename)
 
         if self._cache is not None:
             node = self._cached_process(parser, input_, language, filename, adaptive_fuel)
@@ -835,7 +785,10 @@ class SemanticDiffer:
         """
         Diff every file that changed between two git refs.
 
-        Files that have no registered parser are silently skipped.
+        A changed text file with no registered parser is a failed review.
+        Missing-parser and native runtime failures abort the entire review with
+        the path and original cause. Binary/ignored files are excluded during
+        source collection, before the semantic engine is called.
 
         Parameters
         ----------
@@ -850,12 +803,15 @@ class SemanticDiffer:
         Returns
         -------
         list[SemanticDiff]
-            One entry per changed file that could be parsed.
+            One entry per reviewed changed text file; failures raise rather than disappear.
         """
         from intentumdiff.sources.git_source import iter_changed_sources
+        from intentumdiff.vcs.git_cli import resolve_repo_root
+        from intentumdiff.vcs._safe_path import safe_policy_path
 
         source_started = time.perf_counter()
-        sources = list(iter_changed_sources(repo_path, old_ref, new_ref))
+        policy_root = resolve_repo_root(repo_path)
+        sources = list(iter_changed_sources(policy_root, old_ref, new_ref))
         source_collection_ms = (time.perf_counter() - source_started) * 1000
         rust_batch_results: dict[int, SemanticDiff] = {}
         rust_batch_attempted: set[int] = set()
@@ -878,10 +834,15 @@ class SemanticDiffer:
                     or effective_new_path_lower.endswith((".py", ".pyi"))
                 ):
                     continue
-                # Protected guardrail rules currently apply only to
-                # config/profile languages.  Certified Python batches can skip
-                # the expensive policy lookup; policy-file changes are not
-                # Python files and therefore remain on the fallback path.
+                # A discovered or explicit policy must be validated even when
+                # its file is unchanged/ignored. Rust decides whether it applies;
+                # policy-relevant sources keep the normal physical-path route.
+                if guardrails_may_apply(
+                    safe_policy_path(policy_root, old_path),
+                    safe_policy_path(policy_root, effective_new_path),
+                    self._config,
+                ):
+                    continue
                 request_to_source_index.append(idx)
                 request_files.append(
                     {
@@ -915,6 +876,15 @@ class SemanticDiffer:
                     parallel=rust_batch_parallel,
                     max_workers=rust_batch_workers,
                 )
+                # A corrupted Rust batch is an integrity failure, never an
+                # invitation to reroute files through a different finalizer.
+                # The single-file entrypoint already enforces this contract;
+                # public commit reviews must enforce it before merging results.
+                if rust_batch.invalid_output:
+                    raise RuntimeError(
+                        "Malformed Rust commit batch result: "
+                        f"{rust_batch.fallback_reason or 'invalid native output'}"
+                    )
                 rust_batch_ms = (time.perf_counter() - rust_batch_started) * 1000
                 rust_batch_fallback_count = int(
                     rust_batch.batch_metadata.get("fallback_count")
@@ -996,13 +966,15 @@ class SemanticDiffer:
                 None,
                 new_filename=new_path,
                 _profiler=profiler,
+                _policy_old_filename=safe_policy_path(policy_root, old_path),
+                _policy_source_filename=safe_policy_path(policy_root, new_path or old_path),
             )
             if staging_status is not None:
                 result = result.model_copy(update={"staging_status": staging_status})
             return result
 
-        _skip_exc = (PluginNotFoundError,)
-        _warn_exc = (PluginFuelExhausted, ValueError, RuntimeError)
+        # Parser absence is not a certified decline: it must fail the whole commit.
+        _warn_exc = (PluginNotFoundError, PluginFuelExhausted, ValueError, RuntimeError)
 
         parallel = self._config.parallel
         if not parallel:
@@ -1031,10 +1003,12 @@ class SemanticDiffer:
                     # A genuine token-level fallback under the RUST_ONLY gate is fatal —
                     # propagate it rather than let ``_warn_exc`` silently drop the file.
                     raise
-                except _skip_exc:
-                    logger.debug("Skipping %r — no parser available", item[2])
-                except _warn_exc:
-                    logger.warning("Failed to diff %r", item[2], exc_info=True)
+                except _warn_exc as exc:
+                    # A runtime failure cannot be represented in list[SemanticDiff].
+                    # Preserve the failed file identity; a partial review is unsafe.
+                    raise RuntimeError(
+                        f"Commit diff failed for {item[2]!r}: {exc}"
+                    ) from exc
             return results
         else:
             # ── Parallel ────────────────────────────────────────────────
@@ -1075,10 +1049,12 @@ class SemanticDiffer:
                     except RustOnlyGateError:
                         # Fatal under the RUST_ONLY gate — propagate, do not drop.
                         raise
-                    except _skip_exc:
-                        logger.debug("Skipping %r — no parser available", sources[idx][2])
-                    except _warn_exc:
-                        logger.warning("Failed to diff %r", sources[idx][2], exc_info=True)
+                    except _warn_exc as exc:
+                        # Match the sequential path: failures must not disappear
+                        # when one parallel worker succeeds.
+                        raise RuntimeError(
+                            f"Commit diff failed for {sources[idx][2]!r}: {exc}"
+                        ) from exc
             return [results_map[i] for i in sorted(results_map)]
 
     def diff_stream(
@@ -1106,6 +1082,8 @@ class SemanticDiffer:
         *,
         new_filename: str | None = None,
         parser_plugin_id: str | None = None,
+        _policy_source_filename: str | None = None,
+        _policy_old_filename: str | None = None,
         _profiler: _PhaseProfiler | None = None,
     ) -> SemanticDiff:
         profiler = _profiler or self._new_profiler()
@@ -1116,6 +1094,8 @@ class SemanticDiffer:
             language_hint,
             new_filename=new_filename,
             parser_plugin_id=parser_plugin_id,
+            policy_source_filename=_policy_source_filename,
+            policy_old_filename=_policy_old_filename,
             profiler=profiler,
         )
         # _run_stages_1_to_11 always returns a finished SemanticDiff since the python
@@ -1139,15 +1119,21 @@ class SemanticDiffer:
                     filename,
                     fuel=adaptive_fuel,
                 )
-                routed = SemanticDiff.model_validate_json(updated_json)
-            except Exception as exc:
-                logger.warning(
-                    "Diff analyzer %r failed for %r: %s - skipping",
-                    getattr(analyzer, "provenance", "?"),
-                    filename,
-                    exc,
+                # A Wasm analyzer is a diff-to-diff transform, never permission
+                # to replace a Rust review with Pydantic's empty DTO defaults.
+                from intentumdiff.rust_core import _require_complete_batch_diff_dto
+
+                routed = SemanticDiff.model_validate(
+                    _require_complete_batch_diff_dto(json.loads(updated_json))
                 )
-                continue
+            except Exception as exc:
+                # Semantic analyzers are configured diff-to-diff processing.
+                # Omitting a failed one would return an incomplete review as
+                # successful, including on fuel exhaustion or malformed DTOs.
+                provenance = getattr(analyzer, "provenance", "?")
+                raise RuntimeError(
+                    f"Diff analyzer {provenance!r} failed for {filename!r}: {exc}"
+                ) from exc
         return routed
 
     def _run_stages_1_to_11(
@@ -1159,11 +1145,13 @@ class SemanticDiffer:
         *,
         new_filename: str | None = None,
         parser_plugin_id: str | None = None,
+        policy_source_filename: str | None = None,
+        policy_old_filename: str | None = None,
         profiler: _PhaseProfiler | None = None,
     ) -> SemanticDiff:
         """Run pipeline stages 1–11 (parse → trivia-strip → Wasm → GumTree → moves).
 
-        Returns ``SemanticDiff`` for early exits (cache hit, style-only, fallback).
+        Returns Rust-owned results or explicitly marked source fallbacks.
         """
         # ── 1 + 2. Language detection ────────────────────────────────────────
         profiler = profiler or self._new_profiler()
@@ -1174,6 +1162,7 @@ class SemanticDiffer:
                 language_hint,
                 plugin_id=parser_plugin_id,
                 phase_recorder=profiler.record if profiler.enabled else None,
+                old_content=old_content,
             )
         logger.debug("Using parser %r for %r (language=%r)", parser.grammar_id, filename, language)
 
@@ -1183,6 +1172,10 @@ class SemanticDiffer:
         )
         engine_telemetry: list[dict[str, Any]] = []
         parse_mode = parser.parser_mode
+        # Retired InterpretCst execution cannot survive in a thin Python binding.
+        # `_parse` checks the capability and raises with an actionable upgrade path.
+        if parse_mode != "full-parse":
+            self._parse(new_content, parser, language, filename)
         cache_grammar_id = parser.grammar_id
         diagnostics.summary.update(
             {
@@ -1208,8 +1201,7 @@ class SemanticDiffer:
             },
         )
 
-        # Adaptive fuel starts at the configured floor; the interpret-cst branch
-        # raises it based on CST node count before calling the plugin.
+        # The configured plugin fuel is adapted for full-parse source size below.
         adaptive_fuel: int = self._config.plugin_fuel
 
         # Save originals for the enricher pass (enrichers see un-preprocessed source)
@@ -1229,8 +1221,8 @@ class SemanticDiffer:
             # the full set is safe for every xml diff.
             _user_profiles, _ = load_user_schema_profiles()
             _dialects = user_xml_dialects_payload(_user_profiles)
-            if _dialects:
-                try_register_user_xml_dialects(_dialects)
+            # Empty configuration must clear previously registered native dialects.
+            try_register_user_xml_dialects(_dialects)
         schema_fingerprint = schema_cache_fingerprint(schema_resolution)
         cache_schema_suffix = (
             "" if schema_fingerprint == "schema:none" else f"|{schema_fingerprint}"
@@ -1263,9 +1255,13 @@ class SemanticDiffer:
             "" if compile_metadata is None else f"|compile:{compile_metadata['fingerprint']}"
         )
 
-        # Cache state — resolved later once we have preprocessed content.
-        _diff_key: str | None = None
-        _guardrail_cache_bypass = guardrails_may_apply(filename, new_filename, self._config)
+        # Both physical sides may carry protection. Display aliases must not
+        # hide the source policy on moves out of protected directories (#262).
+        _guardrail_cache_bypass = guardrails_may_apply(
+            policy_old_filename or filename,
+            policy_source_filename or new_filename,
+            self._config,
+        )
         cache_grammar_id = parser.grammar_id
 
         if (
@@ -1322,13 +1318,22 @@ class SemanticDiffer:
                         rust_batch_attempt.diff,
                         file_lifecycle,
                     )
+                # An invalid claimed-complete Rust result is a broken engine/DTO
+                # contract, NOT an ordinary batch decline. Routing it through the
+                # alternate Rust finalizer can silently publish different semantic
+                # changes (observed in the 74-language corpus, #205).
+                if rust_batch_attempt.invalid_output:
+                    raise RuntimeError(
+                        f"Malformed Rust batch result for {filename!r}: "
+                        f"{rust_batch_attempt.fallback_reason}"
+                    )
                 # The certified BATCH shortcut declined — fall through to the native
                 # routed finalize path below. This is a Rust→Rust transition (the
                 # routed path finalizes through the Rust core for every certified
                 # language), NOT a Python fallback, so the RUST_ONLY gate does NOT
-                # fire here. It fires only at the genuine token-level fallback sites
-                # (parse errors / finalize declined / rust core disabled), where the
-                # coarse Python token diff — the last non-Rust producer — takes over.
+                # fire here. Parse-error source comparison also runs in Rust;
+                # explicit core disabling and unexpected finalize declines still
+                # fail the strict gate.
                 logger.debug(
                     "Rust core batch declined for %r: %s; using routed finalize",
                     filename,
@@ -1341,248 +1346,60 @@ class SemanticDiffer:
                     rust_core_skip_reason,
                 )
 
-        if parse_mode == "interpret-cst":
-            trivia_types = list(parser.trivia_node_types) + self._config.extra_trivia_types
+        # ── 7 (full-parse). Plugin owns parsing — send raw source ─────────
+        # Stages 3-6 are skipped: the plugin handles its own CST construction
+        # and trivia filtering. The style-only shortcut is not available here
+        # because there is no host-side CST to hash.
+        max_source_bytes = max(
+            len(old_content.encode("utf-8")),
+            len(new_content.encode("utf-8")),
+        )
+        adaptive_fuel = _fuel_budget(
+            self._config.plugin_fuel,
+            50_000_000 + max_source_bytes * 150_000,
+        )
+        logger.debug("full-parse mode for %r via %r", filename, parser.grammar_id)
 
-            # ── 2.5. Source preprocessing ────────────────────────────────────
-            with profiler.phase("source_preprocessing"):
-                old_content = parser.preprocess_source(old_content)
-                new_content = parser.preprocess_source(new_content)
-
-            # ── 2.6. Diff-level cache check ───────────────────────────────────
-            if self._cache is not None and not diagnostics.enabled and not _guardrail_cache_bypass:
-                _wasm_hash = self._wasm_hash_for(parser)
-                _diff_key = self._cache.diff_key(
-                    old_content,
-                    new_content,
-                    f"{cache_grammar_id}{cache_schema_suffix}{compile_cache_suffix}",
-                    _wasm_hash,
+        # Full-diff cache reads are disabled for this release candidate (#187).
+        # Historical entries omit the Rust engine/configuration identity and
+        # can silently replay stale style-only results after semantic fixes.
+        # Parser-tree caching remains available and is keyed by actual Wasm bytes.
+        with profiler.phase("wasm_plugin_execution"):
+            old_side_absent = file_lifecycle == "added" and old_content == ""
+            new_side_absent = file_lifecycle == "deleted" and new_content == ""
+            if self._cache is not None:
+                old_tree = (
+                    _empty_semantic_tree(language)
+                    if old_side_absent
+                    else self._cached_process(
+                        parser, old_content, language, filename, adaptive_fuel
+                    )
                 )
-                _cached = self._cache.get_diff(_diff_key)
-                if _cached is not None:
-                    logger.debug("Diff cache hit for %r", filename)
-                    return _apply_file_lifecycle_to_diff(
-                        SemanticDiff.model_validate_json(_cached),
-                        file_lifecycle,
+                new_tree = (
+                    _empty_semantic_tree(language)
+                    if new_side_absent
+                    else self._cached_process(
+                        parser, new_content, language, filename, adaptive_fuel
                     )
-
-            old_cst_json = self._parse(
-                old_content,
-                parser,
-                language,
-                filename,
-                profiler=profiler,
-            )
-            new_cst_json = self._parse(
-                new_content,
-                parser,
-                language,
-                filename,
-                profiler=profiler,
-            )
-
-            # ── CST size guard ────────────────────────────────────────────────
-            for _label, _cst in (("old", old_cst_json), ("new", new_cst_json)):
-                if len(_cst) > self._config.max_cst_bytes:
-                    raise ValueError(
-                        f"CST JSON for the {_label!r} version of {filename!r} is "
-                        f"{len(_cst):,} characters, exceeding the limit of "
-                        f"{self._config.max_cst_bytes:,} "
-                        "(DiffConfig.max_cst_bytes). Increase the limit or switch "
-                        "to a full-parse plugin."
-                    )
-
-            # ── 5. Trivia stripping ───────────────────────────────────────────
-            with profiler.phase("trivia_stripping"):
-                old_filtered = _strip_trivia_impl(old_cst_json, trivia_types)
-                new_filtered = _strip_trivia_impl(new_cst_json, trivia_types)
-
-            # ── 6. Style-only shortcut ────────────────────────────────────────
-            with profiler.phase("style_hashing"):
-                old_hash = _compute_structural_hash_for_tree(old_filtered)
-                new_hash = _compute_structural_hash_for_tree(new_filtered)
-
-            if old_hash == new_hash:
-                logger.debug("Style-only diff for %r", filename)
-                diagnostics.record(
-                    stage="style",
-                    action="style_only_shortcut",
-                    rule_id="pipeline.style_only_shortcut",
-                    reason="filtered CST structural hashes are equal",
-                    metadata={"old_hash": old_hash, "new_hash": new_hash},
                 )
-                style_evidence = build_style_only_evidence(
-                    old_source=old_content,
-                    new_source=new_content,
-                    language=language,
-                    old_cst_json=old_cst_json,
-                    new_cst_json=new_cst_json,
+            else:
+                old_tree = (
+                    _empty_semantic_tree(language)
+                    if old_side_absent
+                    else parser.process(old_content, language, filename, fuel=adaptive_fuel)
                 )
-                metadata: dict[str, Any] = {}
-                if style_evidence.ignored_style_changes:
-                    metadata["ignored_style_changes"] = style_evidence.ignored_style_changes
-                for group in style_evidence.change_groups:
-                    diagnostics.record_group(stage="invariance", group=group)
-                if diagnostics.enabled:
-                    diagnostics.summary.update(
-                        {
-                            "early_exit": "style_only",
-                            "final_change_count": 0,
-                            "final_group_count": len(style_evidence.change_groups),
-                        }
-                    )
-                    metadata["diagnostics"] = diagnostics.snapshot()
-                style_diff = SemanticDiff.style_only(
-                    filename,
-                    new_filename if new_filename is not None else filename,
-                    language,
-                    change_groups=style_evidence.change_groups,
-                    metadata=metadata,
+                new_tree = (
+                    _empty_semantic_tree(language)
+                    if new_side_absent
+                    else parser.process(new_content, language, filename, fuel=adaptive_fuel)
                 )
-                style_diff = _apply_file_lifecycle_to_diff(style_diff, file_lifecycle)
-                return apply_guardrails_to_diff(
-                    style_diff,
-                    old_tree=None,
-                    new_tree=None,
-                    old_source=old_raw,
-                    new_source=new_raw,
-                    config=self._config,
-                    diagnostics=diagnostics,
-                )
-
-            # ── 6.5. Adaptive fuel budget ─────────────────────────────────────
-            old_cst_nodes = _count_cst_nodes(old_filtered)
-            new_cst_nodes = _count_cst_nodes(new_filtered)
-            max_cst_nodes = max(old_cst_nodes, new_cst_nodes)
-            adaptive_fuel = _fuel_budget(
-                self._config.plugin_fuel,
-                20_000_000 + max_cst_nodes * 200_000,
-            )
-            logger.debug(
-                "[%s] CST: old=%d bytes/%d nodes, new=%d bytes/%d nodes — fuel=%d",
-                filename,
-                len(old_filtered),
-                old_cst_nodes,
-                len(new_filtered),
-                new_cst_nodes,
-                adaptive_fuel,
-            )
-            diagnostics.record(
-                stage="parse",
-                action="interpret_cst",
-                rule_id="pipeline.interpret_cst_parse",
-                reason="host CST parsed, stripped, and sized",
-                metadata={
-                    "old_cst_bytes": len(old_filtered),
-                    "new_cst_bytes": len(new_filtered),
-                    "old_cst_nodes": old_cst_nodes,
-                    "new_cst_nodes": new_cst_nodes,
-                    "adaptive_fuel": adaptive_fuel,
-                },
-            )
-
-            # ── 7. Plugin dispatch (with parse-tree cache) ───────────────────
-            try:
-                with profiler.phase("wasm_plugin_execution"):
-                    if self._cache is not None:
-                        old_tree = self._cached_process(
-                            parser,
-                            old_filtered,
-                            language,
-                            filename,
-                            adaptive_fuel,
-                            cache_grammar_id=cache_grammar_id,
-                        )
-                        new_tree = self._cached_process(
-                            parser,
-                            new_filtered,
-                            language,
-                            filename,
-                            adaptive_fuel,
-                            cache_grammar_id=cache_grammar_id,
-                        )
-                    else:
-                        old_tree = parser.process(
-                            old_filtered, language, filename, fuel=adaptive_fuel
-                        )
-                        new_tree = parser.process(
-                            new_filtered, language, filename, fuel=adaptive_fuel
-                        )
-            except PluginFuelExhausted as exc:
-                raise PluginFuelExhausted(
-                    exc.plugin_id,
-                    exc.fuel,
-                    f"file={filename!r}, CST nodes up to {max_cst_nodes:,}",
-                ) from exc
-
-        else:
-            # ── 7 (full-parse). Plugin owns parsing — send raw source ─────────
-            # Stages 3-6 are skipped: the plugin handles its own CST construction
-            # and trivia filtering. The style-only shortcut is not available here
-            # because there is no host-side CST to hash.
-            max_source_bytes = max(
-                len(old_content.encode("utf-8")),
-                len(new_content.encode("utf-8")),
-            )
-            adaptive_fuel = _fuel_budget(
-                self._config.plugin_fuel,
-                50_000_000 + max_source_bytes * 150_000,
-            )
-            logger.debug("full-parse mode for %r via %r", filename, parser.grammar_id)
-
-            # Diff-level cache check for full-parse mode.
-            if self._cache is not None and not diagnostics.enabled and not _guardrail_cache_bypass:
-                _wasm_hash = self._wasm_hash_for(parser)
-                _diff_key = self._cache.diff_key(
-                    old_content,
-                    new_content,
-                    f"{parser.grammar_id}{cache_schema_suffix}{compile_cache_suffix}",
-                    _wasm_hash,
-                )
-                _cached = self._cache.get_diff(_diff_key)
-                if _cached is not None:
-                    logger.debug("Diff cache hit for %r (full-parse)", filename)
-                    return _apply_file_lifecycle_to_diff(
-                        SemanticDiff.model_validate_json(_cached),
-                        file_lifecycle,
-                    )
-
-            with profiler.phase("wasm_plugin_execution"):
-                old_side_absent = file_lifecycle == "added" and old_content == ""
-                new_side_absent = file_lifecycle == "deleted" and new_content == ""
-                if self._cache is not None:
-                    old_tree = (
-                        _empty_semantic_tree(language)
-                        if old_side_absent
-                        else self._cached_process(
-                            parser, old_content, language, filename, adaptive_fuel
-                        )
-                    )
-                    new_tree = (
-                        _empty_semantic_tree(language)
-                        if new_side_absent
-                        else self._cached_process(
-                            parser, new_content, language, filename, adaptive_fuel
-                        )
-                    )
-                else:
-                    old_tree = (
-                        _empty_semantic_tree(language)
-                        if old_side_absent
-                        else parser.process(old_content, language, filename, fuel=adaptive_fuel)
-                    )
-                    new_tree = (
-                        _empty_semantic_tree(language)
-                        if new_side_absent
-                        else parser.process(new_content, language, filename, fuel=adaptive_fuel)
-                    )
-            diagnostics.record(
-                stage="parse",
-                action="full_parse",
-                rule_id="pipeline.full_parse",
-                reason="plugin parsed raw source",
-                metadata={"adaptive_fuel": adaptive_fuel},
-            )
+        diagnostics.record(
+            stage="parse",
+            action="full_parse",
+            rule_id="pipeline.full_parse",
+            reason="plugin parsed raw source",
+            metadata={"adaptive_fuel": adaptive_fuel},
+        )
 
         engine_telemetry.extend(_drain_plugin_telemetry(parser))
         _record_engine_telemetry(diagnostics, engine_telemetry)
@@ -1611,37 +1428,36 @@ class SemanticDiffer:
         with profiler.phase("semantic_node_validation"):
             old_tree = _enrich_literal_labels(old_tree, old_raw)
             new_tree = _enrich_literal_labels(new_tree, new_raw)
-            # Cross-language NodeFacts (issue #70): every tree (all parse branches converge here)
-            # gets language-agnostic structural facts derived in the Rust core, so the intent
-            # explainer has signal for ALL languages, not just Python. Idempotent + graceful.
+            # Cross-language NodeFacts (issue #70): Rust derives structural facts for
+            # every language. Missing or malformed native output is a contract failure,
+            # not permission to silently publish a semantically impoverished tree.
             old_tree = enrich_node_facts(old_tree)
             new_tree = enrich_node_facts(new_tree)
             # Profile-label enrichment runs in the Rust core (issue #57 port).
-            # The Rust core is AUTHORITATIVE (readiness #90 / #82): no Python
-            # engine fallback — if the backend is unavailable the tree passes
-            # through UNCHANGED (graceful, degraded labels) rather than routing
-            # to a Python enricher, so "if Python didn't exist it still works".
+            # Rust owns profile enrichment. Missing ABI handlers are fatal:
+            # accepting un-enriched trees silently changes identity matching
+            # and can suppress a meaningful diff. Never substitute Python logic.
             # Gated by language so non-profile diffs pay no tree-JSON roundtrip.
             if language.lower() in {"json", "yaml"}:
                 _identity_fields = tuple(schema_resolution.identity_fields)
                 old_tree = try_rust_profile_label_enrichment(
                     old_tree, old_raw, language, identity_fields=_identity_fields
-                ) or old_tree
+                )
                 new_tree = try_rust_profile_label_enrichment(
                     new_tree, new_raw, language, identity_fields=_identity_fields
-                ) or new_tree
+                )
             if language.lower() in {"css", "scss", "html", "xml", "mdx"}:
-                old_tree = try_rust_profile_label_enrichment(old_tree, old_raw, language) or old_tree
-                new_tree = try_rust_profile_label_enrichment(new_tree, new_raw, language) or new_tree
+                old_tree = try_rust_profile_label_enrichment(old_tree, old_raw, language)
+                new_tree = try_rust_profile_label_enrichment(new_tree, new_raw, language)
             if language.lower() in {"hcl", "puppet"}:
-                old_tree = try_rust_profile_label_enrichment(old_tree, old_raw, language) or old_tree
-                new_tree = try_rust_profile_label_enrichment(new_tree, new_raw, language) or new_tree
+                old_tree = try_rust_profile_label_enrichment(old_tree, old_raw, language)
+                new_tree = try_rust_profile_label_enrichment(new_tree, new_raw, language)
             if language.lower() == "sql":
-                old_tree = try_rust_profile_label_enrichment(old_tree, old_raw, language) or old_tree
-                new_tree = try_rust_profile_label_enrichment(new_tree, new_raw, language) or new_tree
+                old_tree = try_rust_profile_label_enrichment(old_tree, old_raw, language)
+                new_tree = try_rust_profile_label_enrichment(new_tree, new_raw, language)
             if language.lower() in {"asm", "bash", "delphi"}:
-                old_tree = try_rust_profile_label_enrichment(old_tree, old_raw, language) or old_tree
-                new_tree = try_rust_profile_label_enrichment(new_tree, new_raw, language) or new_tree
+                old_tree = try_rust_profile_label_enrichment(old_tree, old_raw, language)
+                new_tree = try_rust_profile_label_enrichment(new_tree, new_raw, language)
             _validate_tree_ids(old_tree, filename)
             _validate_tree_ids(new_tree, filename)
         diagnostics.record(
@@ -1654,17 +1470,16 @@ class SemanticDiffer:
                 "new_nodes": _count_semantic_nodes(new_tree),
             },
         )
-        # ── 8.5. Token-level fallback for severe parse errors ───────────────
+        # ── 8.5. Rust source fallback for severe parse errors ───────────────
         # When tree-sitter produced ERROR nodes and fallback is enabled, skip
-        # the GumTree algorithm and return a coarse token-level diff instead.
+        # semantic matching and preserve the changed source range in Rust.
         if self._config.fallback_to_token_diff and (
             _has_error_node(old_tree) or _has_error_node(new_tree)
         ):
             logger.warning(
-                "Parse errors detected in %r — falling back to token-level diff",
+                "Parse errors detected in %r - using Rust source fallback",
                 filename,
             )
-            _raise_rust_only_gate_error("parse errors require Rust token-level fallback")
             diagnostics.record(
                 stage="fallback",
                 action="token_fallback",
@@ -1693,6 +1508,8 @@ class SemanticDiffer:
                 old_source=old_raw,
                 new_source=new_raw,
                 config=self._config,
+                policy_filename=policy_source_filename,
+                policy_old_filename=policy_old_filename,
                 diagnostics=diagnostics,
             )
         # ── 9. GumTree matching ────────────────────────────────────────────────
@@ -1759,6 +1576,15 @@ class SemanticDiffer:
                     collect_trace=diagnostics.enabled,
                 )
             if finalize_result is not None:
+                if finalize_result.get("fallback_diff") is not None:
+                    fallback_diff = finalize_result["fallback_diff"].model_copy(update={
+                        "old_filename": filename,
+                        "new_filename": new_filename if new_filename is not None else filename})
+                    fallback_diff = _apply_file_lifecycle_to_diff(fallback_diff, file_lifecycle)
+                    return apply_guardrails_to_diff(fallback_diff, old_tree=None, new_tree=None,
+                        old_source=old_raw, new_source=new_raw, config=self._config,
+                        policy_filename=policy_source_filename,
+                        policy_old_filename=policy_old_filename, diagnostics=diagnostics)
                 diagnostics.record(
                     stage="finalize",
                     action="rust_finalize_review",
@@ -1781,176 +1607,18 @@ class SemanticDiffer:
                         reason="rust finalize pass completed",
                         count=int(entry.get("changes_after", 0)),
                     )
-                # Semantic invariances (css color / literal equivalence / yaml block↔flow / import
-                # reorder / …) are equivalences that must hold REGARDLESS of routing, but this
-                # short-circuit returns before the stage-12 apply_invariances. Run it here on the
-                # routed changes so canonical-value "zero-change" edits collapse under routing too
-                # (#57: unlocks json/yaml/css/python). No-op when no invariance fires.
-                fin_changes = finalize_result["changes"]
-                fin_is_style_only = finalize_result["is_style_only"]
-                fin_invariant_groups: list[Any] = []
-                fin_invariant_ignored: list[dict[str, Any]] = []
-                if fin_changes:
-                    _inv = apply_invariances(
-                        fin_changes,
-                        old_tree=old_tree,
-                        new_tree=new_tree,
-                        old_source=old_content,
-                        new_source=new_content,
-                        language=language,
-                    )
-                    if len(_inv.changes) != len(fin_changes) or _inv.change_groups:
-                        fin_changes = _inv.changes
-                        fin_invariant_groups = list(_inv.change_groups)
-                        # The invariance's own IGNORED_STYLE groups ARE the style evidence — carry
-                        # their rule_id/reason so metadata["ignored_style_changes"] leads with the
-                        # specific reason (css.color.canonical_equivalence), not the generic
-                        # source-equivalence fallback below.
-                        for group in fin_invariant_groups:
-                            diagnostics.record_group(stage="invariance", group=group)
-                        fin_invariant_ignored = [
-                            {"rule_id": g.rule_id, **dict(g.metadata)}
-                            for g in fin_invariant_groups
-                            if g.kind == ChangeGroupKind.IGNORED_STYLE
-                        ]
-                        if not fin_changes and old_content != new_content:
-                            fin_is_style_only = True
-                # Generic files are line-oriented from the user's point of view
-                # (#57 generic routing, mirroring the stage-12 orchestration): the routed
-                # finalize's parser-token churn is REPLACED wholesale by the Rust text
-                # review's stable line/character spans, then the (Rust-first) markdown
-                # section passes run for .md filenames. Parser-derived groups are dropped
-                # with the churn — carrying them forward invents fake pairings between
-                # unrelated lines.
-                fin_ignored_override: list[dict[str, Any]] | None = None
-                if language.lower() == "generic":
-                    generic_presented = normalize_generic_text_for_review(
-                        fin_changes,
-                        old_content,
-                        new_content,
-                    )
-                    presented_generic = PresentationResult(
-                        changes=generic_presented.changes,
-                        change_groups=generic_presented.change_groups,
-                        ignored_style_changes=[
-                            *generic_presented.ignored_style_changes,
-                        ],
-                    )
-                    presented_generic = _markdown_section_move_presentation(
-                        presented_generic,
-                        old_source=old_content,
-                        new_source=new_content,
-                        old_filename=filename,
-                        new_filename=(
-                            new_filename if new_filename is not None else filename
-                        ),
-                    )
-                    presented_generic = _markdown_section_heading_rename_presentation(
-                        presented_generic,
-                        old_source=old_content,
-                        new_source=new_content,
-                        old_filename=filename,
-                        new_filename=(
-                            new_filename if new_filename is not None else filename
-                        ),
-                    )
-                    fin_changes = presented_generic.changes
-                    fin_invariant_groups = list(presented_generic.change_groups)
-                    fin_ignored_override = list(presented_generic.ignored_style_changes)
-                    finalize_result["change_groups"] = []
-                    finalize_result["no_surviving_changes"] = False
-                    # Mirror the stage-12 style-only resolution: identical sources (or
-                    # whitespace-collapsed-equal trees) with no surviving line spans are a
-                    # style-only diff, not "no changes". The Rust finalize's flag reflects
-                    # its own suppressions, which the replacement just discarded.
-                    if not fin_changes:
+                from intentumdiff.rust_core import complete_routed_review
 
-                        def _generic_norm(node: SemanticNode) -> tuple[Any, ...]:
-                            label = " ".join(node.label.split())
-                            return (
-                                node.node_type,
-                                label,
-                                tuple(_generic_norm(c) for c in node.children),
-                            )
-
-                        fin_is_style_only = (
-                            old_content == new_content
-                            or _generic_norm(old_tree) == _generic_norm(new_tree)
-                        )
-                # Stage-12 style-only resolution, language-agnostic (markdown #44 exposed
-                # it): ZERO surviving changes with identical (or whitespace-collapsed
-                # tree-equal) sources is a style-only diff for every routed language —
-                # the Rust finalize's flag only reflects its own suppressions.
-                if not fin_changes and not fin_is_style_only:
-
-                    def _routed_norm(node: SemanticNode) -> tuple[Any, ...]:
-                        label = " ".join(node.label.split())
-                        return (
-                            node.node_type,
-                            label,
-                            tuple(_routed_norm(c) for c in node.children),
-                        )
-
-                    fin_is_style_only = (
-                        old_content == new_content
-                        or _routed_norm(old_tree) == _routed_norm(new_tree)
-                    )
-                metadata_fin: dict[str, Any] = {
-                    "engine_owner": "rust",
-                    "semantic_contract": "rust_finalize_review_v1",
-                    "rust_core": {
-                        "engine": "rust_finalize_review_v1",
-                        "stage": "per_stage_finalize_routing",
-                        "used": True,
-                    },
-                }
-                # Context metadata the normal path attaches at stage 11 — the routed
-                # return must carry the same contracts (cpp compile_commands pilot gap).
-                if schema_metadata is not None:
-                    metadata_fin["schema"] = schema_metadata
-                if compile_metadata is not None:
-                    metadata_fin["compile_commands"] = compile_metadata
-                combined_ignored = (
-                    fin_ignored_override
-                    if fin_ignored_override is not None
-                    else [
-                        *fin_invariant_ignored,
-                        *finalize_result["ignored_style_changes"],
-                    ]
-                )
-                if combined_ignored:
-                    metadata_fin["ignored_style_changes"] = combined_ignored
-                if finalize_result["no_surviving_changes"]:
-                    metadata_fin["no_surviving_changes"] = True
-                routed_groups = [*finalize_result["change_groups"], *fin_invariant_groups]
-                if not fin_changes and old_content != new_content and not fin_invariant_ignored:
-                    # The normal path attaches a source-equivalence suppression group
-                    # post-diff when a diff nets to zero changes but the sources differ
-                    # (xml attribute reorder -> zero changes must still RECORD the
-                    # suppression, not merely be absent). The routed short-circuit returns
-                    # before that stage, so mirror it here.
-                    style_evidence = build_style_only_evidence(
-                        old_source=old_content,
-                        new_source=new_content,
-                        language=language,
-                    )
-                    for group in style_evidence.change_groups:
-                        diagnostics.record_group(stage="invariance", group=group)
-                    routed_groups.extend(style_evidence.change_groups)
-                    if style_evidence.ignored_style_changes:
-                        metadata_fin.setdefault("ignored_style_changes", []).extend(
-                            style_evidence.ignored_style_changes
-                        )
-                routed = SemanticDiff(
+                routed = complete_routed_review(
+                    finalized=finalize_result, old_tree=old_tree, new_tree=new_tree,
+                    old_source=old_content, new_source=new_content,
                     old_filename=filename,
                     new_filename=new_filename if new_filename is not None else filename,
-                    language=language,
-                    changes=fin_changes,
-                    change_groups=routed_groups,
-                    has_semantic_changes=bool(fin_changes) and not fin_is_style_only,
-                    is_style_only=fin_is_style_only,
-                    metadata=metadata_fin,
+                    language=language, schema_metadata=schema_metadata,
+                    compile_metadata=compile_metadata,
                 )
+                for group in routed.change_groups:
+                    diagnostics.record_group(stage="invariance", group=group)
                 routed = _apply_file_lifecycle_to_diff(routed, file_lifecycle)
                 routed = apply_guardrails_to_diff(
                     routed,
@@ -1959,6 +1627,8 @@ class SemanticDiffer:
                     old_source=old_content,
                     new_source=new_content,
                     config=self._config,
+                    policy_filename=policy_source_filename,
+                    policy_old_filename=policy_old_filename,
                     diagnostics=diagnostics,
                 )
                 # Diff-analyzer pass on the routed diff (stage 13.5 mirror; issue #57
@@ -1973,7 +1643,7 @@ class SemanticDiffer:
             # transitional python pipeline is retired (issue #57 payoff, stage 4b) —
             # degrade honestly to the coarse token-level diff, same as parse errors.
             logger.warning(
-                "Rust finalize declined for %r (%s) — token-level fallback",
+                "Rust finalize declined for %r (%s) — Rust source fallback",
                 filename,
                 language,
             )
@@ -2008,6 +1678,8 @@ class SemanticDiffer:
                 old_source=old_raw,
                 new_source=new_raw,
                 config=self._config,
+                policy_filename=policy_source_filename,
+                policy_old_filename=policy_old_filename,
                 diagnostics=diagnostics,
             )
         if test_engine == "python":
@@ -2021,7 +1693,7 @@ class SemanticDiffer:
         # transitional python pipeline is retired (issue #57 payoff) — semantic
         # diffing REQUIRES the Rust core; degrade honestly to the token-level diff.
         logger.warning(
-            "Rust core disabled for %r — token-level fallback (python pipeline retired)",
+            "Rust core disabled for %r — Rust source fallback (python pipeline retired)",
             filename,
         )
         _raise_rust_only_gate_error("rust core disabled")
@@ -2055,6 +1727,8 @@ class SemanticDiffer:
             old_source=old_raw,
             new_source=new_raw,
             config=self._config,
+            policy_filename=policy_source_filename,
+            policy_old_filename=policy_old_filename,
             diagnostics=diagnostics,
         )
 
@@ -2062,62 +1736,22 @@ class SemanticDiffer:
         self,
         source: Source,
     ) -> Iterator[ChangeStreamEvent]:
-        """Yield ``ChangeStreamEvent`` objects as each pipeline phase completes.
+        """Stream finalized Rust-backed changes as FINAL add events.
 
-        Three phases are emitted in order:
-
-        1. **STRUCTURAL** — one ``action="add"`` event per change after the
-           GumTree edit script and move-promotion pass (stage 11).  These are
-           available immediately, before the (potentially expensive) refactoring
-           detection runs.
-
-        2. **REFINED** — events emitted once refactoring detection (stage 12) has
-           run.  Consumed raw changes are replaced by ``action="revise"`` events
-           carrying a ``REFACTORING`` change and ``replaced_ids`` listing the
-           node IDs of the Phase-1 changes they supersede.  Removed-but-not-
-           replaced changes are emitted as ``action="remove"``.
-
-        3. **FINAL** — events emitted after classification (stage 13) and any
-           diff-analyzer plugins (stage 13.5) have run.  Emitted only when these
-           passes modify the change list.
-
-        Consumers that only care about the final result can wait until all events
-        are consumed; consumers that want to display partial results can render
-        STRUCTURAL changes immediately and update/remove them as REFINED and
-        FINAL events arrive.
+        The Python pipeline was retired in 0.0.2. Rust returns a complete diff,
+        not intermediate structural/refinement snapshots. This API preserves its
+        event-shaped transport contract, but it does not manufacture progressive
+        semantic phases or reconcile changes using Python object identity.
         """
-        old_content, new_content, filename, language_hint = source.get_content()
-        yield from self._run_pipeline_streaming(old_content, new_content, filename, language_hint)
-
-    def _run_pipeline_streaming(
-        self,
-        old_content: str,
-        new_content: str,
-        filename: str,
-        language_hint: str | None,
-        *,
-        new_filename: str | None = None,
-    ) -> Iterator[ChangeStreamEvent]:
-        """Internal generator — see ``diff_stream_progressive`` for the public API."""
-        result = self._run_stages_1_to_11(
-            old_content, new_content, filename, language_hint, new_filename=new_filename
-        )
-
-        if isinstance(result, SemanticDiff):
-            # Early exit (cache hit / style-only / token fallback): emit all changes
-            # as FINAL so consumers still receive a well-formed event stream.
-            for change in result.changes:
-                yield ChangeStreamEvent(
-                    phase=ChangeStreamPhase.FINAL,
-                    action="add",
-                    change=change,
-                )
-            return
-
-        raise AssertionError(
-            "unreachable: _run_stages_1_to_11 always returns a SemanticDiff since the "
-            "python pipeline retirement (issue #57 payoff, stage 4b)"
-        )
+        # Reuse the public path so FileSource policy discovery retains both
+        # physical paths even when the source exposes a display alias.
+        result = self.diff(source)
+        for change in result.changes:
+            yield ChangeStreamEvent(
+                phase=ChangeStreamPhase.FINAL,
+                action="add",
+                change=change,
+            )
 
     def _cached_process(
         self,
@@ -2141,33 +1775,72 @@ class SemanticDiffer:
             raise RuntimeError("parse cache store is not configured")
         wasm_hash = self._wasm_hash_for(parser)
         grammar_id = cache_grammar_id or parser.grammar_id
-        key = cache.parse_key(input_, grammar_id, wasm_hash)
+        # Rust owns the canonical key hashing. The host must supply every
+        # argument that can affect the Wasm parser output, including language
+        # and filename for a multi-language/shared-grammar component (#188).
+        parser_context = json.dumps(
+            {"grammar_id": grammar_id, "language": language, "filename": filename},
+            sort_keys=True, separators=(",", ":"),
+        )
+        key = cache.parse_key(input_, parser_context, wasm_hash)
         cached = cache.get_parse(key)
         if cached is not None:
             logger.debug("Parse cache hit for grammar=%r", grammar_id)
             return SemanticNode.model_validate_json(cached)
 
         node = parser.process(input_, language, filename, fuel=fuel)
+        # A trap may reload the Wasm module during process(); never write its
+        # output under a key computed for a different compiled component.
+        if self._wasm_hash_for(parser) != wasm_hash:
+            raise RuntimeError("parser Wasm identity changed during parse")
         cache.put_parse(key, node.model_dump_json(), grammar_id=grammar_id)
         return node
 
     def _wasm_hash_for(self, parser: Any) -> str:
-        """
-        Return a short (16-hex-char) sha256 hash of the parser's Wasm binary.
+        """Fingerprint the actual parser Wasm bytes before permitting any cache hit.
 
-        Computed once per grammar_id per process and memoised.  Falls back to
-        ``"unknown"`` if the path cannot be read (e.g. in-memory test stubs).
+        A missing/unreadable component cannot share an ``"unknown"`` cache key:
+        doing so could replay a stale style-only diff without invoking Rust.
+        File identity (not grammar ID) scopes the memoized digest, so different
+        component revisions cannot share previously certified parse/diff results.
         """
-        grammar_id: str = parser.grammar_id
-        if grammar_id in self._wasm_hash_cache:
-            return self._wasm_hash_cache[grammar_id]
         try:
-            wasm_bytes = Path(parser.wasm_path).read_bytes()
-            h = hashlib.sha256(wasm_bytes).hexdigest()[:16]
-        except (AttributeError, OSError):
-            h = "unknown"
-        self._wasm_hash_cache[grammar_id] = h
-        return h
+            path = Path(parser.wasm_path).resolve(strict=True)
+            stat_before = path.stat()
+        except (AttributeError, TypeError, OSError) as exc:
+            raise RuntimeError(
+                f"cannot fingerprint parser Wasm at {getattr(parser, 'wasm_path', None)!r}"
+            ) from exc
+
+        def _identity(stat: Any) -> tuple[int, int, int, int, int]:
+            return (stat.st_dev, stat.st_ino, stat.st_size,
+                    stat.st_mtime_ns, stat.st_ctime_ns)
+
+        identity = (str(path), *_identity(stat_before))
+        digest = self._wasm_hash_cache.get(identity)
+        if digest is None:
+            try:
+                wasm_bytes = path.read_bytes()
+                stat_after = path.stat()
+            except OSError as exc:
+                raise RuntimeError(f"cannot fingerprint parser Wasm at {str(path)!r}") from exc
+            if _identity(stat_before) != _identity(stat_after):
+                raise RuntimeError(f"parser Wasm changed while hashing: {path}")
+            digest = hashlib.sha256(wasm_bytes).hexdigest()
+            self._wasm_hash_cache[identity] = digest
+
+        # The path can be replaced while a LoadedPlugin still executes the
+        # previous compiled component. File digest alone is not a safe cache
+        # identity: bind it to the *instantiated* Wasmtime bytes (#196).
+        compiled = getattr(parser, "compiled_wasm_sha256", None)
+        if isinstance(parser, ParserAdapter) and (
+            not isinstance(compiled, str) or len(compiled) != 64
+            or any(c not in "0123456789abcdef" for c in compiled)
+        ):
+            raise RuntimeError(f"cannot verify compiled parser Wasm identity: {path}")
+        if isinstance(compiled, str) and compiled != digest:
+            raise RuntimeError(f"compiled parser Wasm differs from backing artifact: {path}")
+        return digest
 
     def _parse(
         self,

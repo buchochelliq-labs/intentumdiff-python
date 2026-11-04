@@ -13,6 +13,7 @@ import pytest
 
 from intentumdiff.core.index import SemanticIndex
 from intentumdiff.core.models import NodePosition, ReferenceKind, SemanticNode, SymbolDefinition
+from tests.unit.platform_gates import powershell_unavailable
 
 
 # ---------------------------------------------------------------------------
@@ -452,6 +453,8 @@ class TestFindReferences:
         idx = _index_for(tree, language="elixir")
         assert idx.find_references("greet") == []
         assert idx.find_references("IO.puts")[0].reference_kind == ReferenceKind.CALL
+
+    @powershell_unavailable
 
     def test_end_to_end_newer_language_examples_populate_index(self):
         from intentumdiff import SemanticDiffer

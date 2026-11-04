@@ -27,8 +27,11 @@ not handled by the allowed list.
 
 from __future__ import annotations
 
+import hashlib
 import importlib.metadata
 import logging
+import os
+import platform
 import re
 import threading
 import time
@@ -44,7 +47,7 @@ from intentumdiff.plugins.adapter import (
     ParserAdapter,
     RendererAdapter,
 )
-from intentumdiff.plugins.exceptions import PluginFuelExhausted, PluginNotFoundError
+from intentumdiff.plugins.exceptions import PluginFuelExhausted, PluginNotFoundError, PluginLoadError, PluginSandboxViolation, PluginSecurityError
 from intentumdiff.plugins.language_metadata import fallback_language_info
 from intentumdiff.plugins.loader import LoadedPlugin, load_plugin
 
@@ -66,10 +69,72 @@ PhaseRecorder = Callable[[str, float], None]
 # installs safe even when stale entry-point metadata still lists the plugin.
 _DISABLED_BUILTIN_PARSER_ENTRYPOINTS: frozenset[str] = frozenset({"freebasic"})
 
+def arch_incompatible_reason(
+    entry_point_name: str, wasm_path: str | Path | None = None,
+) -> str | None:
+    """Delegate architecture policy to Rust using the actual staged Wasm digest.
+
+    Python only resolves and hashes host files. With no concrete component, the
+    legacy Rust API must remain fail-closed for unverified PowerShell on ARM64.
+    """
+    from intentumdiff.rust_core import _c_abi_call
+    system, machine = platform.system(), platform.machine()
+    legacy = _c_abi_call("parser_availability", entry_point_name, "", system, machine)
+    reason = legacy["reason"]
+    if reason is None or wasm_path is None:
+        return reason
+    try:
+        digest = hashlib.sha256(Path(wasm_path).read_bytes()).hexdigest()
+    except OSError:
+        return reason  # Unreadable bytes cannot lift a Rust-owned restriction.
+    checked = _c_abi_call(
+        "parser_availability_with_digest", entry_point_name, "", system, machine, digest,
+    )
+    if not isinstance(checked, dict) or "reason" not in checked:
+        raise PluginLoadError(str(wasm_path), "malformed Rust digest availability response")
+    return checked["reason"]
+
+
+def unavailable_parser_for(filename: str) -> tuple[str, str] | None:
+    """Explain a Rust-owned platform exclusion only when its bytes are excluded."""
+    from intentumdiff.rust_core import _c_abi_call
+    system, machine = platform.system(), platform.machine()
+    legacy = _c_abi_call("parser_availability", "", filename, system, machine)["unavailable"]
+    if legacy is None:
+        return None
+    # The built-in path is transport metadata, not a Python semantic policy.
+    # A third-party parser may have a different path; never presume it verified.
+    name = legacy[0]
+    staged = _wasm_dir() / f"{name}_parser.wasm"
+    try:
+        digest = hashlib.sha256(staged.read_bytes()).hexdigest()
+    except OSError:
+        return tuple(legacy)
+    checked = _c_abi_call(
+        "parser_availability_with_digest", "", filename, system, machine, digest,
+    )
+    if not isinstance(checked, dict) or "unavailable" not in checked:
+        raise PluginLoadError(str(staged), "malformed Rust digest availability response")
+    unavailable = checked["unavailable"]
+    return tuple(unavailable) if unavailable is not None else None
+
+
 # Normalised names of first-party packages whose entry-point callables are
 # trusted plugin metadata.
 _TRUSTED_PLUGIN_PACKAGE_NAMES: frozenset[str] = frozenset(
     {
+        # The DISTRIBUTION name, which is not the import name. The wheel is published as
+        # `intentumdiff-python` (the polyglot-binding convention) while the import package
+        # is `intentumdiff`, and entry points report the DISTRIBUTION.
+        #
+        # Omitting it made the package fail its own first-party check: all 69 built-in
+        # parsers were treated as untrusted third-party plugins and refused with a security
+        # warning naming the package itself as the culprit. Every invocation printed ~69
+        # error lines before producing output. Shipped in 0.0.1 and only found by installing
+        # the published wheel — no test in the repo could see it, because in a source
+        # checkout the distribution resolves differently.
+        "intentumdiff-python",
+        "intentumdiff_python",
         "intentumdiff",
         "intentumdiff-dbt",
         "intentumdiff_dbt",
@@ -223,8 +288,25 @@ def _is_trusted_entry_point(ep: importlib.metadata.EntryPoint) -> bool:
 
 
 def _wasm_dir() -> Path:
-    """Return the directory containing built-in .wasm files."""
+    """Return the directory containing built-in .wasm files.
+
+    THE one place that knows where components live. Five call sites derived this
+    independently and four got it right; the CLI's copy used `Path(__file__).parent`
+    from inside `cli/`, resolving to `intentumdiff/cli/wasm/` — a directory that does
+    not exist. Every renderer lookup silently found nothing, and the user was told
+    "No renderer plugin found" for components that ship, load, and report the exact
+    format requested.
+
+    Re-deriving a path is how that happens. Call this instead.
+    """
     return Path(__file__).parent.parent / "wasm"
+
+
+#: Public alias. `_wasm_dir` is private by name and was therefore copied rather than
+#: imported; this gives callers outside this module something to use.
+def builtin_wasm_dir() -> Path:
+    """Directory containing the built-in .wasm components."""
+    return _wasm_dir()
 
 
 # ---------------------------------------------------------------------------
@@ -275,7 +357,7 @@ def _wasm_path_from_ep(ep: importlib.metadata.EntryPoint) -> str:
             "execute arbitrary code before Wasm sandboxing is in effect.  "
             f"The plugin author must add '{_WASM_PATH_METADATA_FIELD}: <relative/path.wasm>' "
             "to their package metadata.  "
-            "See: https://docs.intentumdiff.dev/plugins/metadata"
+            "See: https://buchochelliq-labs.github.io/intentumdiff-docs/extending/"
         )
 
     # Locate the file via importlib.metadata without importing anything.
@@ -423,6 +505,21 @@ class PluginRegistry:
                     self._parser_load_errors.extend(load_errors)
         return self._parser_catalog
 
+    @staticmethod
+    def _catalog_descriptors(entries):
+        descriptors = []
+        for entry in entries:
+            metadata = [_fallback_info_for_catalog(entry, language) for language in entry.language_guesses]
+            descriptors.append({
+                "id": entry.resolved_path,
+                "aliases": [entry.plugin_id, *entry.entry_names],
+                "languages": list(entry.language_guesses),
+                "filenames": [info.default_filename for info in metadata],
+                "extensions": [extension for info in metadata for extension in info.language_file_extensions],
+                "priority": 0,  # Discovery metadata has no declared priority; ignore cache warmth.
+            })
+        return descriptors
+
     def _candidate_entries(
         self,
         filename: str,
@@ -434,31 +531,17 @@ class PluginRegistry:
     ) -> list[_ParserCatalogEntry]:
         with _record_phase(phase_recorder, "parser_candidate_shortlist"):
             entries = self._catalog(phase_recorder)
-            language_filter = set(candidates or [])
-            if language_hint:
-                language_filter.add(language_hint)
+            import json
+            from intentumdiff.rust_core import _required_engine_json
 
-            result: list[_ParserCatalogEntry] = []
-            for entry in entries:
-                if plugin_id is not None:
-                    if plugin_id == entry.plugin_id or plugin_id in entry.entry_names:
-                        result.append(entry)
-                    continue
-                if language_filter:
-                    if language_filter.intersection(entry.language_guesses):
-                        result.append(entry)
-                    continue
-                if _entry_matches_filename(entry, filename):
-                    result.append(entry)
-
-            if result or plugin_id is not None or language_filter:
-                # The generic parser is the designated FALLBACK: when a specific parser
-                # also matched the filename (CMakeLists.txt matches both generic's .txt
-                # and the cmake plugin), catalog order must not let generic claim the
-                # file first — it detect-claims everything.
-                result.sort(key=lambda e: "generic" in e.language_guesses)
-                return result
-            return list(entries)
+            descriptors = self._catalog_descriptors(entries)
+            indices = _required_engine_json("parser_candidate_shortlist", json.dumps({
+                "entries": descriptors,
+                "query": {"filename": filename, "language_hint": language_hint, "plugin_id": plugin_id, "candidates": candidates or []},
+            }), result_type=list)
+            if any(type(index) is not int or not 0 <= index < len(entries) for index in indices) or len(set(indices)) != len(indices):
+                raise RuntimeError("Rust parser shortlist returned invalid indices")
+            return [entries[index] for index in indices]
 
     def _load_catalog_entry(
         self,
@@ -507,6 +590,7 @@ class PluginRegistry:
         language_hint: str | None = None,
         plugin_id: str | None = None,
         phase_recorder: PhaseRecorder | None = None,
+        old_content: str = "",
     ) -> tuple[ParserAdapter, str]:
         """
         Return ``(parser, language)`` for a given file.
@@ -516,113 +600,67 @@ class PluginRegistry:
 
         Raises ``PluginNotFoundError`` if no parser can handle the file.
         """
-        allowed = self._config.allowed_plugins
+        import json
+        from intentumdiff.rust_core import _required_engine_json
 
-        if plugin_id:
-            for entry in self._candidate_entries(
-                filename,
-                language_hint=language_hint,
-                plugin_id=plugin_id,
-                phase_recorder=phase_recorder,
-            ):
+        entries = self._catalog(phase_recorder)
+        request = {"entries": self._catalog_descriptors(entries), "filename": filename,
+                   "content": content[:2048], "old_content": old_content[:2048], "language_hint": language_hint, "plugin_id": plugin_id,
+                   "strict": self._config.strict_plugins, "allowed_plugins": self._config.allowed_plugins}
+        events = []
+        parsers = {}
+        errors = {}
+        while True:
+            with _record_phase(phase_recorder, "parser_candidate_shortlist"):
+                action = _required_engine_json("filename_selection_next", json.dumps({
+                    "request": request, "events": events,
+                }), result_type=dict)
+            kind = action["kind"]
+            if kind == "load":
+                index = action["index"]
                 try:
-                    parser = self._load_catalog_entry(entry, phase_recorder=phase_recorder)
-                    if allowed is not None and parser.grammar_id not in allowed:
-                        continue
-                    if language_hint:
-                        if language_hint in parser.language_ids:
-                            return parser, language_hint
-                        continue
+                    parser = self._load_catalog_entry(entries[index], phase_recorder=phase_recorder)
+                    event = {"kind": "loaded", "index": index, "grammar_id": parser.grammar_id,
+                             "languages": list(parser.language_ids), "priority": parser.priority}
+                    parsers[index] = parser
+                except Exception as exc:
+                    errors[len(events)] = exc
+                    event = {"kind": "load_failed", "index": index,
+                             "terminal": isinstance(exc, (PluginFuelExhausted, PluginSandboxViolation, PluginSecurityError))}
+                events.append(event)
+            elif kind == "probe":
+                index = action["index"]
+                try:
                     with _record_phase(phase_recorder, "parser_plugin_language_detection"):
-                        lang = parser.detect_language(filename, content[:2048])
-                    if lang:
-                        return parser, lang
-                except PluginFuelExhausted:
-                    # Terminal, never a skip. Fuel exhaustion (now possible during
-                    # instantiation since the wasmtime 47 binding) means THIS plugin hit
-                    # the user's CPU cap — trying the next candidate would either
-                    # mis-parse the file or dress the fuel problem up as
-                    # PluginNotFoundError('unknown'). The whole point of the fuel
-                    # contract is to fail explicitly rather than degrade silently.
-                    raise
+                        language = parsers[index].detect_language(filename, action["sample"])
+                    event = {"kind": "probed", "index": index, "language": language}
                 except Exception as exc:
-                    logger.debug(
-                        "Skipping parser candidate %s after load failure: %s",
-                        ",".join(entry.entry_names),
-                        exc,
-                    )
-                    continue
-            raise PluginNotFoundError(plugin_id, filename)
-
-        if language_hint:
-            for entry in self._candidate_entries(
-                filename,
-                language_hint=language_hint,
-                phase_recorder=phase_recorder,
-            ):
-                try:
-                    parser = self._load_catalog_entry(entry, phase_recorder=phase_recorder)
-                except PluginFuelExhausted:
-                    # Terminal, never a skip. Fuel exhaustion (now possible during
-                    # instantiation since the wasmtime 47 binding) means THIS plugin hit
-                    # the user's CPU cap — trying the next candidate would either
-                    # mis-parse the file or dress the fuel problem up as
-                    # PluginNotFoundError('unknown'). The whole point of the fuel
-                    # contract is to fail explicitly rather than degrade silently.
-                    raise
-                except Exception as exc:
-                    logger.debug(
-                        "Skipping parser candidate %s after load failure: %s",
-                        ",".join(entry.entry_names),
-                        exc,
-                    )
-                    continue
-                if allowed is not None and parser.grammar_id not in allowed:
-                    continue
-                if language_hint in parser.language_ids:
-                    return parser, language_hint
-                if language_hint in entry.language_guesses and "generic" in parser.language_ids:
-                    return parser, language_hint
-            if self._config.strict_plugins:
-                raise PluginNotFoundError(language_hint, filename)
-
-        primary_entries = self._candidate_entries(filename, phase_recorder=phase_recorder)
-        matched_paths: set[str] = set()
-        for entries in (
-            primary_entries,
-            [entry for entry in self._catalog() if entry not in primary_entries],
-        ):
-            for entry in entries:
-                if entry.resolved_path in matched_paths:
-                    continue
-                matched_paths.add(entry.resolved_path)
-                try:
-                    parser = self._load_catalog_entry(entry, phase_recorder=phase_recorder)
-                except PluginFuelExhausted:
-                    # Terminal, never a skip. Fuel exhaustion (now possible during
-                    # instantiation since the wasmtime 47 binding) means THIS plugin hit
-                    # the user's CPU cap — trying the next candidate would either
-                    # mis-parse the file or dress the fuel problem up as
-                    # PluginNotFoundError('unknown'). The whole point of the fuel
-                    # contract is to fail explicitly rather than degrade silently.
-                    raise
-                except Exception as exc:
-                    logger.debug(
-                        "Skipping parser candidate %s after load failure: %s",
-                        ",".join(entry.entry_names),
-                        exc,
-                    )
-                    continue
-                if allowed is not None and parser.grammar_id not in allowed:
-                    continue
-                with _record_phase(phase_recorder, "parser_plugin_language_detection"):
-                    lang = parser.detect_language(filename, content[:2048])
-                if lang:
-                    return parser, lang
-            if entries is primary_entries and primary_entries:
+                    errors[len(events)] = exc
+                    event = {"kind": "probe_failed", "index": index}
+                events.append(event)
+            elif kind == "selected":
+                return parsers[action["index"]], action["language"]
+            elif kind == "failure":
+                raise errors[action["event"]]
+            elif kind == "not_found":
+                missing = action["identity"]
                 break
+            else:
+                raise RuntimeError(f"Invalid Rust filename selection action: {kind!r}")
 
-        raise PluginNotFoundError("unknown", filename)
+        excluded = unavailable_parser_for(filename)
+        if excluded is not None:
+            name, reason = excluded
+            # The one place this is worth saying out loud: the user is diffing a file whose
+            # parser we deliberately did not load. Without it they see "unknown language" and
+            # have no way to learn why, which looks like a broken product rather than a known
+            # platform limitation.
+            logger.warning(
+                "No semantic parser for %s on %s/%s: the %r parser is excluded here because "
+                "%s. This file falls back to token-level diffing.",
+                filename, platform.system(), platform.machine(), name, reason,
+            )
+        raise PluginNotFoundError(missing, filename)
 
     def detect_by_content(
         self,
@@ -641,50 +679,32 @@ class PluginRegistry:
             Optional pre-filter.  When supplied, only parsers whose
             ``language_ids`` overlap with *candidates* are consulted.
         """
-        if plugin_id:
-            parser = self.get_parser_by_id(plugin_id)
-            allowed = self._config.allowed_plugins
-            if allowed is not None and parser.grammar_id not in allowed:
-                raise PluginNotFoundError(plugin_id)
-            if candidates and not any(c in parser.language_ids for c in candidates):
-                raise PluginNotFoundError(plugin_id)
-            lang = parser.detect_language("", content[:4096])
-            if not lang or (candidates and lang not in candidates):
-                raise PluginNotFoundError(plugin_id)
-            return [
-                DetectionResult(
-                    language=lang,
-                    grammar_id=parser.grammar_id,
-                    confidence=1.0,
-                )
-            ]
+        import json
+        from intentumdiff.rust_core import _required_engine_json
 
-        ranked = sorted(self.parsers, key=lambda p: p.priority, reverse=True)
-        allowed = self._config.allowed_plugins
-        raw_results: list[tuple[str, str, int, bool]] = []
-        for parser in ranked:
-            if allowed is not None and parser.grammar_id not in allowed:
-                continue
-            if candidates and not any(c in parser.language_ids for c in candidates):
-                continue
-            lang = parser.detect_language("", content[:4096])
-            if lang:
-                preferred = bool(
-                    preferred_plugins
-                    and preferred_plugins.get(lang) == parser.plugin_id
-                )
-                raw_results.append((lang, parser.grammar_id, parser.priority, preferred))
-        raw_results.sort(key=lambda item: (not item[3], -item[2], item[0], item[1]))
-        results: list[DetectionResult] = []
-        for rank, (lang, grammar_id, _priority, _preferred) in enumerate(raw_results):
-            results.append(
-                DetectionResult(
-                    language=lang,
-                    grammar_id=grammar_id,
-                    confidence=round(1.0 / (rank + 1), 3),
-                )
-            )
-        return results
+        parsers = self.parsers
+        request = {
+            "entries": [{"plugin_id": parser.plugin_id, "grammar_id": parser.grammar_id,
+                         "languages": list(parser.language_ids), "priority": parser.priority}
+                        for parser in parsers],
+            "content": content,
+            "allowed_plugins": self._config.allowed_plugins,
+            "candidates": candidates or [],
+            "preferred_plugins": preferred_plugins or {},
+            "plugin_id": plugin_id,
+        }
+        plan = _required_engine_json("content_detection_plan", json.dumps(request), result_type=dict)
+        # Loading and calling host adapters is I/O; probe eligibility and sample size
+        # come from Rust. Exceptions (including fuel exhaustion) propagate unchanged.
+        observations = [{"index": index,
+                         "language": parsers[index].detect_language("", plan["sample"])}
+                        for index in plan["indices"]]
+        outcome = _required_engine_json("content_detection_finish", json.dumps({
+            "request": request, "observations": observations,
+        }), result_type=dict)
+        if outcome["not_found"] is not None:
+            raise PluginNotFoundError(outcome["not_found"])
+        return [DetectionResult.model_validate(result) for result in outcome["results"]]
 
     def example_for(self, language: str, plugin_id: str | None = None) -> dict[str, str] | None:
         """Return the ``{old, new}`` playground example from the parser that
@@ -878,26 +898,6 @@ def _fallback_info_for_catalog(
     )
 
 
-def _entry_matches_filename(entry: _ParserCatalogEntry, filename: str) -> bool:
-    if not filename:
-        return False
-    name = Path(filename).name.lower()
-    full = filename.replace("\\", "/").lower()
-    for language_id in entry.language_guesses:
-        info = _fallback_info_for_catalog(entry, language_id)
-        if name == info.default_filename.lower() or full.endswith(
-            "/" + info.default_filename.lower()
-        ):
-            return True
-        for extension in info.language_file_extensions:
-            normalized = extension.lower()
-            if normalized.startswith("."):
-                if name.endswith(normalized):
-                    return True
-            elif name == normalized:
-                return True
-    return False
-
 
 def _discover_parser_catalog(
     *,
@@ -913,7 +913,25 @@ def _discover_parser_catalog(
             if ep.name in _DISABLED_BUILTIN_PARSER_ENTRYPOINTS and _is_trusted_entry_point(ep):
                 logger.debug("Skipping disabled first-party parser entry point: %s", ep.name)
                 continue
-            wasm_path = _wasm_path_from_ep(ep)
+            incompatible = arch_incompatible_reason(ep.name)
+            if incompatible is not None:
+                # A trusted staged replacement may now be compatible. Resolve
+                # its host path without compiling Wasm, then ask the same Rust
+                # policy again using its real SHA-256. On any error retain the
+                # original fail-closed exclusion and keep discovery silent.
+                try:
+                    wasm_path = _wasm_path_from_ep(ep)
+                    incompatible = arch_incompatible_reason(ep.name, wasm_path)
+                except Exception:
+                    pass
+                if incompatible is not None:
+                    logger.debug(
+                        "Parser %r is unavailable on %s/%s: %s",
+                        ep.name, platform.system(), platform.machine(), incompatible,
+                    )
+                    continue
+            else:
+                wasm_path = _wasm_path_from_ep(ep)
             resolved = str(Path(wasm_path).resolve())
             existing = by_path.get(resolved)
             if existing is not None:
@@ -961,10 +979,17 @@ def _add_first_party_parser_entrypoint_fallbacks(
     for name, callable_name in _FIRST_PARTY_PARSER_ENTRYPOINT_FALLBACKS.items():
         if name in existing_names:
             continue
+        # The SAME architecture gate as entry-point discovery. This fallback builds catalog
+        # entries directly from builtin callables, bypassing that path entirely - which is
+        # exactly how powershell kept reaching the catalog on Windows/aarch64 while the gate
+        # itself correctly reported "excluded". Two ways in, one of them guarded, is no guard.
         entry_callable = getattr(builtins, callable_name, None)
         if entry_callable is None:
             continue
         wasm_path = entry_callable()
+        if arch_incompatible_reason(name, wasm_path) is not None:
+            logger.debug("Fallback skipped for %r: unverified staged component on this platform", name)
+            continue
         if not Path(wasm_path).exists():
             continue
         resolved = str(Path(wasm_path).resolve())
@@ -1034,6 +1059,7 @@ def _load_parsers(
 def _load_renderers(fuel: int = 10_000_000) -> list[RendererAdapter]:
     """Discover and instantiate all registered renderer plugins."""
     adapters: list[RendererAdapter] = []
+    failed: list[str] = []
     for ep in importlib.metadata.entry_points(group=_RENDERER_GROUP):
         try:
             wasm_path = _wasm_path_from_ep(ep)
@@ -1044,6 +1070,22 @@ def _load_renderers(fuel: int = 10_000_000) -> list[RendererAdapter]:
             logger.debug("Loaded renderer plugin: %s (%s)", ep.name, wasm_path)
         except Exception as exc:
             logger.warning("Failed to load renderer plugin %r: %s", ep.name, exc)
+            failed.append(ep.name)
+    # A renderer that fails to load used to be a warning and nothing else: the adapter was
+    # simply omitted and every caller carried on with a smaller set. CI ran the whole suite
+    # with ZERO renderers and reported green - each test touching --format html|patch|llm|
+    # terminal was skipping, hitting a Python fallback, or asserting on degraded output, and
+    # nothing distinguished those from real coverage (#22).
+    #
+    # Opt-in rather than always-on, because a user with a partial install should still get a
+    # working diff - degrading is right for THEM and wrong for a gate. CI sets this so an
+    # incomplete component set stops the run where the cause is legible.
+    if failed and os.environ.get("INTENTUMDIFF_REQUIRE_ALL_COMPONENTS") == "1":
+        raise PluginLoadError(
+            f"{len(failed)} renderer plugin(s) failed to load: {', '.join(sorted(failed))}. "
+            "INTENTUMDIFF_REQUIRE_ALL_COMPONENTS=1 is set, so an incomplete component set is "
+            "an error rather than a silent downgrade - stage the components, or unset it."
+        )
     return adapters
 
 
@@ -1059,7 +1101,12 @@ def _load_enrichers(fuel: int = 10_000_000) -> list[EnricherAdapter]:
             adapters.append(adapter)
             logger.debug("Loaded enricher plugin: %s (%s)", ep.name, wasm_path)
         except Exception as exc:
-            logger.warning("Failed to load enricher plugin %r: %s", ep.name, exc)
+            # An installed extension that fails to load is not equivalent to an
+            # absent extension. Continuing would certify incomplete semantics (#237).
+            raise PluginLoadError(
+                f"{_ENRICHER_GROUP}:{ep.name}",
+                f"registered enricher failed to load: {exc}",
+            ) from exc
     return adapters
 
 
@@ -1075,5 +1122,10 @@ def _load_diff_analyzers(fuel: int = 10_000_000) -> list[DiffAnalyzerAdapter]:
             adapters.append(adapter)
             logger.debug("Loaded diff-analyzer plugin: %s (%s)", ep.name, wasm_path)
         except Exception as exc:
-            logger.warning("Failed to load diff-analyzer plugin %r: %s", ep.name, exc)
+            # Do not silently remove a registered semantic pass from the review
+            # pipeline or treat a partial plugin set as a complete result (#236).
+            raise PluginLoadError(
+                f"{_DIFF_ANALYZER_GROUP}:{ep.name}",
+                f"registered diff analyzer failed to load: {exc}",
+            ) from exc
     return adapters

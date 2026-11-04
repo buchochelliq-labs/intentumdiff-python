@@ -22,6 +22,8 @@ import importlib.metadata as _importlib_metadata
 import json
 import logging
 import os
+import platform
+import re
 import ssl
 import threading
 import time as _time
@@ -35,11 +37,15 @@ from wasmtime.component import Component, Linker
 from intentumdiff.plugins.exceptions import (
     PluginFuelExhausted,
     PluginLoadError,
+    PluginSecurityError,
     PluginOutputError,
     PluginSandboxViolation,
 )
 
 logger = logging.getLogger(__name__)
+
+# Emitted once per process, not once per plugin load: there are 78 plugins.
+_OVERRIDE_WARNED: bool = False
 _MAX_TELEMETRY_RECORDS = 128
 
 # ---------------------------------------------------------------------------
@@ -52,8 +58,16 @@ _MAX_TELEMETRY_RECORDS = 128
 # fast offline check.  For a live OSV scan run: ``intentumdiff security-check``.
 _VULNERABLE_WASMTIME_VERSIONS: frozenset[str] = frozenset({
     "44.0.0",   # CVE-2026-44216 / GHSA-p8xm-42r7-89xg — host panic via memory64
+    # GHSA-mghf-wjfp-p5xm — aarch64 br_table sandbox escape (critical).
+    # GHSA-9pvw-hwfg-92h5 — host panic through component streams/futures.
+    # Pre-patch Python bindings listed below contain affected native Wasmtime.
+    "45.0.0",
+    "46.0.1",
+    "47.0.1",
+    "48.0.0",
+    "49.0.0",
 })
-_WASMTIME_ADVISORY = "CVE-2026-44216 / GHSA-p8xm-42r7-89xg"
+_WASMTIME_ADVISORY = "GHSA-p8xm-42r7-89xg / GHSA-mghf-wjfp-p5xm / GHSA-9pvw-hwfg-92h5"
 _WASMTIME_ADVISORY_URL = (
     "https://github.com/bytecodealliance/wasmtime/security/advisories/"
     "GHSA-p8xm-42r7-89xg"
@@ -72,50 +86,112 @@ def _is_trusted_wasm_path(wasm_path: str | Path | None) -> bool:
         return False
 
 
-#: The #89 provenance manifest shipped alongside the bundled parsers (filename -> SHA-256).
+#: First-party bundled Wasm is always verified before execution. There is no
+#: release runtime waiver: absent, malformed or divergent provenance is unsafe.
 _PROVENANCE_MANIFEST = _BUILTIN_WASM_DIR / "wasm_provenance.json"
-#: Opt-in to make a bundled-wasm provenance mismatch a hard load failure (release/CI). Off by
-#: default so a dev tree without the manifest — or with a stale one after a manual wasm copy —
-#: is not broken; the mismatch is still logged.
-_ENFORCE_PROVENANCE_ENV = "INTENTUMDIFF_ENFORCE_WASM_PROVENANCE"
 
 
-def _verify_builtin_provenance(path: Path) -> None:
-    """Verify a bundled first-party Wasm against the #89 provenance manifest, when present.
+def _verify_builtin_provenance(path: Path) -> bytes | None:
+    """Check bundled Wasm against the shipping manifest and return those bytes.
 
-    Parallels hub.py's third-party checksum path, but for the first-party bundled parsers: a
-    mismatch — or an artifact the manifest never saw (the #87 stale-artifact case) — is a
-    supply-chain red flag. It is logged as a warning, and raised as a ``PluginLoadError`` when
-    ``INTENTUMDIFF_ENFORCE_WASM_PROVENANCE=1``. A missing/unreadable manifest (a dev build without
-    the package-time provenance step) is skipped — verification is optional by design (#89).
+    Read and hash the same buffer that will be passed to Wasmtime; checking a
+    path and reopening it later permits replacement between the two operations.
+    Third-party plugin provenance is checked independently by the plugin hub.
     """
-    if not _is_trusted_wasm_path(path) or not _PROVENANCE_MANIFEST.is_file():
-        return
+    if not _is_trusted_wasm_path(path):
+        return None
     try:
         manifest = json.loads(_PROVENANCE_MANIFEST.read_text(encoding="utf-8"))
-        artifacts = manifest.get("artifacts", {})
-    except (OSError, ValueError):
-        return  # unreadable manifest — do not block on a broken dev artifact
+    except (OSError, ValueError, UnicodeError) as exc:
+        raise PluginSecurityError(
+            str(path), f"bundled Wasm provenance manifest is missing or invalid: {exc}"
+        ) from exc
+    if not isinstance(manifest, dict) or manifest.get("schema_version") != 1:
+        raise PluginSecurityError(str(path), "bundled Wasm provenance has invalid schema")
+    artifacts = manifest.get("artifacts")
     if not isinstance(artifacts, dict):
-        return
-    name = Path(path).name
+        raise PluginSecurityError(str(path), "bundled Wasm provenance lacks artifacts map")
+    name = path.name
     expected = artifacts.get(name)
-    problem: str | None = None
-    if expected is None:
-        problem = f"bundled Wasm {name!r} is not listed in the provenance manifest"
-    else:
-        digest = hashlib.sha256(Path(path).read_bytes()).hexdigest()
-        if digest != expected.get("sha256"):
-            problem = f"bundled Wasm {name!r} does not match its provenance SHA-256"
-    if problem is None:
+    if not isinstance(expected, dict):
+        raise PluginSecurityError(
+            str(path), f"bundled Wasm {name!r} is not listed in the provenance manifest"
+        )
+    digest = expected.get("sha256")
+    size = expected.get("size_bytes")
+    if (not isinstance(digest, str) or len(digest) != 64
+            or any(c not in "0123456789abcdef" for c in digest)
+            or not isinstance(size, int) or isinstance(size, bool) or size < 0):
+        raise PluginSecurityError(str(path), f"bundled Wasm {name!r} has invalid provenance metadata")
+    try:
+        payload = path.read_bytes()
+    except OSError as exc:
+        raise PluginSecurityError(str(path), f"bundled Wasm cannot be read: {exc}") from exc
+    if len(payload) != size or hashlib.sha256(payload).hexdigest() != digest:
+        raise PluginSecurityError(str(path), f"bundled Wasm {name!r} does not match provenance SHA-256/size")
+    return payload
+
+
+def _check_rust_component_load_policy(path: Path) -> bytes | None:
+    """Ask Rust before compilation; return the exact approved bytes if guarded.
+
+    Python owns only host I/O and error translation; Rust decides whether the
+    digest is compatible. A protected component must compile from the *same*
+    bytes that were hashed, rather than reopening the file after validation.
+    An empty digest probes the restriction without reading unrelated plugins.
+    """
+    from intentumdiff.rust_core import _c_abi_call
+
+    name, system, machine = path.name, platform.system(), platform.machine()
+
+    def reason_for(digest: str) -> str | None:
+        status = _c_abi_call("parser_component_availability", name, system, machine, digest)
+        if not isinstance(status, dict) or "reason" not in status:
+            raise PluginLoadError(str(path), "malformed Rust component availability response")
+        reason = status["reason"]
+        if reason is not None and not isinstance(reason, str):
+            raise PluginLoadError(str(path), "invalid Rust component availability reason type")
+        return reason
+
+    if reason_for("") is None:
         return
-    if os.environ.get(_ENFORCE_PROVENANCE_ENV) == "1":
-        raise PluginLoadError(str(path), problem)
-    logger.warning(
-        "Wasm provenance check: %s (set %s=1 to make this a hard failure).",
-        problem,
-        _ENFORCE_PROVENANCE_ENV,
-    )
+    try:
+        approved_bytes = path.read_bytes()
+    except OSError as exc:
+        raise PluginLoadError(str(path), f"cannot hash staged Wasm component: {exc}") from exc
+    reason = reason_for(hashlib.sha256(approved_bytes).hexdigest())
+    if reason is not None:
+        raise PluginLoadError(str(path), reason)
+    return approved_bytes
+
+
+
+def _is_known_vulnerable_wasmtime(version: str) -> bool:
+    """Reject vulnerable Wasmtime release *ranges*, not just sampled versions.
+
+    GHSA-mghf-wjfp-p5xm affects every release below 36.0.19,
+    37.0.0 through 48.0.6, and 49.0.0 through 49.0.3.
+    GHSA-9pvw-hwfg-92h5 also affects 46.0.0 through 48.0.6 and
+    49.0.0 through 49.0.3. An unparseable/prerelease version cannot
+    establish the patched runtime identity and must fail closed.
+    """
+    if version in _VULNERABLE_WASMTIME_VERSIONS:
+        return True
+    match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", version)
+    if match is None:
+        return True
+    major, _minor, patch = (int(part) for part in match.groups())
+    if major < 36:
+        return True
+    if major == 36:
+        return patch < 19
+    if 37 <= major < 48:
+        return True
+    if major == 48:
+        return patch < 7
+    if major == 49:
+        return patch < 4
+    return False
 
 
 def _check_wasmtime_version(
@@ -129,19 +205,22 @@ def _check_wasmtime_version(
     Wasm module to panic the host process by allocating an extremely large
     WebAssembly table under the default on-demand allocator with memory64.
 
-    The normal dependency path now requires a fixed Python binding
-    (wasmtime>=45.0).  This offline runtime gate remains as defense-in-depth
-    for stale or manually pinned environments.
+    The release-candidate Python dependency pins wasmtime==50.0.1, the
+    available Python binding after the 2026 ARM64 Wasmtime advisories.
+    This offline runtime gate remains as defense-in-depth for stale or
+    manually pinned environments. Rust Core independently pins 48.0.7.
 
-    See: https://github.com/bytecodealliance/wasmtime/security/advisories/GHSA-p8xm-42r7-89xg
+    See: https://github.com/bytecodealliance/wasmtime/security/advisories/GHSA-mghf-wjfp-p5xm
     """
     try:
         version = _importlib_metadata.version("wasmtime")
-    except _importlib_metadata.PackageNotFoundError:
-        # wasmtime not installed as a proper package — skip version gate.
-        return
+    except _importlib_metadata.PackageNotFoundError as exc:
+        raise PluginSecurityError(
+            "<wasmtime-version-check>",
+            "wasmtime distribution metadata is absent; cannot verify a patched native runtime",
+        ) from exc
 
-    if version not in _VULNERABLE_WASMTIME_VERSIONS:
+    if not _is_known_vulnerable_wasmtime(version):
         return
 
     override = os.environ.get("INTENTUMDIFF_ALLOW_VULNERABLE_WASMTIME", "").strip()
@@ -156,11 +235,12 @@ def _check_wasmtime_version(
         )
         return
 
-    raise PluginLoadError(
+    raise PluginSecurityError(
         "<wasmtime-version-check>",
-        f"wasmtime=={version} is in the known-vulnerable blocklist "
-        f"({_WASMTIME_ADVISORY} — host-process panic on large table allocation "
-        f"with memory64). Upgrade wasmtime or set INTENTUMDIFF_ALLOW_VULNERABLE_WASMTIME=1 "
+        f"wasmtime=={version} is in the known-vulnerable blocklist or its " 
+        f"version cannot be verified as patched "
+        f"({_WASMTIME_ADVISORY} — unsafe host behaviour including aarch64 "
+        f"sandbox escape or process panic). Upgrade wasmtime or set INTENTUMDIFF_ALLOW_VULNERABLE_WASMTIME=1 "
         f"to override (not recommended). Run 'intentumdiff security-check' for a live "
         f"OSV scan. See: {_WASMTIME_ADVISORY_URL}",
     )
@@ -404,19 +484,30 @@ def _check_osv_cache_or_block(
         # Stamp is fresh but no cache file: the last fetch failed.
         override = os.environ.get("INTENTUMDIFF_ALLOW_VULNERABLE_WASMTIME", "").strip()
         if override in ("1", "true", "yes"):
-            logger.warning(
-                "INTENTUMDIFF_ALLOW_VULNERABLE_WASMTIME: loading plugins with "
-                "unverified OSV status — last advisory fetch failed."
-            )
+            # Worth saying — a safety check has been deliberately disabled — but worth
+            # saying ONCE. Emitting it per plugin load repeated it up to 78 times a run.
+            global _OVERRIDE_WARNED
+            if not _OVERRIDE_WARNED:
+                _OVERRIDE_WARNED = True
+                logger.warning(
+                    "INTENTUMDIFF_ALLOW_VULNERABLE_WASMTIME: loading plugins with "
+                    "unverified OSV status — last advisory fetch failed."
+                )
             return
         if trusted or _is_trusted_wasm_path(wasm_path):
-            logger.warning(
+            # DEBUG, not WARNING. This fires on every ordinary run whenever the machine
+            # is offline or the advisory cache has expired, and there is nothing for the
+            # user to do about it: first-party plugins ship inside the wheel and
+            # third-party ones stay blocked either way. Emitting it at warning level put
+            # alarming text — naming a "allow vulnerable" override — on stderr beside
+            # correct results, which is precisely how 0.0.1 came to look broken.
+            logger.debug(
                 "Loading first-party trusted Wasm plugin with unverified OSV "
                 "status because the last advisory fetch failed. Third-party "
                 "plugins remain blocked without INTENTUMDIFF_ALLOW_VULNERABLE_WASMTIME=1."
             )
             return
-        raise PluginLoadError(
+        raise PluginSecurityError(
             "<osv-check>",
             "The OSV advisory check failed on its last attempt (network "
             "unavailable?). Plugin loading is blocked to protect against "
@@ -443,7 +534,7 @@ def _check_osv_cache_or_block(
                 )
                 return
             aliases = ", ".join(v.get("aliases", []))
-            raise PluginLoadError(
+            raise PluginSecurityError(
                 "<osv-check>",
                 f"OSV advisory {v['id']}"
                 + (f" ({aliases})" if aliases else "")
@@ -546,61 +637,6 @@ def _bounded_plugin_text(plugin_id: str, export_name: str, value: Any) -> str:
     return text
 
 
-def _check_json_text_limits(cst_json: str) -> None:
-    size = len(cst_json.encode("utf-8"))
-    if size > _HOST_UTILS_MAX_JSON_BYTES:
-        raise _host_utils_error(
-            f"JSON payload is {size} bytes; limit is "
-            f"{_HOST_UTILS_MAX_JSON_BYTES} bytes"
-        )
-
-    depth = 0
-    in_string = False
-    escaped = False
-    for ch in cst_json:
-        if in_string:
-            if escaped:
-                escaped = False
-            elif ch == "\\":
-                escaped = True
-            elif ch == '"':
-                in_string = False
-            continue
-        if ch == '"':
-            in_string = True
-        elif ch in "[{":
-            depth += 1
-            if depth > _HOST_UTILS_MAX_JSON_DEPTH:
-                raise _host_utils_error(
-                    f"JSON nesting depth exceeds {_HOST_UTILS_MAX_JSON_DEPTH}"
-                )
-        elif ch in "]}":
-            depth = max(0, depth - 1)
-
-
-def _check_trivia_type_limits(trivia_types: list[str]) -> None:
-    if len(trivia_types) > _HOST_UTILS_MAX_TRIVIA_TYPES:
-        raise _host_utils_error(
-            f"trivia type count is {len(trivia_types)}; limit is "
-            f"{_HOST_UTILS_MAX_TRIVIA_TYPES}"
-        )
-
-    total = 0
-    for trivia_type in trivia_types:
-        size = len(str(trivia_type).encode("utf-8"))
-        if size > _HOST_UTILS_MAX_TRIVIA_TYPE_BYTES:
-            raise _host_utils_error(
-                f"trivia type is {size} bytes; limit is "
-                f"{_HOST_UTILS_MAX_TRIVIA_TYPE_BYTES} bytes"
-            )
-        total += size
-        if total > _HOST_UTILS_MAX_TRIVIA_BYTES:
-            raise _host_utils_error(
-                f"trivia type payload is {total} bytes; limit is "
-                f"{_HOST_UTILS_MAX_TRIVIA_BYTES} bytes"
-            )
-
-
 def _truncate_utf8(text: str, max_bytes: int) -> str:
     encoded = text.encode("utf-8")
     if len(encoded) <= max_bytes:
@@ -610,107 +646,22 @@ def _truncate_utf8(text: str, max_bytes: int) -> str:
     return encoded[:budget].decode("utf-8", errors="ignore") + marker.decode("ascii")
 
 
-def _load_limited_cst_json(cst_json: str) -> Any:
-    _check_json_text_limits(cst_json)
-    try:
-        data = json.loads(cst_json)
-    except json.JSONDecodeError as exc:
-        raise _host_utils_error(f"invalid JSON: {exc.msg}") from exc
-
-    stack: list[tuple[Any, int]] = [(data, 1)]
-    count = 0
-    while stack:
-        node, depth = stack.pop()
-        count += 1
-        if count > _HOST_UTILS_MAX_JSON_NODES:
-            raise _host_utils_error(
-                f"JSON node count exceeds {_HOST_UTILS_MAX_JSON_NODES}"
-            )
-        if depth > _HOST_UTILS_MAX_JSON_DEPTH:
-            raise _host_utils_error(
-                f"JSON nesting depth exceeds {_HOST_UTILS_MAX_JSON_DEPTH}"
-            )
-        if isinstance(node, dict):
-            stack.extend((value, depth + 1) for value in node.values())
-        elif isinstance(node, list):
-            stack.extend((value, depth + 1) for value in node)
-    return data
+def _host_limits() -> dict[str, int]:
+    return {"max_bytes": _HOST_UTILS_MAX_JSON_BYTES, "max_depth": _HOST_UTILS_MAX_JSON_DEPTH,
+            "max_nodes": _HOST_UTILS_MAX_JSON_NODES, "max_trivia_types": _HOST_UTILS_MAX_TRIVIA_TYPES,
+            "max_trivia_type_bytes": _HOST_UTILS_MAX_TRIVIA_TYPE_BYTES,
+            "max_trivia_bytes": _HOST_UTILS_MAX_TRIVIA_BYTES}
 
 
 def _strip_trivia_impl(cst_json: str, trivia_types: list[str]) -> str:
-    """Remove trivia nodes from a bounded CST JSON document."""
-    _check_trivia_type_limits(trivia_types)
-    trivia_set = set(trivia_types)
-    data = _load_limited_cst_json(cst_json)
-    if not isinstance(data, dict):
-        return json.dumps(data, separators=(",", ":"), ensure_ascii=False)
-
-    results: dict[int, Any] = {}
-    stack: list[tuple[Any, bool]] = [(data, False)]
-    while stack:
-        node, visited = stack.pop()
-        if not isinstance(node, dict):
-            results[id(node)] = node
-            continue
-        if not visited:
-            stack.append((node, True))
-            children = node.get("children")
-            if isinstance(children, list):
-                stack.extend((child, False) for child in reversed(children))
-            continue
-        if node.get("type") in trivia_set:
-            results[id(node)] = None
-            continue
-        children = node.get("children")
-        if isinstance(children, list):
-            filtered = [
-                results[id(child)]
-                for child in children
-                if results.get(id(child)) is not None
-            ]
-            results[id(node)] = dict(node, children=filtered)
-        else:
-            results[id(node)] = node
-
-    result = results[id(data)]
-    return json.dumps(result, separators=(",", ":"), ensure_ascii=False)
+    from intentumdiff.rust_core import _c_abi_call
+    return json.dumps(_c_abi_call("host_strip_trivia", cst_json, trivia_types, _host_limits()),
+                      separators=(",", ":"), ensure_ascii=False)
 
 
 def _structural_hash_impl(cst_json: str) -> str:
-    """
-    Compute a structural hash of a CST node (JSON object).
-
-    Algorithm matches the engine: SHA-256, hex-encoded.
-      leaf:     sha256(type + ":" + text)
-      internal: sha256(type + "|" + "|".join(hash(child) for child in children))
-    """
-
-    data = _load_limited_cst_json(cst_json)
-    hashes: dict[int, str] = {}
-    stack: list[tuple[Any, bool]] = [(data, False)]
-    while stack:
-        node, visited = stack.pop()
-        if not isinstance(node, dict):
-            hashes[id(node)] = hashlib.sha256(str(node).encode()).hexdigest()
-            continue
-        children = node.get("children")
-        has_children = isinstance(children, list) and bool(children)
-        if has_children and not visited:
-            stack.append((node, True))
-            stack.extend((child, False) for child in reversed(children))
-            continue
-        # Accept BOTH key spellings (#49 item 2, latent bug): CST nodes carry
-        # type/text, but FullParse SemanticNode trees carry node_type/label — the
-        # old type/text-only reads hashed FullParse trees as all-blank SHAPE.
-        node_type = node.get("node_type") or node.get("type", "")
-        if has_children:
-            child_hashes = "|".join(hashes[id(c)] for c in children)
-            payload = f"{node_type}|{child_hashes}"
-        else:
-            text = node.get("label", node.get("text", ""))
-            payload = f"{node_type}:{text}"
-        hashes[id(node)] = hashlib.sha256(payload.encode()).hexdigest()
-    return hashes[id(data)]
+    from intentumdiff.rust_core import _c_abi_call
+    return _c_abi_call("host_structural_hash", cst_json, _host_limits())
 
 
 def _log_impl(level: str, message: str) -> None:
@@ -782,6 +733,7 @@ class LoadedPlugin:
         fuel: int,
         iface_name: str,
         trusted: bool = False,
+        compiled_wasm_sha256: str | None = None,
     ) -> None:
         self._wasm_path = wasm_path
         self._instance = instance
@@ -789,6 +741,8 @@ class LoadedPlugin:
         self._fuel = fuel
         self._iface_name = iface_name
         self._trusted = trusted
+        # Digest of the *compiled* Wasm buffer, not a later filesystem snapshot.
+        self._compiled_wasm_sha256 = compiled_wasm_sha256
         # Cache the interface-level ExportIndex for nested function lookups
         self._iface_idx = instance.get_export_index(store, iface_name)
         # Wasm Store is not thread-safe; serialise all calls through this lock.
@@ -802,6 +756,11 @@ class LoadedPlugin:
     def wasm_path(self) -> str:
         """Path of the ``.wasm`` file that backs this plugin instance."""
         return self._wasm_path
+
+    @property
+    def compiled_wasm_sha256(self) -> str | None:
+        """SHA-256 of the exact Wasm bytes compiled for this live instance."""
+        return self._compiled_wasm_sha256
 
     @property
     def trusted(self) -> bool:
@@ -946,6 +905,7 @@ class LoadedPlugin:
         fresh = load_plugin(self._wasm_path, self._fuel, trusted=self._trusted)
         self._instance = fresh._instance
         self._store = fresh._store
+        self._compiled_wasm_sha256 = fresh._compiled_wasm_sha256
         self._iface_idx = fresh._instance.get_export_index(fresh._store, self._iface_name)
         self._tainted = False
 
@@ -980,12 +940,24 @@ class LoadedPlugin:
         if not unlimited:
             try:
                 self._store.set_fuel(fuel)
-            except WasmtimeError:
+            except WasmtimeError as exc:
+                # Never dispatch an unmetered guest; this store is tainted.
                 status = "fuel_set_failed"
-                logger.warning(
-                    "set_fuel failed for plugin %r — fuel cap may not be active",
-                    self._wasm_path,
+                self._tainted = True
+                self._record_telemetry(
+                    func_name=func_name,
+                    fuel_budget=fuel,
+                    fuel_unlimited=False,
+                    fuel_consumed=None,
+                    fuel_remaining=None,
+                    elapsed_ms=(_time.perf_counter() - started) * 1000.0,
+                    status=status,
+                    args=args,
                 )
+                raise PluginSecurityError(
+                    self._wasm_path,
+                    f"required Wasm fuel cap could not be applied: {exc}",
+                ) from exc
 
         try:
             # Two-level lookup: interface instance → function
@@ -1152,13 +1124,26 @@ def load_plugin(
     _unlimited = fuel == -1
     path = Path(wasm_path)
     trusted = trusted or _is_trusted_wasm_path(path)
-    _verify_builtin_provenance(path)                     # #89 first-party provenance (optional)
+    verified_component_bytes = _verify_builtin_provenance(path)  # #89, always fail closed
     _check_wasmtime_version(path, trusted=trusted)       # fast sync blocklist
     _check_osv_cache_or_block(path, trusted=trusted)     # fast sync OSV gate
     _maybe_start_osv_check()                             # async refresh
 
     if not path.exists():
         raise PluginLoadError(str(path), "file not found")
+    approved_component_bytes = _check_rust_component_load_policy(path)
+    if (verified_component_bytes is not None and approved_component_bytes is not None
+            and verified_component_bytes != approved_component_bytes):
+        raise PluginSecurityError(str(path), "bundled Wasm changed between provenance and Rust approval")
+    component_bytes = (approved_component_bytes
+                       if approved_component_bytes is not None else verified_component_bytes)
+    if component_bytes is None:
+        # Third-party components also compile from an owned, hashed buffer;
+        # Component.from_file would hide which revision Wasmtime actually read.
+        try:
+            component_bytes = path.read_bytes()
+        except OSError as exc:
+            raise PluginLoadError(str(path), f"cannot read Wasm component: {exc}") from exc
 
     try:
         cfg = Config()
@@ -1167,6 +1152,26 @@ def load_plugin(
         # exposes the setter (added in wasmtime-py post-44.0.0 builds).
         if hasattr(cfg, "wasm_memory64"):
             cfg.wasm_memory64 = False  # type: ignore[attr-defined]
+
+        # Every plugin gets its OWN Engine, and wasmtime reserves a large contiguous virtual
+        # address range per linear memory - 4 GiB by default on 64-bit, plus a guard region.
+        # With 73 parsers that is roughly 292 GiB of RESERVED (not committed) address space.
+        #
+        # x86-64 shrugs at that. Windows on ARM64 does not: loading every parser in one
+        # process - which language_ids() and every other inventory API does - fail-fasts with
+        # STATUS_STACK_BUFFER_OVERRUN (0xC0000409) and no Python traceback, because the
+        # failure happens in the allocator rather than in Python.
+        #
+        # Found by running the suite on windows-11-arm for the first time (#9). It was never
+        # only a test problem: any arm64 user listing supported languages would have hit it.
+        #
+        # A parser reads a source file. 64 MiB is already generous, and memory can still grow
+        # past the reservation by moving, so this caps address space, not capability.
+        if hasattr(cfg, "memory_reservation"):
+            cfg.memory_reservation = 64 * 1024 * 1024  # type: ignore[attr-defined]
+        if hasattr(cfg, "memory_guard_size"):
+            cfg.memory_guard_size = 64 * 1024  # type: ignore[attr-defined]
+
         if _unlimited:
             logger.warning(
                 "Unlimited Wasm fuel for plugin %r — calls are uncapped and "
@@ -1175,7 +1180,9 @@ def load_plugin(
             )
         engine = Engine(cfg)
 
-        component = Component.from_file(engine, str(path))
+        # Compile precisely the bytes whose digest is bound to this instance.
+        # First-party protected components were approved by Rust above.
+        component = Component(engine, component_bytes)
 
         linker = Linker(engine)
         linker.add_wasip2()
@@ -1183,18 +1190,18 @@ def load_plugin(
         # Register host-utils imports using add_instance context manager.
         # root must be closed before instantiate() is called.
         root = linker.root()
-        with root.add_instance("intentdiff:plugin/host-utils") as host:
+        with root.add_instance("intentdiff:plugin/host-utils@1.0.0") as host:
             host.add_func(
                 "strip-trivia",
-                lambda store, args: _strip_trivia_impl(args[0], list(args[1])),
+                lambda store, cst_json, trivia_types: _strip_trivia_impl(cst_json, list(trivia_types)),
             )
             host.add_func(
                 "structural-hash",
-                lambda store, args: _structural_hash_impl(args[0]),
+                lambda store, cst_json: _structural_hash_impl(cst_json),
             )
             host.add_func(
                 "log",
-                lambda store, args: _log_impl(args[0], args[1]),
+                lambda store, level, message: _log_impl(level, message),
             )
         root.close()
 
@@ -1207,7 +1214,13 @@ def load_plugin(
         # after the balloon.
         store.set_limits(memory_size=_plugin_memory_limit_bytes())
         if not _unlimited:
-            store.set_fuel(fuel)
+            try:
+                store.set_fuel(fuel)
+            except WasmtimeError as exc:
+                # Do not instantiate without the mandatory CPU budget.
+                raise PluginSecurityError(
+                    str(path), f"required Wasm fuel cap could not be applied during load: {exc}"
+                ) from exc
 
         instance = linker.instantiate(store, component)
 
@@ -1233,6 +1246,7 @@ def load_plugin(
             fuel,
             iface_name,
             trusted=trusted,
+            compiled_wasm_sha256=hashlib.sha256(component_bytes).hexdigest(),
         )
 
     except (PluginLoadError, PluginSandboxViolation):

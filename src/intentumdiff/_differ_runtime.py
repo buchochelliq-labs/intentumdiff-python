@@ -12,59 +12,25 @@ from intentumdiff.analysis.diagnostics import (
     DiagnosticsRecorder,
 )
 from intentumdiff.core.models import (
-    ChangeGroupKind,
     SemanticDiff,
 )
 
 logger = logging.getLogger(__name__)
 
-_ADDED_FILE_STATUSES = frozenset({"added", "add", "a", "new", "untracked"})
-_DELETED_FILE_STATUSES = frozenset({"deleted", "delete", "d", "removed", "remove"})
+def _infer_file_lifecycle(old_source: str, new_source: str, staging_status: str | None = None) -> str:
+    """Adapt source/status facts to the shared Rust lifecycle policy."""
+    from intentumdiff.rust_core import _c_abi_call
+    return _c_abi_call("infer_file_lifecycle", old_source, new_source, staging_status)
 
 
-def _infer_file_lifecycle(
-    old_source: str,
-    new_source: str,
-    staging_status: str | None = None,
-) -> str:
-    """Infer the file lifecycle from source presence and git status facts.
+def _apply_file_lifecycle_to_diff(diff: SemanticDiff, lifecycle: str) -> SemanticDiff:
+    """Convert the shared Rust result back into the public Python DTO."""
+    from intentumdiff.rust_core import _c_abi_call, _require_complete_batch_diff_dto
 
-    This is shell-owned source metadata, not semantic classification. The engine
-    still owns the raw additions/deletions and review groups.
-    """
-
-    status = (staging_status or "").strip().lower()
-    if status in _ADDED_FILE_STATUSES:
-        return "added"
-    if status in _DELETED_FILE_STATUSES:
-        return "deleted"
-    if old_source == "" and new_source != "":
-        return "added"
-    if old_source != "" and new_source == "":
-        return "deleted"
-    return "modified"
-
-
-def _apply_file_lifecycle_to_diff(
-    diff: SemanticDiff,
-    lifecycle: str,
-) -> SemanticDiff:
-    metadata = dict(diff.metadata)
-    metadata["file_lifecycle"] = lifecycle
-    if lifecycle == "modified":
-        return diff.model_copy(update={"metadata": metadata})
-
-    change_groups = [
-        group for group in diff.change_groups if group.kind != ChangeGroupKind.IGNORED_STYLE
-    ]
-    return diff.model_copy(
-        update={
-            "metadata": metadata,
-            "change_groups": change_groups,
-            "is_style_only": False,
-            "has_semantic_changes": bool(diff.changes),
-        }
+    response = _c_abi_call(
+        "finalize_file_lifecycle", diff.model_dump(mode="json"), lifecycle,
     )
+    return SemanticDiff.model_validate(_require_complete_batch_diff_dto(response))
 
 
 class _PhaseProfiler:
@@ -126,12 +92,12 @@ def _attach_content_type_metadata(
     """Enrich a diff's metadata with the detected content type (mime + category).
 
     Uses the Rust magic-byte detector on the changed content so downstream
-    surfaces can show what kind of file was diffed. Never raises — the detector
-    bridge falls back gracefully when the native core is unavailable.
+    surfaces can show what kind of file was diffed. Malformed UTF-8 source
+    and required Rust detector failures propagate; no fabricated bytes/fallback.
     """
     from intentumdiff.content_type import detect_content_type
 
-    head = (new_content or old_content)[:8192].encode("utf-8", errors="replace")
+    head = (new_content or old_content)[:8192].encode("utf-8", errors="strict")
     metadata = dict(diff.metadata or {})
     metadata["content_type"] = detect_content_type(head)
     return diff.model_copy(update={"metadata": metadata})

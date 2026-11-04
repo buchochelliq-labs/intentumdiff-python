@@ -374,6 +374,7 @@ class AsyncLspClient:
             "rootUri": self._root_uri,
             "workspaceFolders": [{"uri": self._root_uri, "name": "workspace"}],
             "capabilities": {
+                "general": {"positionEncodings": ["utf-16"]},
                 "textDocument": {
                     "hover": {
                         "contentFormat": ["plaintext", "markdown"],
@@ -385,7 +386,12 @@ class AsyncLspClient:
             },
             "clientInfo": {"name": "IntentumDiff", "version": "0.1"},
         }
-        await self._send_request("initialize", init_params)
+        result = await self._send_request("initialize", init_params)
+        if not isinstance(result, dict) or not isinstance(result.get("capabilities", {}), dict):
+            raise LspConnectionError("Invalid LSP initialize capabilities")
+        encoding = result.get("capabilities", {}).get("positionEncoding", "utf-16")
+        if encoding != "utf-16":
+            raise LspConnectionError(f"Unsupported LSP position encoding: {encoding}")
         self._send_notification("initialized", {})
 
     def _next_request_id(self) -> int:

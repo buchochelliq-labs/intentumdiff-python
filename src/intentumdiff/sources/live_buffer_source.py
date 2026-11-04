@@ -18,7 +18,7 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
 from intentumdiff.sources.base import Source
-from intentumdiff.vcs._safe_path import safe_relative_path
+from intentumdiff.vcs._safe_path import safe_relative_path, safe_working_tree_path
 from intentumdiff.vcs.git_cli import resolve_repo_root, run_git_bytes
 
 if TYPE_CHECKING:
@@ -62,6 +62,7 @@ class LiveBufferSource(Source):
         ref: str = "HEAD",
         language_hint: str | None = None,
         edit_deltas: "list[EditDelta] | None" = None,
+        cache_snapshot: bool = False,
     ) -> None:
         # Validate the file path before storing it.
         safe = PurePosixPath(file_path)
@@ -77,6 +78,8 @@ class LiveBufferSource(Source):
         self._ref = ref
         self._language_hint = language_hint
         self.edit_deltas: list[EditDelta] | None = edit_deltas
+        self._cache_snapshot = cache_snapshot
+        self._cached_old_content: str | None = None
 
     # ------------------------------------------------------------------
     # Source interface
@@ -88,9 +91,20 @@ class LiveBufferSource(Source):
         *old_content* is read from the committed blob at ``self._ref``.
         *new_content* is the in-memory buffer ``live_content``.
         """
-        old_content = self._read_committed()
+        if self._cache_snapshot:
+            if self._cached_old_content is None:
+                self._cached_old_content = self._read_committed()
+            old_content = self._cached_old_content
+        else:
+            old_content = self._read_committed()
         filename = Path(self._file_path).name
         return old_content, self._live_content, filename, self._language_hint
+
+    def guardrail_policy_paths(self) -> tuple[str, str]:
+        """Use the selected repository, not process cwd, for buffer policy I/O."""
+        root = resolve_repo_root(self._repo_path)
+        path = str(safe_working_tree_path(root, self._file_path))
+        return path, path
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -107,7 +121,33 @@ class LiveBufferSource(Source):
             data = run_git_bytes(
                 root, ["cat-file", "blob", f"{self._ref}:{self._file_path}"]
             )
-        except subprocess.CalledProcessError:
-            # File not yet tracked at this ref — treat old side as empty.
+        except subprocess.CalledProcessError as exc:
+            # A missing file at a valid ref is a legitimate addition. An invalid
+            # ref or a missing/corrupted tracked blob is not: returning an empty
+            # baseline for either would manufacture a successful semantic diff
+            # against the wrong source (#229). Check the Git tree independently.
+            #
+            # Use a literal pathspec and -z output: glob characters, spaces and
+            # non-ASCII path bytes must not turn a tracked file into an addition.
+            entries = run_git_bytes(
+                root,
+                [
+                    "ls-tree", "-r", "-z", "--full-tree",
+                    self._ref, "--", f":(literal){self._file_path}",
+                ],
+            )
+            expected_path = self._file_path.encode("utf-8", errors="surrogateescape")
+            tracked = any(
+                entry.partition(b"\t")[2] == expected_path
+                for entry in entries.split(b"\0")
+                if entry
+            )
+            if tracked:
+                raise RuntimeError(
+                    f"Failed to read tracked Git blob {self._ref}:{self._file_path}"
+                ) from exc
             return ""
-        return data.decode("utf-8", errors="replace")
+        # Git can return a tracked blob whose bytes are not valid UTF-8.
+        # Replacing invalid bytes would invent an old source and falsely
+        # certify a semantic review against content Git never stored (#231).
+        return data.decode("utf-8")

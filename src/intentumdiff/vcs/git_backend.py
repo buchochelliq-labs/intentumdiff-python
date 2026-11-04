@@ -71,7 +71,7 @@ class GitVcsBackend(VcsBackend):
         """Return the on-disk content of *path* in the working tree."""
         full_path = safe_working_tree_path(self._root, _safe_path(path))
         try:
-            return full_path.read_text(encoding="utf-8", errors="replace")
+            return full_path.read_text(encoding="utf-8", errors="strict")
         except FileNotFoundError:
             return ""
 

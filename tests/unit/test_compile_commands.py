@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
+
+import pytest
 
 from intentumdiff.analysis.compile_commands import compile_commands_metadata
 
@@ -121,3 +124,67 @@ def test_compile_commands_metadata_extracts_from_command_string(tmp_path) -> Non
     assert metadata["include_dirs"] == ["include"]
     assert metadata["standard"] == "c++17"
     assert metadata["fingerprint"]
+
+
+def test_compile_context_never_selects_an_unrelated_same_basename(tmp_path):
+    (tmp_path / 'c').mkdir()
+    (tmp_path / 'compile_commands.json').write_text(json.dumps([
+        {'directory': str(tmp_path), 'file': 'a/main.cpp', 'arguments': ['c++', '-DA=1']},
+        {'directory': str(tmp_path), 'file': 'b/main.cpp', 'arguments': ['c++', '-DB=1']},
+    ]))
+    assert compile_commands_metadata(filename='c/main.cpp', language='cpp', cwd=tmp_path) is None
+
+
+def test_compile_context_preserves_quoted_spaces_and_resolves_relative_directory(tmp_path):
+    (tmp_path / 'build').mkdir()
+    (tmp_path / 'src').mkdir()
+    (tmp_path / 'compile_commands.json').write_text(json.dumps([
+        {'directory': 'build', 'file': '../src/main.cpp',
+         'command': 'c++ -I"include with spaces" -DNAME="hello world" ../src/main.cpp'},
+    ]))
+    result = compile_commands_metadata(filename='src/main.cpp', language='cpp', cwd=tmp_path)
+    assert result is not None
+    assert result['file'] == 'src/main.cpp'
+    assert result['directory'] == 'build'
+    assert result['include_dirs'] == ['include with spaces']
+    assert result['defines'] == ['NAME=hello world']
+
+def test_missing_compile_database_is_optional(tmp_path) -> None:
+    assert compile_commands_metadata(
+        filename="src/main.cpp", language="cpp", cwd=tmp_path,
+    ) is None
+
+
+def test_malformed_present_compile_database_fails_closed(tmp_path) -> None:
+    (tmp_path / "compile_commands.json").write_text("{bad JSON", encoding="utf-8")
+    with pytest.raises(ValueError, match="Malformed compile database"):
+        compile_commands_metadata(filename="src/main.cpp", language="cpp", cwd=tmp_path)
+
+
+def test_invalid_utf8_compile_database_fails_closed(tmp_path) -> None:
+    (tmp_path / "compile_commands.json").write_bytes(b"\xff")
+    with pytest.raises(RuntimeError, match="Cannot read configured compile database"):
+        compile_commands_metadata(filename="src/main.cpp", language="c", cwd=tmp_path)
+
+
+def test_unreadable_compile_database_fails_closed(
+    tmp_path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    policy = tmp_path / "compile_commands.json"
+    policy.write_text("[]", encoding="utf-8")
+    real_read = Path.read_text
+
+    def failed_read(self: Path, *args, **kwargs):
+        if self == policy:
+            raise PermissionError("compile DB read denied")
+        return real_read(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", failed_read)
+    with pytest.raises(RuntimeError, match="compile DB read denied"):
+        compile_commands_metadata(filename="src/main.cpp", language="cpp", cwd=tmp_path)
+
+
+def test_directory_instead_of_compile_database_fails_closed(tmp_path) -> None:
+    (tmp_path / "compile_commands.json").mkdir()
+    with pytest.raises(RuntimeError, match="Cannot read configured compile database"):
+        compile_commands_metadata(filename="src/main.cpp", language="cpp", cwd=tmp_path)

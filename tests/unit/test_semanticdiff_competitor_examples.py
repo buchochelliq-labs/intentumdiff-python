@@ -292,10 +292,8 @@ def test_python_moved_code_matches_semanticdiff_signature(
         old_tokens=["calc_hash"],
         new_tokens=["calc_hash"],
     )
-    _assert_has_group(
-        diff,
-        kind=ChangeGroupKind.IGNORED_STYLE,
-    )
+    # Relocation and behavior edits are not proof of a formatting change.
+    assert not any(g.kind == ChangeGroupKind.IGNORED_STYLE for g in diff.change_groups)
     _assert_has_change(
         diff,
         change_type=ChangeType.MODIFICATION,
@@ -346,7 +344,7 @@ def test_python_style_changes_match_semanticdiff_signature(
     _assert_has_group(
         diff,
         kind=ChangeGroupKind.IGNORED_STYLE,
-        old_tokens=["host", "foo"],
+        old_tokens=["subprocess", "run"],
     )
     _assert_has_change(
         diff,

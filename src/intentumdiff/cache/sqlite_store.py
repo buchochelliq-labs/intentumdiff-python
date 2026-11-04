@@ -100,30 +100,12 @@ class SqliteCacheStore(CacheStore):
         max_size: int | None = None,
         limit: int = 50,
     ) -> list[dict]:
-        """Metadata rows (no BLOBs) with optional filters. The ``file_glob`` filter
-        is applied here (fnmatch) over an over-fetched result set, matching the
-        retired Python behaviour and keeping the glob off the SQL surface."""
-        # Validate before crossing the FFI boundary so a bad limit is a ValueError
-        # (matching the retired Python), not a pyo3 TypeError on the i64 argument.
-        if not isinstance(limit, int) or limit < 1:
+        """Return metadata selected and limited by Rust (case-sensitive filename glob)."""
+        if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
             raise ValueError("limit must be a positive integer")
-        raw = self._rust.list_entries(
-            table, language, since, before, min_size, max_size, limit, file_glob is not None
-        )
-        entries = json.loads(raw)
-        if file_glob and table == "diff_cache":
-            import fnmatch  # noqa: PLC0415
-
-            filtered: list[dict] = []
-            for entry in entries:
-                if fnmatch.fnmatch(
-                    entry.get("old_filename", ""), file_glob
-                ) or fnmatch.fnmatch(entry.get("new_filename", ""), file_glob):
-                    filtered.append(entry)
-                if len(filtered) >= limit:
-                    break
-            return filtered
-        return entries[:limit]
+        return json.loads(self._rust.list_entries_filtered(
+            table, language, since, before, min_size, max_size, limit, file_glob
+        ))
 
     def get_entry_metadata(self, key: str, table: str) -> dict | None:
         raw = self._rust.get_entry_metadata(key, table)

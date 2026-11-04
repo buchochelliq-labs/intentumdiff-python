@@ -32,6 +32,11 @@ def _write_wheel(path: Path, names: list[str]) -> Path:
                 )
             else:
                 zf.writestr(name, "")
+        artifacts = _artifacts({Path(name).name: b"" for name in names if name.endswith(".wasm")})
+        zf.writestr(
+            "intentumdiff/wasm/wasm_provenance.json",
+            _json.dumps({"schema_version": 1, "registry_commit": "c" * 40, "artifacts": artifacts}),
+        )
     return path
 
 
@@ -58,6 +63,86 @@ def test_verify_wheel_accepts_native_intentumdiff_wheel(tmp_path: Path) -> None:
     assert summary["wasm_files"] == 1
     assert summary["platform_tag"] == "win_amd64"
     assert int(summary["size_bytes"]) > 0
+
+
+
+@pytest.mark.parametrize("duplicate", [
+    "intentumdiff/wasm/python_parser.wasm",
+    "intentumdiff/wasm/wasm_provenance.json",
+    "intentumdiff/intentumdiff_rust_core.cp312-win_amd64.pyd",
+])
+def test_verify_wheel_rejects_duplicate_zip_members_even_when_bytes_match(
+    tmp_path: Path, duplicate: str,
+) -> None:
+    wheel = _write_wheel(
+        tmp_path / "intentumdiff_python-0.0.1-cp312-cp312-win_amd64.whl",
+        _valid_names(),
+    )
+    with zipfile.ZipFile(wheel, "a") as zf:
+        original = zf.read(duplicate)
+        with pytest.warns(UserWarning, match="Duplicate name"):
+            zf.writestr(duplicate, original)
+
+    # Set(namelist()) hides this ambiguity, and zf.read returns only one
+    # member. Release provenance must reject all repeated ZIP entries.
+    with pytest.raises(ValueError, match="duplicate archive entries"):
+        verify_wheel(wheel)
+
+
+@pytest.mark.parametrize(
+    ("alias", "message"),
+    [
+        ("intentumdiff/./__init__.py", "noncanonical archive path"),
+        ("intentumdiff//__init__.py", "noncanonical archive path"),
+        ("intentumdiff/plugins\\config.py", "noncanonical archive path"),
+        ("intentumdiff/__INIT__.py", "platform-aliasing archive entries"),
+        ("intentumdiff/wasm/PYTHON_PARSER.WASM", "platform-aliasing archive entries"),
+    ],
+)
+def test_verify_wheel_rejects_installation_path_aliases(
+    tmp_path: Path, alias: str, message: str,
+) -> None:
+    wheel = _write_wheel(
+        tmp_path / "intentumdiff_python-0.0.1-cp312-cp312-win_amd64.whl",
+        _valid_names(),
+    )
+    # ZipInfo sanitizes Windows separators during construction. Preserve the
+    # original central-directory spelling to ensure this actually exercises
+    # raw backslash entries on Windows, rather than a normalized safe path.
+    with zipfile.ZipFile(wheel, "a") as zf:
+        raw_member = zipfile.ZipInfo(alias)
+        raw_member.filename = alias
+        zf.writestr(raw_member, "")
+    with zipfile.ZipFile(wheel) as zf:
+        assert alias in [member.orig_filename for member in zf.infolist()]
+    with pytest.raises(ValueError, match=message):
+        verify_wheel(wheel)
+
+
+def test_verify_wheel_rejects_raw_backslash_even_after_windows_normalization(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    raw_name = r"intentumdiff/plugins\config.py"
+    wheel = _write_wheel(
+        tmp_path / "intentumdiff_python-0.0.1-cp312-cp312-win_amd64.whl",
+        _valid_names(),
+    )
+    with zipfile.ZipFile(wheel, "a") as zf:
+        raw_member = zipfile.ZipInfo(raw_name)
+        raw_member.filename = raw_name
+        zf.writestr(raw_member, "")
+    # Simulate Windows ZipInfo._sanitize_filename on non-Windows CI.
+    original_sanitize = zipfile._sanitize_filename
+    monkeypatch.setattr(
+        zipfile,
+        "_sanitize_filename",
+        lambda filename: original_sanitize(filename).replace("\\", "/"),
+    )
+    with zipfile.ZipFile(wheel) as zf:
+        member = next(member for member in zf.infolist() if member.orig_filename == raw_name)
+        assert member.filename == "intentumdiff/plugins/config.py"
+    with pytest.raises(ValueError, match="noncanonical archive path"):
+        verify_wheel(wheel)
 
 
 def test_verify_wheel_accepts_windows_arm64_wheel(tmp_path: Path) -> None:
@@ -193,6 +278,13 @@ def test_verify_wheel_rejects_metadata_identity_mismatch(tmp_path: Path) -> None
             else:
                 zf.writestr(name, "")
 
+    with zipfile.ZipFile(wheel, "a") as zf:
+        zf.writestr(
+            "intentumdiff/wasm/wasm_provenance.json",
+            _json.dumps({"schema_version": 1, "registry_commit": "c" * 40,
+                         "artifacts": _artifacts({"python_parser.wasm": b""})}),
+        )
+
     with pytest.raises(ValueError, match="METADATA Name"):
         verify_wheel(wheel)
 
@@ -254,7 +346,7 @@ def _write_wheel_with_provenance(
     manifest_artifacts: dict[str, dict] | None,
 ) -> Path:
     """A wheel whose wasm entries carry real bytes, optionally embedding a provenance manifest
-    (None = no manifest embedded, the optional-this-slice case)."""
+    (None exercises the missing-manifest rejection)."""
     with zipfile.ZipFile(path, "w") as zf:
         zf.writestr("intentumdiff/__init__.py", "")
         zf.writestr("intentumdiff/intentumdiff_rust_core.cp312-win_amd64.pyd", "")
@@ -263,7 +355,8 @@ def _write_wheel_with_provenance(
         if manifest_artifacts is not None:
             zf.writestr(
                 "intentumdiff/wasm/wasm_provenance.json",
-                _json.dumps({"schema_version": 1, "artifacts": manifest_artifacts}),
+                _json.dumps({"schema_version": 1, "registry_commit": "c" * 40,
+                             "artifacts": manifest_artifacts}),
             )
         zf.writestr(
             "intentumdiff_python-0.0.1.dist-info/METADATA",
@@ -279,7 +372,22 @@ def _write_wheel_with_provenance(
 
 def _artifacts(wasm: dict[str, bytes]) -> dict[str, dict]:
     return {
-        name: {"sha256": _hashlib.sha256(data).hexdigest(), "size_bytes": len(data)}
+        name: {
+            "sha256": _hashlib.sha256(data).hexdigest(),
+            "size_bytes": len(data),
+            "source": {
+                "repository": (
+                    "https://github.com/buchochelliq-labs/intentumdiff-core"
+                    if name.endswith("_renderer.wasm")
+                    else "https://github.com/buchochelliq-labs/intentumdiff-python-parser"
+                ),
+                "commit": "a" * 40,
+                "artifact": "renderer-components" if name.endswith("_renderer.wasm") else "parser-wasm",
+                "artifact_id": 123,
+                "artifact_archive_sha256": "b" * 64,
+                "abi_target": None if name.endswith("_renderer.wasm") else "1.0.0",
+            },
+        }
         for name, data in wasm.items()
     }
 
@@ -288,11 +396,11 @@ def _prov_wheel_name(tmp_path: Path) -> Path:
     return tmp_path / "intentumdiff_python-0.0.1-cp312-cp312-win_amd64.whl"
 
 
-def test_provenance_absent_is_optional_this_slice(tmp_path: Path) -> None:
+def test_provenance_absent_is_rejected(tmp_path: Path) -> None:
     wasm = {"python_parser.wasm": b"\x00asm py"}
     wheel = _write_wheel_with_provenance(_prov_wheel_name(tmp_path), wasm, None)
-    summary = verify_wheel(wheel)
-    assert summary["provenance_verified"] == -1  # -1 = no manifest embedded
+    with pytest.raises(ValueError, match="missing required Wasm provenance manifest"):
+        verify_wheel(wheel)
 
 
 def test_provenance_matching_manifest_passes(tmp_path: Path) -> None:
@@ -323,4 +431,22 @@ def test_provenance_missing_wasm_is_rejected(tmp_path: Path) -> None:
     manifest = _artifacts({"python_parser.wasm": b"\x00asm py", "gone_parser.wasm": b"gone"})
     wheel = _write_wheel_with_provenance(_prov_wheel_name(tmp_path), wasm, manifest)
     with pytest.raises(ValueError, match="missing"):
+        verify_wheel(wheel)
+
+
+def test_provenance_without_component_source_is_rejected(tmp_path: Path) -> None:
+    wasm = {"python_parser.wasm": b"\\x00asm py"}
+    entries = _artifacts(wasm)
+    del entries["python_parser.wasm"]["source"]
+    wheel = _write_wheel_with_provenance(_prov_wheel_name(tmp_path), wasm, entries)
+    with pytest.raises(ValueError, match="lacks exact source"):
+        verify_wheel(wheel)
+
+
+def test_provenance_with_moving_commit_is_rejected(tmp_path: Path) -> None:
+    wasm = {"python_parser.wasm": b"\\x00asm py"}
+    entries = _artifacts(wasm)
+    entries["python_parser.wasm"]["source"]["commit"] = "main"
+    wheel = _write_wheel_with_provenance(_prov_wheel_name(tmp_path), wasm, entries)
+    with pytest.raises(ValueError, match="invalid immutable CI source"):
         verify_wheel(wheel)

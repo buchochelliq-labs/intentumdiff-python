@@ -6,9 +6,7 @@ import json
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
-import yaml
 
 from intentumdiff.analysis.diagnostics import DiagnosticsRecorder
 from intentumdiff.analysis.keyed_profiles import KEYED_DATA_LANGUAGES
@@ -50,15 +48,18 @@ def guardrails_may_apply(
 
     if not config.guardrails_enabled:
         return False
-    if _is_policy_file(filename) or (new_filename is not None and _is_policy_file(new_filename)):
-        return True
-    policy_path = _find_policy_path(filename, config.guardrail_policy_path)
-    if policy_path is None:
-        return False
-    try:
-        return bool(load_guardrail_policy(filename, explicit_path=policy_path).rules)
-    except ValueError:
-        return True
+    # Both sides of a move can have a policy. Checking only the destination
+    # silently releases protection on moves out of a guarded directory (#262).
+    # An explicit policy is mandatory even before a certified Rust batch return
+    # (#261); all YAML semantics and rule evaluation remain Rust-owned.
+    policies = _load_relevant_guardrail_policies(
+        filename, new_filename, config.guardrail_policy_path
+    )
+    return (
+        _is_policy_file(filename)
+        or _is_policy_file(new_filename)
+        or any(policy.rules for policy in policies)
+    )
 
 
 def load_guardrail_policy(
@@ -68,24 +69,59 @@ def load_guardrail_policy(
 ) -> GuardrailPolicy:
     policy_path = _find_policy_path(filename, explicit_path)
     if policy_path is None:
+        # An EXPLICIT --policy is the caller asserting that file exists. Returning an empty
+        # policy here is a fail-OPEN: the check then reports "Guardrail check passed" and
+        # exits 0 with nothing on stderr, so a typo in the path is indistinguishable from a
+        # clean run. For a gate whose documented purpose is stopping API keys changing
+        # unreviewed, that is the worst possible default.
+        #
+        # Auto-discovery finding nothing is different and stays permissive: the user never
+        # claimed a policy existed.
+        if explicit_path is not None:
+            raise FileNotFoundError(
+                f"Guardrail policy not found: {explicit_path}. "
+                "The check would otherwise pass with no rules loaded, which looks identical "
+                "to a clean run."
+            )
         return GuardrailPolicy(path=None, rules=())
 
-    raw = yaml.safe_load(policy_path.read_text(encoding="utf-8")) or {}
-    if not isinstance(raw, dict):
-        raise ValueError(f"{policy_path} must contain a YAML mapping")
+    from intentumdiff.rust_core import _c_abi_call
 
-    guardrails = raw.get("guardrails", raw)
-    if not isinstance(guardrails, dict):
-        raise ValueError(f"{policy_path} guardrails section must be a mapping")
+    try:
+        rules = _c_abi_call("parse_guardrail_policy", policy_path.read_text(encoding="utf-8"))
+    except ValueError as exc:
+        raise ValueError(f"{policy_path}: {exc}") from exc
+    return GuardrailPolicy(path=policy_path, rules=tuple(
+        ProtectedRule(rule_id=rule["rule_id"], severity=GuardrailSeverity(rule["severity"]),
+                      language=rule["language"], path=rule["path"], message=rule["message"],
+                      files=tuple(rule["files"])) for rule in rules))
 
-    protected = guardrails.get("protected", [])
-    if protected is None:
-        protected = []
-    if not isinstance(protected, list):
-        raise ValueError(f"{policy_path} guardrails.protected must be a list")
 
-    rules = tuple(_parse_rule(item, index, policy_path) for index, item in enumerate(protected))
-    return GuardrailPolicy(path=policy_path, rules=rules)
+def _load_relevant_guardrail_policies(
+    old_filename: str,
+    new_filename: str | None,
+    explicit_path: Path | None,
+) -> tuple[GuardrailPolicy, ...]:
+    """Discover distinct host policy files for both sides; Rust owns their meaning."""
+    if explicit_path is not None:
+        # An explicit policy overrides auto-discovery and is required to exist.
+        # load_guardrail_policy raises instead of manufacturing no rules (#261).
+        return (load_guardrail_policy(new_filename or old_filename,
+                                      explicit_path=explicit_path),)
+
+    found: list[GuardrailPolicy] = []
+    seen_paths: set[Path] = set()
+    for filename in (old_filename, new_filename):
+        if not filename:
+            continue
+        policy_path = _find_policy_path(filename, None)
+        if policy_path is None or policy_path in seen_paths:
+            continue
+        seen_paths.add(policy_path)
+        # Malformed, dangling or unreadable policies must fail closed even
+        # when the other side of the move contains a valid policy.
+        found.append(load_guardrail_policy(filename, explicit_path=policy_path))
+    return tuple(found)
 
 
 def apply_guardrails_to_diff(
@@ -97,36 +133,39 @@ def apply_guardrails_to_diff(
     new_source: str,
     config: DiffConfig,
     diagnostics: DiagnosticsRecorder | None = None,
+    policy_filename: str | None = None,
+    policy_old_filename: str | None = None,
 ) -> SemanticDiff:
     if not config.guardrails_enabled:
         return diff
 
-    violations: list[GuardrailViolation] = []
-    if (old_source != new_source) and (
-        _is_policy_file(diff.old_filename) or _is_policy_file(diff.new_filename)
-    ):
-        violations.append(
-            GuardrailViolation(
-                rule_id="intentumdiff.policy_file",
-                severity=GuardrailSeverity.IMMUTABLE,
-                file=diff.new_filename or diff.old_filename,
-                language=diff.language,
-                semantic_path=GUARDRAIL_POLICY_FILENAME,
-                old_value="project policy",
-                new_value="project policy",
-                message="Project guardrail policy changed",
-            )
-        )
+    from dataclasses import asdict
+    from intentumdiff.rust_core import _c_abi_call, _require_complete_batch_diff_dto
 
-    policy = load_guardrail_policy(
-        diff.new_filename or diff.old_filename,
-        explicit_path=config.guardrail_policy_path,
+    # FileSource transports the physical identities for both sides, preserving
+    # user-facing aliases. For cross-directory moves include both applicable
+    # policy files; only Rust interprets and matches their rules (#262).
+    policies = _load_relevant_guardrail_policies(
+        policy_old_filename or diff.old_filename,
+        policy_filename or diff.new_filename,
+        config.guardrail_policy_path,
     )
-    if policy.rules and old_tree is not None and new_tree is not None:
-        violations.extend(_evaluate_policy_rules(diff, old_tree, new_tree, policy.rules))
-
-    if not violations:
-        return diff
+    request = {
+        "diff": diff.model_dump(mode="json"),
+        "old_tree": old_tree.model_dump(mode="json") if old_tree else None,
+        "new_tree": new_tree.model_dump(mode="json") if new_tree else None,
+        "old_source": old_source, "new_source": new_source,
+        "rules": [asdict(rule) for policy in policies for rule in policy.rules],
+    }
+    # Pure host-I/O provenance: Rust selects filename-scoped rules and
+    # immutable policy-file warnings; public labels remain untouched (#260).
+    if policy_filename is not None:
+        request["guardrail_new_filename"] = policy_filename
+    if policy_old_filename is not None:
+        request["guardrail_old_filename"] = policy_old_filename
+    response = _c_abi_call("apply_guardrail_policy", json.dumps(request))
+    result = SemanticDiff.model_validate(_require_complete_batch_diff_dto(response))
+    violations = result.guardrail_violations[len(diff.guardrail_violations):]
 
     if diagnostics is not None and diagnostics.enabled:
         for violation in violations:
@@ -156,64 +195,7 @@ def apply_guardrails_to_diff(
                 },
             )
 
-    metadata = dict(diff.metadata)
-    metadata["guardrails"] = {
-        "violation_count": len(violations),
-        "immutable_count": sum(
-            violation.severity == GuardrailSeverity.IMMUTABLE for violation in violations
-        ),
-    }
-    return diff.model_copy(
-        update={
-            "guardrail_violations": [*diff.guardrail_violations, *violations],
-            "metadata": metadata,
-        }
-    )
-
-
-def _parse_rule(raw: Any, index: int, policy_path: Path) -> ProtectedRule:
-    if not isinstance(raw, dict):
-        raise ValueError(f"{policy_path} guardrails.protected[{index}] must be a mapping")
-
-    language = str(raw.get("language", "")).strip().lower()
-    if language not in GUARDRAIL_CONFIG_LANGUAGES:
-        raise ValueError(
-            f"{policy_path} guardrails.protected[{index}] targets unsupported "
-            f"language {language!r}; protected guardrails currently support "
-            f"{sorted(GUARDRAIL_CONFIG_LANGUAGES)}"
-        )
-
-    path = _normalise_path(raw.get("path", ""))
-    if not path:
-        raise ValueError(f"{policy_path} guardrails.protected[{index}] requires path")
-
-    severity_text = str(raw.get("severity", GuardrailSeverity.IMPORTANT.value)).lower()
-    try:
-        severity = GuardrailSeverity(severity_text)
-    except ValueError as exc:
-        raise ValueError(
-            f"{policy_path} guardrails.protected[{index}] has unsupported "
-            f"severity {severity_text!r}"
-        ) from exc
-
-    files = raw.get("files", ())
-    if isinstance(files, str):
-        file_patterns = (files,)
-    elif isinstance(files, list):
-        file_patterns = tuple(str(item) for item in files)
-    elif files in (None, ()):
-        file_patterns = ()
-    else:
-        raise ValueError(f"{policy_path} guardrails.protected[{index}].files is invalid")
-
-    return ProtectedRule(
-        rule_id=str(raw.get("id") or f"guardrail.{index + 1}"),
-        severity=severity,
-        language=language,
-        path=path,
-        message=str(raw.get("message") or f"Protected path {path} changed"),
-        files=file_patterns,
-    )
+    return result
 
 
 def _evaluate_policy_rules(
@@ -227,7 +209,7 @@ def _evaluate_policy_rules(
     semantic-path derivation. Python marshals the parsed policy + the diff's
     changed-node ids in and rebuilds GuardrailViolation objects out; the Python
     matching mirror (rule loop, ``_semantic_paths``, ``_node_value_summary``,
-    ``_file_matches``) was deleted. Returns ``[]`` when the core is unavailable.
+    ``_file_matches``) was deleted. Engine failures raise; only a successful empty result means no violations.
     """
     from intentumdiff.rust_core import try_rust_evaluate_guardrail_rules
 
@@ -278,16 +260,6 @@ def _evaluate_policy_rules(
     ]
 
 
-def _normalise_path(value: Any) -> str:
-    text = str(value).strip().strip(".")
-    return ".".join(_clean_path_part(part) for part in text.split(".") if part)
-
-
-def _clean_path_part(value: str) -> str:
-    text = str(value).strip().strip('"').strip("'")
-    return text.lower()
-
-
 def _is_policy_file(filename: str | None) -> bool:
     return Path(filename or "").name.lower() == GUARDRAIL_POLICY_FILENAME
 
@@ -299,20 +271,36 @@ def _find_policy_path(filename: str, explicit_path: Path | None) -> Path | None:
     starts: list[Path] = []
     raw = Path(filename)
     if filename and not filename.startswith("<"):
-        starts.append(raw if raw.is_dir() else raw.parent)
-    starts.append(Path.cwd())
+        # The argument identifies a source *file*, even if its current checkout
+        # entry is a symlink to a directory.  Do not follow that final component
+        # into unrelated external policy directories for a historical Git diff.
+        # For relative paths, the parent resolves against cwd already.  An
+        # absolute path must never fall back to an unrelated process cwd.
+        starts.append(raw.parent)
+    else:
+        # Synthetic/in-memory sources have no physical policy-search origin.
+        starts.append(Path.cwd())
 
     seen: set[Path] = set()
     for start in starts:
         try:
             current = start.resolve()
-        except OSError:
-            current = Path.cwd()
+        except OSError as exc:
+            # A failed physical-path resolution is not permission to import
+            # a policy from another repository's process working directory.
+            # Report the host I/O failure instead of manufacturing a clean (or
+            # foreign-policy) guardrail result.
+            raise RuntimeError(
+                f"Unable to resolve guardrail policy search path {start}: {exc}"
+            ) from exc
         for directory in (current, *current.parents):
             if directory in seen:
                 continue
             seen.add(directory)
             candidate = directory / GUARDRAIL_POLICY_FILENAME
-            if candidate.exists():
+            # A dangling symlink is an explicitly present but unusable policy.
+            # Treating it as absent would silently disable protected-change checks.
+            # The subsequent strict read must report the missing target instead.
+            if candidate.exists() or candidate.is_symlink():
                 return candidate
     return None

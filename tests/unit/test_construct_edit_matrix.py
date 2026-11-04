@@ -47,6 +47,21 @@ _CASES = _matrix_cases()
 _IDS = [f"{manifest['language']}-{verb}" for _, manifest, _, verb in _CASES]
 
 
+def test_construct_edit_matrix_covers_every_corpus_language() -> None:
+    """A missing matrix/manifest must not shrink the parametrized acceptance set."""
+    dirs = {p.name for p in _CORPUS_ROOT.iterdir() if p.is_dir()}
+    assert len(dirs) == 74, f"expected 74 fixture languages, found {len(dirs)}"
+    matrix_dirs = {p.parent.name for p in _CORPUS_ROOT.glob("*/edit_matrix.expect.json")}
+    assert matrix_dirs == dirs, f"missing edit matrices: {sorted(dirs - matrix_dirs)}"
+    actual_pairs = {(source.parent.name, verb) for source, _, _, verb in _CASES}
+    expected_pairs = {(directory, verb) for directory in dirs for verb in EDIT_VERBS}
+    assert actual_pairs == expected_pairs, (
+        f"missing construct-edit cases: {sorted(expected_pairs - actual_pairs)}"
+    )
+    assert len(_CASES) == len(expected_pairs), "duplicate or missing construct-edit cases"
+
+
+
 @pytest.mark.parametrize(("source_path", "manifest", "expectation", "verb"), _CASES, ids=_IDS)
 def test_construct_edit(source_path: Path, manifest: dict, expectation: dict, verb: str) -> None:
     if "skip" in expectation:
@@ -65,3 +80,33 @@ def test_construct_edit(source_path: Path, manifest: dict, expectation: dict, ve
             f"(was: {expectation['xfail']})"
         )
     assert status == "ok", f"{language} [{verb}]: {detail}"
+
+
+
+def test_lua_local_function_duplicate_derivation_keeps_valid_source() -> None:
+    from tests.unit.construct_edit_matrix import Construct, derive_duplicate_entity
+
+    source = "local function greet(name)\n    return name\nend\n"
+    derived = derive_duplicate_entity(
+        source, [Construct("function_declaration", "local greet", 0, 2)], 0
+    )
+    assert derived is not None
+    mutated, context = derived
+    assert context == {"copy": "greetCopy", "original": "greet"}
+    assert mutated.count("local function greet(name)") == 1
+    assert mutated.count("local function greetCopy(name)") == 1
+    assert "localCopy function" not in mutated
+
+
+def test_elixir_swap_moves_whole_declarations():
+    from tests.unit.construct_edit_matrix import find_entities, derive_swap_siblings
+    source = (_CORPUS_ROOT / 'elixir/playground.ex').read_text(encoding='utf-8')
+    differ = SemanticDiffer()
+    entities, base = find_entities(differ, 'elixir', 'code.ex', source)
+    assert [(c.label, c.start_line, c.end_line) for c in entities] == [
+        ('Greeter', 0, 12), ('greet', 1, 3), ('farewell', 5, 7), ('shout', 9, 11)
+    ]
+    new, ctx = derive_swap_siblings(source, entities, base)
+    lines = source.splitlines()
+    assert new == '\n'.join(lines[:1] + lines[5:8] + lines[4:5] + lines[1:4] + lines[8:]) + '\n'
+    assert ctx == {'first': 'greet', 'second': 'farewell'}

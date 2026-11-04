@@ -1,0 +1,23 @@
+[
+  {
+    "name": "delete ADF pipeline",
+    "filename": "pipeline.json",
+    "old": "{\n  \"name\": \"CopyPipeline\",\n  \"properties\": {\n    \"activities\": [\n      {\n        \"name\": \"CopyData\",\n        \"type\": \"Copy\",\n        \"inputs\":  [{\"referenceName\": \"Source\", \"type\": \"DatasetReference\"}],\n        \"outputs\": [{\"referenceName\": \"Sink\",   \"type\": \"DatasetReference\"}],\n        \"typeProperties\": {\"source\": {\"type\": \"BlobSource\"}, \"sink\": {\"type\": \"BlobSink\"}}\n      }\n    ]\n  }\n}\n",
+    "new": "",
+    "language": "adf",
+    "deleted_labels": [
+      "CopyPipeline",
+      "CopyData (Copy)"
+    ]
+  },
+  {
+    "name": "delete ordinary JSON",
+    "filename": "config.json",
+    "old": "{\"enabled\": true}\n",
+    "new": "",
+    "language": "json",
+    "deleted_labels": [
+      "enabled"
+    ]
+  }
+]

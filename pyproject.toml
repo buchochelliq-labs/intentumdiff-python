@@ -13,7 +13,7 @@ build-backend = "maturin"
 # distribution costs users an uninstall/reinstall for no benefit.
 # Distribution name only: the import is unchanged, `import intentumdiff`.
 name = "intentumdiff-python"
-version = "0.0.1"
+version = "0.0.2b2"
 description = "Semantic code review: detect intent, moves, refactorings, and style changes"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -27,20 +27,21 @@ dependencies = [
     "pydantic>=2.7",
     "rich>=13.0",
     "rich-click>=1.8",
-    "unidiff>=0.7",
     "pygments>=2.17",
     "pyyaml>=6.0",
-    "wasmtime>=47.0.1",
+    # Exact Python Wasmtime 50.0.1 native wheel (including win_arm64). Unlike the
+    # Rust/Cargo 48.0.7 patch line, PyPI has no Python 48.0.7 binding.
+    # Avoid the pre-patch ARM64 sandbox escape / component stream vulnerabilities.
+    "wasmtime==50.0.1",
     "defusedxml>=0.7",
-    "pathspec>=0.12",
     "watchdog>=3.0",
 ]
 
 [project.urls]
-Homepage = "https://github.com/buchochelliq-labs/intentumdiff"
-Repository = "https://github.com/buchochelliq-labs/intentumdiff"
-Issues = "https://github.com/buchochelliq-labs/intentumdiff/issues"
-Documentation = "https://github.com/buchochelliq-labs/intentumdiff/tree/main/docs"
+Homepage = "https://github.com/buchochelliq-labs/intentumdiff-python"
+Repository = "https://github.com/buchochelliq-labs/intentumdiff-python"
+Issues = "https://github.com/buchochelliq-labs/intentumdiff-python/issues"
+Documentation = "https://buchochelliq-labs.github.io/intentumdiff-docs/"
 
 [project.optional-dependencies]
 dev = [
@@ -186,7 +187,7 @@ llm      = "intentumdiff.plugins.builtins:llm_renderer_entry"
 # IntentumDiff is shipped as one native platform wheel. The wheel contains:
 # - the Python public API/CLI packages from src/
 # - pre-built first-party Wasm parser/renderer components
-# - the PyO3 Rust core host extension module
+# - the Rust core cdylib loaded through the C ABI
 #
 # Do NOT publish an sdist for the first public release. Installing from source
 # requires Rust, maturin, and the wasm32-wasip2 target, which is the opposite of
@@ -210,6 +211,7 @@ python-packages = ["intentumdiff"]
 bindings = "cffi"
 include = [
     { path = "src/intentumdiff/wasm/*.wasm", format = "wheel" },
+    { path = "src/intentumdiff/wasm/wasm_provenance.json", format = "wheel" },
     { path = "src/intentumdiff/invariances/*.yaml", format = "wheel" },
     { path = "src/intentumdiff/invariances/*.json", format = "wheel" },
     # The published plugin-registry schema (#95) — loaded at runtime via resources.files.

@@ -17,6 +17,7 @@ import threading
 import time
 from contextlib import contextmanager
 from types import SimpleNamespace
+from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -52,6 +53,17 @@ def _fn(id: str, label: str) -> SemanticNode:
         label=label,
         position=_pos(),
         structural_hash=f"h-{id}",
+    )
+
+
+def _empty_module(filename: str) -> SemanticNode:
+    """A successfully parsed file with no symbol definitions, not a missing parse."""
+    return SemanticNode(
+        id=f"empty-{filename}",
+        node_type="module",
+        label="",
+        position=_pos(),
+        structural_hash="h-empty",
     )
 
 
@@ -112,6 +124,7 @@ class TestSemanticDifferParallelCommit:
         # None to fall back to the mocked iter_changed_sources — otherwise it runs real
         # git against the test's cwd.
         with (
+            patch("intentumdiff.vcs.git_cli.resolve_repo_root", return_value=str(Path.cwd())),
             patch(
                 "intentumdiff.sources.git_source.collect_working_tree_python_sources_fast",
                 return_value=None,
@@ -187,33 +200,77 @@ class TestSemanticDifferParallelCommit:
 
         assert [result.new_filename for result in results] == ["a.py", "b.py"]
 
-    def test_parallel_commit_skips_plugin_not_found_like_sequential(self):
+    @pytest.mark.parametrize("parallel", [False, 2], ids=["sequential", "parallel"])
+    @pytest.mark.parametrize("include_good", [False, True], ids=["all-missing", "mixed"])
+    def test_commit_missing_parser_fails_closed(self, parallel, include_good):
+        """Missing parsers cannot silently omit changed text, even alongside a success."""
         from intentumdiff.plugins.exceptions import PluginNotFoundError
 
-        differ = SemanticDiffer(DiffConfig(parallel=2, experimental_rust_core=False))
+        differ = SemanticDiffer(DiffConfig(parallel=parallel, experimental_rust_core=False))
 
         def fake_pipeline(self, old, new, filename, language_hint, **kwargs):
             if filename == "unknown.xyz":
                 raise PluginNotFoundError("no parser")
             return _semantic_diff(filename, kwargs.get("new_filename") or filename)
 
+        changed_files = []
+        if include_good:
+            changed_files.append(("old good", "new good", "good.py", "good.py", None))
+        changed_files.append(
+            ("old unknown", "new unknown", "unknown.xyz", "unknown.xyz", None)
+        )
+        repo_patch, sources_patch = self._patch_git_inputs(changed_files)
+        with (
+            repo_patch,
+            sources_patch,
+            patch.object(SemanticDiffer, "_run_pipeline", fake_pipeline),
+        ):
+            with pytest.raises(RuntimeError, match=r"Commit diff failed for 'unknown\.xyz'") as caught:
+                differ.diff_commit(".")
+
+        assert isinstance(caught.value.__cause__, PluginNotFoundError)
+
+    @pytest.mark.parametrize("parallel", [False, 2], ids=["sequential", "parallel"])
+    @pytest.mark.parametrize(
+        "error",
+        [
+            pytest.param(
+                RuntimeError("Rust node facts unavailable"), id="rust-boundary"
+            ),
+            pytest.param(ValueError("malformed Rust payload"), id="invalid-payload"),
+            pytest.param(
+                PluginFuelExhausted("python-parser", 100_000),
+                id="parser-fuel",
+            ),
+        ],
+    )
+    def test_commit_file_failure_is_not_silent_partial_success(self, parallel, error):
+        """A failed changed file must not disappear behind a successful sibling."""
+        differ = SemanticDiffer(
+            DiffConfig(parallel=parallel, experimental_rust_core=False)
+        )
+
+        def fake_pipeline(self, old, new, filename, language_hint, **kwargs):
+            if filename == "broken.py":
+                raise error
+            return _semantic_diff(filename, kwargs.get("new_filename") or filename)
+
         changed_files = [
-            ("old unknown", "new unknown", "unknown.xyz", "unknown.xyz", None),
             ("old good", "new good", "good.py", "good.py", None),
+            ("old broken", "new broken", "broken.py", "broken.py", None),
         ]
         repo_patch, sources_patch = self._patch_git_inputs(changed_files)
         with (
             repo_patch,
             sources_patch,
-            patch.object(
-                SemanticDiffer,
-                "_run_pipeline",
-                fake_pipeline,
-            ),
+            patch.object(SemanticDiffer, "_run_pipeline", fake_pipeline),
         ):
-            results = differ.diff_commit(".")
+            with pytest.raises(
+                RuntimeError, match=r"Commit diff failed for 'broken\.py'"
+            ) as caught:
+                differ.diff_commit(".")
 
-        assert [result.new_filename for result in results] == ["good.py"]
+        assert caught.value.__cause__ is error
 
     def test_phase_profile_records_source_collection_once(self):
         differ = SemanticDiffer(
@@ -330,6 +387,46 @@ class TestSemanticDifferParallelCommit:
             ]
             assert adapter_phase_names[0] == "rust_core_commit_source_filtering"
             assert "rust_core_request_json_encode" in adapter_phase_names
+
+    @pytest.mark.parametrize("parallel", [False, True, 3])
+    def test_commit_rejects_malformed_rust_batch_without_rerouting(self, parallel):
+        """A corrupted native batch must abort the public commit API (#215, #216)."""
+        differ = SemanticDiffer(DiffConfig(experimental_rust_core=True, parallel=parallel))
+        changed_files = [
+            ("old a", "new a", "a.py", "a.py", None),
+            ("old b", "new b", "b.py", "b.py", None),
+        ]
+        batch_calls = []
+
+        def malformed_batch(**kwargs):
+            batch_calls.append(kwargs)
+            return RustCoreBatchDiffsAttempt(
+                invalid_output=True,
+                fallback_reason="invalid native transport: corrupt C ABI envelope",
+            )
+
+        def fail_pipeline(*_args, **_kwargs):
+            raise AssertionError("corrupt native batch must not reroute to the pipeline")
+
+        repo_patch, sources_patch = self._patch_git_inputs(changed_files)
+        with (
+            repo_patch,
+            sources_patch,
+            patch(
+                "intentumdiff.plugins.builtins.python_parser_entry",
+                return_value="python_parser.wasm",
+            ),
+            patch(
+                "intentumdiff.differ.try_rust_core_batch_diffs",
+                side_effect=malformed_batch,
+            ),
+            patch.object(SemanticDiffer, "_run_pipeline", fail_pipeline),
+        ):
+            with pytest.raises(RuntimeError, match="Malformed Rust commit batch result"):
+                differ.diff_commit(".")
+
+        assert len(batch_calls) == 1
+        assert len(batch_calls[0]["files"]) == 2
 
     def test_commit_rust_batch_fallback_reruns_with_rust_core_enabled(self):
         # Reformulated for the transitional-layer retirement (issue #57 payoff, stage
@@ -657,26 +754,31 @@ class TestSemanticDifferParallelCommit:
 class TestDiffCommit:
     def _make_differ(self) -> CommitDiffer:
         cd = CommitDiffer()
+        # Mocked per-file diffs below are intentionally not valid Python source.
+        # A successful second parse must still produce a real (empty) tree;
+        # returning None must never stand for "no relevant symbols".
+        cd._parse_to_tree = MagicMock(
+            side_effect=lambda filename, language, content: _empty_module(filename)
+        )
         return cd
 
     def _patch_pipeline(self, cd: CommitDiffer, diffs: list[SemanticDiff]):
         """Patch _run_pipeline to return successive diffs."""
         cd._differ._run_pipeline = MagicMock(side_effect=diffs)
 
+    @contextmanager
     def _patch_iter_changed_sources(self, changed_files: list[tuple]):
         """Return a context manager that patches iter_changed_sources."""
-        return patch(
+        with self._patch_git_repo(), patch(
             "intentumdiff.core.commit_differ.iter_changed_sources",
             return_value=iter(changed_files),
-        )
+        ):
+            yield
 
     def _patch_git_repo(self):
-        # commit_differ no longer uses GitPython; neutralize the gitignore pre-pass
-        # (git-CLI) so diff_commit stays hermetic — the diff data comes from the
-        # mocked iter_changed_sources.
-        return patch.object(
-            CommitDiffer, "_collect_gitignore_state", return_value=(set(), None)
-        )
+        # Source collection and repository discovery are independent host I/O.
+        return patch("intentumdiff.core.commit_differ.resolve_repo_root",
+                     return_value=str(Path.cwd()))
 
     def test_returns_commit_diff(self):
         cd = self._make_differ()
@@ -707,18 +809,17 @@ class TestDiffCommit:
         assert len(result.file_diffs) == 1
         assert result.file_diffs[0] is diff
 
-    def test_parse_error_collected(self):
+    def test_pipeline_failure_aborts_complete_commit_review(self):
         cd = self._make_differ()
 
         with self._patch_git_repo() as mock_git:
             mock_git.Repo.return_value = MagicMock()
             with self._patch_iter_changed_sources([("old", "new", "broken.py", "broken.py", None)]):
                 cd._differ._run_pipeline = MagicMock(side_effect=ValueError("synthetic error"))
-                result = cd.diff_commit(".")
+                with pytest.raises(RuntimeError, match="broken.py.*synthetic error"):
+                    cd.diff_commit(".")
 
-        assert any("broken.py" in e for e in result.parse_errors)
-
-    def test_plugin_error_collected_without_aborting_commit_review(self):
+    def test_plugin_error_fails_closed_even_with_successful_file(self):
         cd = self._make_differ()
         good_diff = _semantic_diff("good.py", "good.py")
 
@@ -737,12 +838,41 @@ class TestDiffCommit:
                     ]
                 )
                 cd._parse_to_tree = MagicMock(return_value=None)
-                result = cd.diff_commit(".")
+                with pytest.raises(RuntimeError, match="fuel.py.*FUEL_EXCEEDED"):
+                    cd.diff_commit(".")
 
-        assert result.file_diffs == [good_diff]
-        assert any("fuel.py" in error and "FUEL_EXCEEDED" in error for error in result.parse_errors)
+    def test_second_parse_missing_parser_aborts_after_per_file_success(self):
+        """A complete per-file diff does not certify the later cross-file index."""
+        from intentumdiff.plugins.exceptions import PluginNotFoundError
 
-    def test_plugin_not_found_skips_file(self):
+        cd = self._make_differ()
+        cd._differ._run_pipeline = MagicMock(return_value=_semantic_diff("good.py", "good.py"))
+        cd._parse_to_tree = MagicMock(side_effect=PluginNotFoundError("missing indexing parser"))
+        with self._patch_iter_changed_sources(
+            [("old", "new", "good.py", "good.py", None)]
+        ):
+            with pytest.raises(RuntimeError, match="good.py.*missing indexing parser") as exc:
+                cd.diff_commit(".")
+        assert isinstance(exc.value.__cause__, PluginNotFoundError)
+
+    def test_missing_required_index_rejects_successful_commit(self):
+        from intentumdiff.core.commit_differ import FileDiffResult
+
+        cd = self._make_differ()
+        cd._build_index = MagicMock(return_value=None)
+        record = FileDiffResult(
+            file_diff=_semantic_diff("good.py", "good.py"),
+            old_path="good.py",
+            new_path="good.py",
+            old_content="before",
+            new_content="after",
+        )
+        with pytest.raises(RuntimeError, match="missing old or new index"):
+            cd.finalize_commit_diff(
+                [record], [], old_ref="HEAD~1", new_ref="HEAD"
+            )
+
+    def test_plugin_not_found_fails_closed(self):
         cd = self._make_differ()
         from intentumdiff.plugins.exceptions import PluginNotFoundError
 
@@ -752,10 +882,8 @@ class TestDiffCommit:
                 [("old", "new", "unknown.xyz", "unknown.xyz", None)]
             ):
                 cd._differ._run_pipeline = MagicMock(side_effect=PluginNotFoundError("no parser"))
-                result = cd.diff_commit(".")
-
-        assert result.file_diffs == []
-        assert result.parse_errors == []
+                with pytest.raises(RuntimeError, match="unknown.xyz"):
+                    cd.diff_commit(".")
 
     def test_all_parser_load_failure_is_not_reported_as_clean_review(self):
         cd = self._make_differ()
@@ -776,6 +904,53 @@ class TestDiffCommit:
 
                 with pytest.raises(RuntimeError, match="No parser plugins could be loaded"):
                     cd.diff_commit(".")
+
+    def test_stream_finalization_rejects_partial_errors(self):
+        from intentumdiff.core.commit_differ import FileDiffError, FileDiffResult
+
+        cd = self._make_differ()
+        good = _semantic_diff("good.py", "good.py")
+        result = FileDiffResult(good, "good.py", "good.py", "old", "new")
+        error = FileDiffError("bad.py", "bad.py", "native engine unavailable", "pipeline_error")
+        with pytest.raises(RuntimeError, match="bad.py.*native engine unavailable"):
+            cd.finalize_commit_diff(
+                [result], [error], old_ref="HEAD~1", new_ref="HEAD"
+            )
+
+    def test_alternate_vcs_backend_fails_closed_on_mixed_results(self):
+        from intentumdiff.vcs.base import ChangedFile
+
+        cd = self._make_differ()
+        backend = SimpleNamespace(
+            resolve_root=lambda: Path.cwd(),
+            guardrail_policy_path=lambda path: str(Path.cwd() / path),
+            list_changed_files=lambda _old, _new: [
+                ChangedFile("good.py", "good.py", "modified"),
+                ChangedFile("bad.py", "bad.py", "modified"),
+            ],
+            get_blob=lambda _path, _ref: "source",
+        )
+        cd._differ._run_pipeline = MagicMock(
+            side_effect=[_semantic_diff("good.py", "good.py"), RuntimeError("native failure")]
+        )
+        with pytest.raises(RuntimeError, match="bad.py.*native failure"):
+            cd.diff_commit(old_ref="old", new_ref="new", backend=backend)
+
+    def test_alternate_vcs_backend_skips_only_explicit_binary_files(self):
+        from intentumdiff.vcs.base import ChangedFile
+
+        cd = self._make_differ()
+        backend = SimpleNamespace(
+            resolve_root=lambda: Path.cwd(),
+            guardrail_policy_path=lambda path: str(Path.cwd() / path),
+            list_changed_files=lambda _old, _new: [
+                ChangedFile("image.png", "image.png", "modified", is_binary=True)
+            ],
+            get_blob=MagicMock(side_effect=AssertionError("binary blob should not load")),
+        )
+        result = cd.diff_commit(old_ref="old", new_ref="new", backend=backend)
+        assert result.file_diffs == []
+        backend.get_blob.assert_not_called()
 
     def test_empty_commit_returns_empty_diff(self):
         cd = self._make_differ()
@@ -819,7 +994,7 @@ class TestDiffCommit:
                         return fn_old
                     if content == "new_helpers":
                         return fn_new
-                    return None  # all other file versions have no relevant symbols
+                    return _empty_module(filename)  # parsed, but has no symbols
 
                 cd._parse_to_tree = _fake_parse_to_tree
 
@@ -910,7 +1085,7 @@ class TestDiffCommit:
         cd = self._make_differ()
         parsed: list[str] = []
 
-        def fake_pipeline(_old, _new, old_path, _hint, new_filename=None):
+        def fake_pipeline(_old, _new, old_path, _hint, new_filename=None, **kwargs):
             parsed.append(new_filename or old_path)
             return MagicMock()
 
@@ -929,6 +1104,30 @@ class TestDiffCommit:
         assert "image.png" not in paths
         assert "code.py" in paths
 
+    def test_iter_file_diffs_preserves_literal_replacement_characters(self):
+        """Literal replacement characters are valid text, not evidence of decode failure."""
+        cd = self._make_differ()
+        parsed: list[str] = []
+
+        def fake_pipeline(_old, _new, old_path, _hint, new_filename=None, **kwargs):
+            parsed.append(new_filename or old_path)
+            return MagicMock()
+
+        with self._patch_git_repo() as mock_git:
+            mock_git.Repo.return_value = MagicMock()
+            with self._patch_iter_changed_sources([
+                ("��� before", "��� after", "literal.txt", "literal.txt", None),
+                ("def a():\n    return 1\n", "def a():\n    return 2\n", "code.py", "code.py", None),
+            ]):
+                cd._differ._run_pipeline = MagicMock(side_effect=fake_pipeline)
+                streamed = list(cd.iter_file_diffs("."))
+
+        # Both valid text files reach the parser.
+        assert parsed == ["literal.txt", "code.py"]
+        paths = [getattr(item, "new_path", None) for item in streamed]
+        assert "literal.txt" in paths
+        assert "code.py" in paths
+
 
 # ---------------------------------------------------------------------------
 # _parse_to_tree
@@ -936,214 +1135,26 @@ class TestDiffCommit:
 
 
 class TestParseToTree:
-    def test_returns_none_for_unknown_extension(self):
+    def test_missing_parser_propagates_instead_of_fabricating_empty_index(self):
         cd = CommitDiffer()
         from intentumdiff.plugins.exceptions import PluginNotFoundError
 
         cd._differ._registry.detect_parser = MagicMock(side_effect=PluginNotFoundError("no parser"))
-        result = cd._parse_to_tree("file.unknown", "unknown", "content")
-        assert result is None
+        with pytest.raises(PluginNotFoundError, match="no parser"):
+            cd._parse_to_tree("file.unknown", "unknown", "content")
 
-    def test_returns_none_on_parse_exception(self):
+    def test_missing_index_tree_fails_with_filename(self):
+        cd = CommitDiffer()
+        cd._parse_to_tree = MagicMock(return_value=None)
+        with pytest.raises(RuntimeError, match="missing.py.*parser returned no semantic tree"):
+            cd._build_index([("missing.py", "python", "def f(): pass")])
+
+    def test_empty_file_list_is_the_only_absent_index(self):
+        cd = CommitDiffer()
+        assert cd._build_index([]) is None
+
+    def test_propagates_engine_parse_exception(self):
         cd = CommitDiffer()
         cd._differ._registry.detect_parser = MagicMock(side_effect=RuntimeError("boom"))
-        result = cd._parse_to_tree("file.py", "python", "def foo(): pass")
-        assert result is None
-
-
-# ---------------------------------------------------------------------------
-# _collect_gitignore_state
-# ---------------------------------------------------------------------------
-
-
-class TestCollectGitignoreState:
-    """Tests for CommitDiffer._collect_gitignore_state() against real git repos.
-
-    The pre-pass shells to the git CLI (#98, A2.4.3), so these build real two-commit
-    repositories (HEAD~1 -> HEAD) rather than mocking the GitPython object model.
-    """
-
-    @staticmethod
-    def _git(cwd, *args: str) -> None:
-        subprocess.run(["git", "-C", str(cwd), *args], check=True, capture_output=True)
-
-    def _init_repo(self, tmp_path) -> None:
-        self._git(tmp_path, "init")
-        self._git(tmp_path, "config", "user.email", "t@example.com")
-        self._git(tmp_path, "config", "user.name", "T")
-
-    def _commit(self, tmp_path, message: str, *, allow_empty: bool = False) -> None:
-        self._git(tmp_path, "add", "-A")
-        args = ["commit", "-m", message]
-        if allow_empty:
-            args.append("--allow-empty")
-        self._git(tmp_path, *args)
-
-    def test_no_changes_returns_empty(self, tmp_path):
-        cd = CommitDiffer()
-        self._init_repo(tmp_path)
-        (tmp_path / "a.py").write_text("x = 1\n")
-        self._commit(tmp_path, "v1")
-        self._commit(tmp_path, "v2", allow_empty=True)  # no file changes
-        deleted, spec = cd._collect_gitignore_state(str(tmp_path), "HEAD~1", "HEAD")
-        assert deleted == set()
-        assert spec is None
-
-    def test_deletion_collected(self, tmp_path):
-        cd = CommitDiffer()
-        self._init_repo(tmp_path)
-        (tmp_path / "src").mkdir()
-        (tmp_path / "src" / "old.py").write_text("x = 1\n")
-        self._commit(tmp_path, "v1")
-        (tmp_path / "src" / "old.py").unlink()
-        self._commit(tmp_path, "v2")
-        deleted, spec = cd._collect_gitignore_state(str(tmp_path), "HEAD~1", "HEAD")
-        assert "src/old.py" in deleted
-        assert spec is None
-
-    def test_gitignore_modification_builds_spec(self, tmp_path):
-        cd = CommitDiffer()
-        self._init_repo(tmp_path)
-        (tmp_path / ".gitignore").write_text("# initial\n")
-        self._commit(tmp_path, "v1")
-        (tmp_path / ".gitignore").write_text("*.log\nbuild/\n")
-        self._commit(tmp_path, "v2")
-        _, spec = cd._collect_gitignore_state(str(tmp_path), "HEAD~1", "HEAD")
-        assert spec is not None
-        assert spec.match_file("app.log")
-        assert spec.match_file("build/output.js")
-        assert not spec.match_file("src/main.py")
-
-    def test_gitignore_addition_builds_spec(self, tmp_path):
-        cd = CommitDiffer()
-        self._init_repo(tmp_path)
-        (tmp_path / "a.py").write_text("x = 1\n")
-        self._commit(tmp_path, "v1")
-        (tmp_path / ".gitignore").write_text("dist/\n")
-        self._commit(tmp_path, "v2")
-        _, spec = cd._collect_gitignore_state(str(tmp_path), "HEAD~1", "HEAD")
-        assert spec is not None
-        assert spec.match_file("dist/bundle.js")
-
-    def test_subdir_gitignore_prefixes_patterns(self, tmp_path):
-        cd = CommitDiffer()
-        self._init_repo(tmp_path)
-        (tmp_path / "src").mkdir()
-        (tmp_path / "src" / ".gitignore").write_text("# initial\n")
-        self._commit(tmp_path, "v1")
-        (tmp_path / "src" / ".gitignore").write_text("*.pyc\n")
-        self._commit(tmp_path, "v2")
-        _, spec = cd._collect_gitignore_state(str(tmp_path), "HEAD~1", "HEAD")
-        assert spec is not None
-        assert spec.match_file("src/foo.pyc")
-        # Root-level .pyc should not match (pattern was scoped to src/)
-        assert not spec.match_file("foo.pyc")
-
-    def test_exception_returns_empty(self, tmp_path):
-        cd = CommitDiffer()
-        # A path that isn't a git repo -> resolve_repo_root raises -> caught -> empty.
-        deleted, spec = cd._collect_gitignore_state(str(tmp_path), "HEAD~1", "HEAD")
-        assert deleted == set()
-        assert spec is None
-
-
-# ---------------------------------------------------------------------------
-# gitignore_excluded tagging in diff_commit
-# ---------------------------------------------------------------------------
-
-
-class TestGitignoreExcluded:
-    """Integration-style tests: diff_commit tags diffs whose deletion was
-    triggered by a .gitignore rule change."""
-
-    def _make_differ(self) -> CommitDiffer:
-        return CommitDiffer()
-
-    def _patch_iter_changed_sources(self, changed_files):
-        return patch(
-            "intentumdiff.core.commit_differ.iter_changed_sources",
-            return_value=iter(changed_files),
-        )
-
-    def _patch_git_repo(self):
-        # commit_differ no longer uses GitPython; neutralize the gitignore pre-pass
-        # (git-CLI) so diff_commit stays hermetic — the diff data comes from the
-        # mocked iter_changed_sources.
-        return patch.object(
-            CommitDiffer, "_collect_gitignore_state", return_value=(set(), None)
-        )
-
-    def _make_gitignore_state(
-        self, cd: CommitDiffer, deleted: set[str], gitignore_content: str | None
-    ):
-        """Patch _collect_gitignore_state to return controlled values."""
-        import pathspec as _ps
-
-        spec = (
-            _ps.PathSpec.from_lines("gitignore", gitignore_content.splitlines())
-            if gitignore_content
-            else None
-        )
-        cd._collect_gitignore_state = MagicMock(return_value=(deleted, spec))
-
-    def test_deleted_file_matching_new_gitignore_is_tagged(self):
-        cd = self._make_differ()
-        diff = _semantic_diff("logs/app.log", "logs/app.log")
-        self._make_gitignore_state(cd, {"logs/app.log"}, "*.log\n")
-
-        with self._patch_git_repo() as mock_git:
-            mock_git.Repo.return_value = MagicMock()
-            with self._patch_iter_changed_sources(
-                [("old", "", "logs/app.log", "logs/app.log", None)]
-            ):
-                cd._differ._run_pipeline = MagicMock(return_value=diff)
-                result = cd.diff_commit(".")
-
-        assert len(result.file_diffs) == 1
-        assert result.file_diffs[0].gitignore_excluded is True
-
-    def test_deleted_file_not_matching_pattern_not_tagged(self):
-        cd = self._make_differ()
-        diff = _semantic_diff("src/main.py", "src/main.py")
-        self._make_gitignore_state(cd, {"src/main.py"}, "*.log\n")
-
-        with self._patch_git_repo() as mock_git:
-            mock_git.Repo.return_value = MagicMock()
-            with self._patch_iter_changed_sources(
-                [("old", "", "src/main.py", "src/main.py", None)]
-            ):
-                cd._differ._run_pipeline = MagicMock(return_value=diff)
-                result = cd.diff_commit(".")
-
-        assert result.file_diffs[0].gitignore_excluded is False
-
-    def test_no_gitignore_change_never_tagged(self):
-        cd = self._make_differ()
-        diff = _semantic_diff("src/main.py", "src/main.py")
-        self._make_gitignore_state(cd, {"src/main.py"}, None)  # no gitignore spec
-
-        with self._patch_git_repo() as mock_git:
-            mock_git.Repo.return_value = MagicMock()
-            with self._patch_iter_changed_sources(
-                [("old", "", "src/main.py", "src/main.py", None)]
-            ):
-                cd._differ._run_pipeline = MagicMock(return_value=diff)
-                result = cd.diff_commit(".")
-
-        assert result.file_diffs[0].gitignore_excluded is False
-
-    def test_non_deleted_files_not_tagged(self):
-        cd = self._make_differ()
-        diff = _semantic_diff("src/main.py", "src/main.py")
-        # File appears in gitignore but it's NOT in deleted_paths (it's a modification)
-        self._make_gitignore_state(cd, set(), "*.py\n")
-
-        with self._patch_git_repo() as mock_git:
-            mock_git.Repo.return_value = MagicMock()
-            with self._patch_iter_changed_sources(
-                [("old", "new", "src/main.py", "src/main.py", None)]
-            ):
-                cd._differ._run_pipeline = MagicMock(return_value=diff)
-                result = cd.diff_commit(".")
-
-        assert result.file_diffs[0].gitignore_excluded is False
+        with pytest.raises(RuntimeError, match="boom"):
+            cd._parse_to_tree("file.py", "python", "def foo(): pass")

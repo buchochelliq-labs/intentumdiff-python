@@ -17,6 +17,8 @@ Formats: terminal (default), terminal-color, json, patch, html, llm
 
 from __future__ import annotations
 
+import sys
+from contextlib import suppress
 from typing import NoReturn
 
 from intentumdiff.cli._commands import (  # noqa: F401
@@ -191,7 +193,64 @@ __all__ = [
 ]
 
 
+#: The pre-rebrand distribution. Installing IntentumDiff does not remove it, because pip
+#: treats a renamed project as an unrelated package.
+_RETIRED_DISTRIBUTION = "intentdiff"
+
+
+def _warn_if_retired_distribution_installed() -> None:
+    """
+    Warn when the pre-rebrand ``intentdiff`` distribution is installed alongside this one.
+
+    Both projects install the same ``intentumdiff`` import package, so whichever pip laid down
+    last wins and the resolved distribution name may be the retired one — which is NOT in the
+    first-party trust allowlist. Every bundled parser is then rejected as untrusted third-party
+    code, and the user sees a stream of ``native_fallback`` errors and no diff at all.
+
+    Nothing in that chain names the actual cause, and the failure is total rather than partial,
+    so it reads as "the tool is broken" rather than "you have two installs". This is the same
+    defect class that made 0.0.1 unusable: a package failing its own trust check because of how
+    its distribution name resolves.
+    """
+    try:
+        from importlib.metadata import distribution
+
+        distribution(_RETIRED_DISTRIBUTION)
+    except Exception:  # noqa: BLE001 - absence is the normal case, and any lookup failure is fine
+        return
+    _err.print(
+        f"[yellow]Warning:[/yellow] the retired '{_RETIRED_DISTRIBUTION}' distribution is "
+        "installed alongside IntentumDiff. They share an import package, so parsers may be "
+        f"rejected as untrusted and diffs may fail. Run: pip uninstall {_RETIRED_DISTRIBUTION}"
+    )
+
+
+def _use_utf8_streams() -> None:
+    """Make stdout/stderr able to carry the characters we actually emit.
+
+    On Windows a non-redirected console is cp1252, and we emit U+2192 (the arrow in
+    "old -> new"), spinner glyphs, and box-drawing characters. Writing any of them raises:
+
+        UnicodeEncodeError: 'charmap' codec can't encode character '→'
+
+    Observed as: `--format llm` failing outright, `intentumdiff index` dying with a charmap
+    error that masked "not a git repository", and mojibake in `plugins list` and the
+    token-level-fallback warning. One cause, four symptoms.
+
+    errors="replace" rather than strict: a console that genuinely cannot represent a glyph
+    should show a placeholder, never abort a completed diff. The results were correct; only
+    the printing failed.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:  # not present when the stream is replaced in tests
+            with suppress(Exception):
+                reconfigure(encoding="utf-8", errors="replace")
+
+
 def main(argv: list[str] | None = None) -> NoReturn:
+    _use_utf8_streams()
+    _warn_if_retired_distribution_installed()
     _legacy_click_main(argv)
 
 

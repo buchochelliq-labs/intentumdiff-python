@@ -1,0 +1,110 @@
+[
+  {
+    "platform": "linux",
+    "wheel": "intentumdiff_python-0.0.2b1-py3-none-linux_x86_64.whl",
+    "wheel_sha256": "d14173f1f3a10d412e284d7bc5665d278dc7add4f1e1b3c7052012a2d8e70157",
+    "archive_sha256": "63d6987e470175e9e42dd45860293c08f088a8b5f81956053ff134e1f60da5ea",
+    "python_commit": "7d9b3a10bb705b40a5e54f4097bb8210025260b5",
+    "core_commit": "91092f9ec42165e68cab6ca3904c3d3f923691fb",
+    "components": 73,
+    "manifest_embedded": false,
+    "corpus_cases": 17,
+    "junit": {
+      "name": "pytest",
+      "errors": "0",
+      "failures": "0",
+      "skipped": "196",
+      "tests": "2877",
+      "time": "896.727",
+      "timestamp": "2026-10-05T21:02:41.985085+00:00",
+      "hostname": "runnervm8df0l"
+    },
+    "native": [
+      {
+        "path": "intentumdiff/intentumdiff_rust_core/libintentumdiff_rust_core.so",
+        "sha256": "74466f6a217eeb9a479e60a4f90b55025969ea2b6fdfda72be3d7fb4c65f8994"
+      }
+    ]
+  },
+  {
+    "platform": "mac",
+    "wheel": "intentumdiff_python-0.0.2b1-py3-none-macosx_11_0_arm64.whl",
+    "wheel_sha256": "7a9adec2c0108b790de82615b8eab0de1ec7e7b619189978c536e77a3bb50c8a",
+    "archive_sha256": "f86de76cd6f11b549c828838bb6bdcb7960687bda0bdcd4edc1559a51f583561",
+    "python_commit": "7d9b3a10bb705b40a5e54f4097bb8210025260b5",
+    "core_commit": "91092f9ec42165e68cab6ca3904c3d3f923691fb",
+    "components": 73,
+    "manifest_embedded": false,
+    "corpus_cases": 17,
+    "junit": {
+      "name": "pytest",
+      "errors": "0",
+      "failures": "0",
+      "skipped": "196",
+      "tests": "2877",
+      "time": "1068.828",
+      "timestamp": "2026-10-05T21:00:11.494305+00:00",
+      "hostname": "iad20-fj917-302c07cb-f76a-4eeb-a378-171005653081-7A39DA8F4BC2.local"
+    },
+    "native": [
+      {
+        "path": "intentumdiff/intentumdiff_rust_core/libintentumdiff_rust_core.dylib",
+        "sha256": "529ca29f1113b272ccb047f7a222994ba57bb3390a58104caa2c4eebaa7d0148"
+      }
+    ]
+  },
+  {
+    "platform": "win",
+    "wheel": "intentumdiff_python-0.0.2b1-py3-none-win_amd64.whl",
+    "wheel_sha256": "67f16cf9bca7cd4c6da9c454e33391f0716f4fdd4fb161e3b53cdca40527d92b",
+    "archive_sha256": "02fbd99c661eef01bf11ca05591c81611f26805bdc6cf2c99b0d40b32a959535",
+    "python_commit": "7d9b3a10bb705b40a5e54f4097bb8210025260b5",
+    "core_commit": "91092f9ec42165e68cab6ca3904c3d3f923691fb",
+    "components": 73,
+    "manifest_embedded": false,
+    "corpus_cases": 17,
+    "junit": {
+      "name": "pytest",
+      "errors": "0",
+      "failures": "0",
+      "skipped": "195",
+      "tests": "2877",
+      "time": "1113.876",
+      "timestamp": "2026-10-05T21:06:25.179699+00:00",
+      "hostname": "runnervmfi6oq"
+    },
+    "native": [
+      {
+        "path": "intentumdiff/intentumdiff_rust_core/intentumdiff_rust_core.dll",
+        "sha256": "e5737b058c5028f1f524e3834f921753c1d644efc2e80af9530885b23c4684fe"
+      }
+    ]
+  },
+  {
+    "platform": "arm",
+    "wheel": "intentumdiff_python-0.0.2b1-py3-none-win_arm64.whl",
+    "wheel_sha256": "cccdbb91eda5ecd679c0bddd31ba31247636e61d96b54b6a354b20b294c778a7",
+    "archive_sha256": "7520746003abec2041483ecaa91c1d7ea84fa5fb81c57d3fde41f7919864f13a",
+    "python_commit": "7d9b3a10bb705b40a5e54f4097bb8210025260b5",
+    "core_commit": "91092f9ec42165e68cab6ca3904c3d3f923691fb",
+    "components": 73,
+    "manifest_embedded": false,
+    "corpus_cases": 17,
+    "junit": {
+      "name": "pytest",
+      "errors": "0",
+      "failures": "0",
+      "skipped": "212",
+      "tests": "2872",
+      "time": "1317.694",
+      "timestamp": "2026-10-05T13:22:16.581635-07:00",
+      "hostname": "runnervma5ngn"
+    },
+    "native": [
+      {
+        "path": "intentumdiff/intentumdiff_rust_core/intentumdiff_rust_core.dll",
+        "sha256": "05d2b4690b7beeb644b531710ab1f62e139250bc13261956e8b28d1c744dd3a9"
+      }
+    ]
+  }
+]

@@ -43,6 +43,19 @@ class FileSource(Source):
         self._filename = filename or self._new_path.name
 
     def get_content(self) -> tuple[str, str, str, str | None]:
-        old_content = self._old_path.read_text(encoding="utf-8", errors="replace")
-        new_content = self._new_path.read_text(encoding="utf-8", errors="replace")
+        old_content = self._old_path.read_text(encoding="utf-8", errors="strict")
+        new_content = self._new_path.read_text(encoding="utf-8", errors="strict")
         return old_content, new_content, self._filename, self._language_hint
+
+    def guardrail_policy_paths(self) -> tuple[str, str]:
+        """Preserve the two real file locations independently of display aliases."""
+        return str(self._old_path), str(self._new_path)
+
+    def display_names(self) -> tuple[str, str] | None:
+        # This source is the one that genuinely has two names. An explicit ``filename``
+        # overrides both, and identical basenames need no distinction.
+        if self._filename != self._new_path.name:
+            return None
+        if self._old_path.name == self._new_path.name:
+            return None
+        return self._old_path.name, self._new_path.name

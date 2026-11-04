@@ -2,8 +2,9 @@ name: CI
 
 on:
   push:
-    branches: ["main"]
+    branches: ["main", "release/v0.0.2-rc"]
   pull_request:
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -14,26 +15,52 @@ permissions:
 
 jobs:
   python-suite:
-    name: Python full suite (pytest)
-    # windows-latest matches the environment the suite is developed and gated on
-    # (named-pipe LiveServer tests, path handling).
-    runs-on: windows-latest
+    name: Python full suite (${{ matrix.os }})
+    # publish.yml builds wheels for ubuntu, macos, windows and windows-11-arm. Until now the
+    # suite ran on windows-latest ONLY, so three of the four artefacts we publish had never
+    # had a test run on the platform they target - compiled and uploaded on the strength of a
+    # Windows run (#9).
+    #
+    # That is the 0.0.1 shape again: a check that proves the code builds standing in for a
+    # check that proves the artefact works.
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 180
+    strategy:
+      # Never fail-fast. On the first run every platform's result is information we do not
+      # have yet; cancelling macos because ubuntu went red would throw away half of it.
+      fail-fast: false
+      matrix:
+        # Exactly the four publish.yml builds a wheel for, so no artefact ships from a
+        # platform nothing was tested on. windows-11-arm is a NATIVE arm64 runner here for
+        # the same reason it is in publish.yml: `-b cffi` makes maturin EXECUTE a
+        # target-matching interpreter, and an arm64 python.exe cannot run on an x64 host.
+        os: [windows-latest, ubuntu-latest, macos-latest, windows-11-arm]
     env:
       CARGO_PROFILE_DEV_DEBUG: "false"
       MATURIN_PEP517_ARGS: "--profile dev"
+      # Empty on Dependabot PRs and fork PRs, which receive NO repository secrets.
+      # Evaluated here because `secrets.*` cannot be referenced from a step-level `if:`.
+      # Every open Dependabot PR in this repo was red purely because provisioning
+      # hard-failed without it - nothing to do with the bumps they proposed.
+      HAS_SPLIT_TOKEN: ${{ secrets.SPLIT_REPO_TOKEN != '' }}
+      # windows-11-arm died during collection with NO output at all: no traceback, no
+      # "collected N items", just exit 1. That is what a native crash looks like when
+      # stdout is still buffered - the buffer dies with the process and takes the only
+      # evidence with it. These two make the next failure legible.
+      PYTHONFAULTHANDLER: "1"
+      PYTHONUNBUFFERED: "1"
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Install Rust 1.95.0
-        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # stable
         with:
           toolchain: 1.95.0
 
       - name: Install Python 3.12
-        uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
 
@@ -64,12 +91,29 @@ jobs:
         # resolves to 'unknown' and the suite cannot run. Fail-closed: a missing or
         # unverified component stops the job here rather than an hour later as mass
         # PluginNotFoundError failures.
+        if: env.HAS_SPLIT_TOKEN == 'true'
         run: |
           pip install "pyyaml>=6.0"
           python scripts/provision_build_inputs.py --from-parser-artifacts
         env:
           GIT_TERMINAL_PROMPT: "0"
           GH_TOKEN: ${{ secrets.SPLIT_REPO_TOKEN }}
+
+      - name: Audit exact staged Wasm opcodes for metered Wasmtime
+        if: env.HAS_SPLIT_TOKEN == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          # Provenance is verified before any file is presented as a pinned scan.
+          python scripts/wasm_provenance.py verify
+          # Pinned wasmparser traverses core modules nested inside components.
+          # The original 47.0.3 Rust host had known fuel risks. Keep
+          # the opcode audit and fail closed on staged components under the
+          # patched production 48.0.7 Rust host / Python 50.0.1 binding.
+          cargo test --manifest-path scripts/wasm_fuel_audit/Cargo.toml
+          cargo run --manifest-path scripts/wasm_fuel_audit/Cargo.toml -- \
+            src/intentumdiff/wasm evidence/wasm-fuel-opcodes.json
 
       - name: Install intentumdiff + test dependencies
         # cffi first: the editable install is a maturin cffi-bindings build, which
@@ -79,5 +123,136 @@ jobs:
           pip install cffi
           pip install -e .[dev,serve]
 
+      - name: Diagnose this platform before the suite
+        # TEMPORARY (#9). windows-11-arm exits the suite in ~12s with no traceback, no
+        # "collected N items" and - even with PYTHONFAULTHANDLER set - no fault handler
+        # output. That rules out both an ordinary test failure and a hard native crash,
+        # and leaves nothing to act on.
+        #
+        # A suite is a poor diagnostic instrument: it imports and collects everything and
+        # reports at the end, so an abrupt exit destroys the evidence for all of it. This
+        # walks the same ground in order, printing each result before attempting the next.
+        # continue-on-error because the OUTPUT is the value; a red X here explains nothing.
+        if: env.HAS_SPLIT_TOKEN == 'true'
+        continue-on-error: true
+        run: python scripts/diagnose_platform.py
+
+      - name: Record candidate source identities
+        if: env.HAS_SPLIT_TOKEN == 'true'
+        shell: bash
+        run: |
+          mkdir -p evidence
+          git rev-parse HEAD > evidence/python-tested-commit.txt
+          git -C build/intentumdiff-core rev-parse HEAD > evidence/core-commit.txt
+          rustc --version > evidence/rust-version.txt
+          python --version > evidence/python-version.txt
+
+      - name: Compare native Rust and public Python migration corpus
+        if: env.HAS_SPLIT_TOKEN == 'true'
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo build --manifest-path build/intentumdiff-core/crates/rust-core-host/Cargo.toml --example migration_probe
+          probe=build/intentumdiff-core/crates/rust-core-host/target/debug/examples/migration_probe
+          if [ -f "$probe.exe" ]; then probe="$probe.exe"; fi
+          python scripts/check_migration_parity.py --core-dir build/intentumdiff-core --native "$probe" --wasm-dir src/intentumdiff/wasm --evidence evidence/migration-parity.json 2>&1 | tee evidence/migration-parity.log
+          export INTENTUMDIFF_NATIVE_PROBE="$probe"
+          echo "INTENTUMDIFF_NATIVE_PROBE=$probe" >> "$GITHUB_ENV"
+          python -m pytest tests/unit/test_native_parser_selection.py tests/unit/test_shared_filename_selection.py tests/unit/test_detect.py tests/unit/test_shared_content_detection.py tests/unit/test_shared_cache_filtering.py tests/unit/test_shared_patch_source.py tests/unit/test_deletion_ignore_evidence.py tests/unit/test_lazy_parser_registry.py tests/unit/test_lsp_enricher.py tests/unit/test_shared_guardrail_policy.py tests/unit/test_content_type.py tests/unit/test_shared_reference_resolution.py tests/unit/test_routed_review.py tests/unit/test_diffignore.py -q
+
       - name: Run the full unit suite
-        run: python -m pytest tests/unit -q
+        if: env.HAS_SPLIT_TOKEN == 'true'
+        run: python -m pytest tests/unit -q --junitxml=evidence/unit-suite.xml
+        env:
+          # Components were just staged, so an incomplete set is a provisioning failure, not
+          # a reason to quietly cover less. Without this the suite ran with ZERO renderers
+          # loaded and still reported green (#22).
+          INTENTUMDIFF_REQUIRE_ALL_COMPONENTS: "1"
+
+      - name: Run the reduced suite (no token - components unavailable)
+        # Dependabot and fork PRs get no secrets, so parser components cannot be
+        # provisioned and every component-dependent test would fail for a reason the author
+        # cannot fix. Run what CAN run, and SAY what was skipped - a quiet reduced gate is
+        # indistinguishable from a full one, and someone will eventually merge believing the
+        # whole suite ran.
+        #
+        # The full gate still runs on every maintainer branch PR and on the base branch, so
+        # nothing merges without it having passed somewhere.
+        if: env.HAS_SPLIT_TOKEN != 'true'
+        run: |
+          echo "::notice::SPLIT_REPO_TOKEN unavailable (Dependabot or fork PR) - parser components were not provisioned, so component-dependent tests are skipped. A maintainer run exercises the full gate."
+          python -m pytest tests/unit -q --deselect tests/unit/test_construct_edit_matrix.py
+
+      - name: Build a wheel on this platform
+        # The suite above runs against an EDITABLE install, which resolves imports from the
+        # source checkout. That is not the artefact anyone downloads. Every 0.0.1 defect
+        # survived a green suite and appeared the moment a real wheel was installed, so the
+        # wheel itself has to be built and exercised here.
+        if: env.HAS_SPLIT_TOKEN == 'true'
+        run: pip wheel . --no-deps --wheel-dir dist
+        env:
+          # Candidate acceptance must exercise the same optimized native profile as
+          # publication, not inherit the editable test install's development profile.
+          MATURIN_PEP517_ARGS: "--profile release --compatibility pypi"
+
+      - name: Record candidate artifact identities
+        if: env.HAS_SPLIT_TOKEN == 'true'
+        shell: bash
+        run: |
+          python scripts/wasm_provenance.py verify
+          cp src/intentumdiff/wasm/wasm_provenance.json evidence/wasm_provenance.json
+          echo "release" > evidence/wheel-build-profile.txt
+          python scripts/verify_artifacts.py --root . --manifest evidence/wheels.sha256 record --patterns "dist/*.whl"
+
+      - name: Smoke the wheel this platform just built
+        # Installs into a CLEAN venv and does what a user does in their first five minutes:
+        # import, console script, python -m, a real diff, clean stderr, and every URL in the
+        # output resolving. Against the wheel built on THIS runner, not a source checkout and
+        # not the wheel some other platform produced.
+        if: env.HAS_SPLIT_TOKEN == 'true'
+        shell: bash
+        run: |
+          wheel=$(ls dist/*.whl | head -1)
+          echo "smoking $wheel on $RUNNER_OS"
+          set -o pipefail
+          python scripts/smoke_published_wheel.py --wheel "$wheel" 2>&1 | tee evidence/wheel-smoke.log
+
+      - name: Retain candidate outputs and wheels for independent review
+        if: always() && env.HAS_SPLIT_TOKEN == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: candidate-evidence-${{ matrix.os }}-${{ github.run_attempt }}
+          retention-days: 30
+          if-no-files-found: error
+          path: |
+            evidence/
+            dist/*.whl
+
+  action-pins:
+    name: Pins and links we ship
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check every pinned SHA against its version comment
+        # Reads only PUBLIC tag lists, so GITHUB_TOKEN is enough and this job works on
+        # Dependabot and fork PRs, which receive no repository secrets. That matters: a
+        # wrong comment is precisely what makes Dependabot open bumps that are already
+        # applied, so the check has to run on the PRs where the symptom shows up.
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python scripts/check_action_pin_comments.py
+
+      - name: Check every URL we ship actually resolves
+        # 0.0.1 shipped an error message naming a domain that was never registered, and its
+        # replacement named a file that does not exist on main. Both were introduced AS fixes.
+        #
+        # smoke_published_wheel.py already checks URLs that appear on stderr, but it can only
+        # see what a successful run prints - and the plugin-metadata error fires only for a
+        # third-party plugin, so its dead link went unnoticed through two releases.
+        #
+        # Needs no secrets, so this runs on Dependabot and fork PRs too.
+        run: python scripts/check_source_urls.py

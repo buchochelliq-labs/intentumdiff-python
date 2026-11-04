@@ -222,7 +222,13 @@ def _build_parser() -> argparse.ArgumentParser:
     assets_git_p.set_defaults(func=_cmd_assets_git)
 
     # ── file ─────────────────────────────────────────────────────────────────
-    file_p = sub.add_parser("file", help="Diff two local files.")
+    # `diff` is the first thing anyone types, and it used to fail with
+    # "No such command 'diff'. Did you mean 'gist-diff'?" — a suggestion that points away from
+    # the two commands that actually diff things. Aliasing it to `file` costs nothing and
+    # removes a dead end from the very first interaction with the tool.
+    file_p = sub.add_parser(
+        "file", aliases=["diff"], help="Diff two local files (alias: diff)."
+    )
     file_p.add_argument("old_file", metavar="OLD", help="Path to the old file.")
     file_p.add_argument("new_file", metavar="NEW", help="Path to the new file.")
     _add_output_args(file_p)
@@ -995,6 +1001,10 @@ if _CLICK_RUNTIME_AVAILABLE:
         ("git", "Diff files or commits in a git repository."),
         ("assets", "Perceptual diffs for non-text assets."),
         ("file", "Diff two local files."),
+        # Registered here as well as aliased on the argparse parser: this Click group is what
+        # rejects unknown commands, so without an entry here `diff` still fails before argparse
+        # is ever consulted — and fails suggesting `gist-diff`.
+        ("diff", "Diff two local files (alias for 'file')."),
         ("patch", "Diff from a unified diff patch."),
         ("string", "Diff two in-memory strings."),
         ("github-pr", "Parse a GitHub pull request URL into a review target."),

@@ -1,27 +1,64 @@
 # Building intentumdiff (Python) from source
 
-Toolchains: **Python 3.12**, **Rust 1.93.0** (the wheel build compiles the engine).
+CI toolchains: **Python 3.12**, **Rust 1.95.0** (the wheel build compiles the engine).
 
 ## 1. Provision the build inputs
 
-The engine and the parser components are separate repos' artifacts:
+The engine and the parser/renderer components come from separate repositories.
+The split Python repository does not require the retired monorepo. To use local
+build inputs:
 
 ```bash
 python scripts/provision_build_inputs.py \
-    --core-dir /path/to/intentumdiff-core \      # or omit to clone the repo
-    --wasm-dir /path/to/built/components       # parser .wasm set to bundle
+    --core-dir /path/to/intentumdiff-core \
+    --wasm-dir /path/to/built/components
 ```
 
 This stages `build/intentumdiff-core/` (pyproject's `[tool.maturin] manifest-path` points into
-it) and `src/intentumdiff/wasm/*.wasm`.
+it) and `src/intentumdiff/wasm/*.wasm`. Alongside the parsers, include the complete
+four-renderer set in the component directory: `terminal_renderer.wasm`,
+`patch_renderer.wasm`, `html_renderer.wasm` and `llm_renderer.wasm`. All four are
+registered built-ins and are required for complete component discovery, including
+when `INTENTUMDIFF_REQUIRE_ALL_COMPONENTS=1`.
+By default, omitting `--core-dir` fetches the immutable `CORE_REF` pinned in the
+provisioning script. A local checkout (`--core-dir` or `INTENTUMDIFF_CORE_DIR`) or
+`INTENTUMDIFF_CORE_REF` is an explicit override of that pin.
+
+For the artifact-backed CI path, configure Git authentication for the sibling
+repositories and provide `GH_TOKEN` or `GITHUB_TOKEN` with read access to their
+Actions artifacts, then run:
+
+```bash
+python -m pip install "pyyaml>=6.0"
+python scripts/provision_build_inputs.py --from-parser-artifacts
+```
+
+Provisioning without either a component directory or `--from-parser-artifacts`
+skips component staging. That is not a complete release-wheel build.
+
+For local components, `--wasm-dir` copies `wasm_provenance.json` when supplied.
+If your component directory has no manifest, generate one from the staged files:
+
+```bash
+python scripts/wasm_provenance.py generate
+python scripts/wasm_provenance.py verify
+```
+
+Artifact-backed provisioning generates this manifest automatically. The wheel must
+include it; installed-wheel smoke verifies its complete component set and hashes.
 
 ## 2. Build
 
 ```bash
-pip install cffi          # REQUIRED before the build: maturin's cffi-bindings mode
-                          # needs the cffi module importable by the target interpreter
-pip install -e .[dev,serve]          # editable dev install (drops the cdylib in-tree)
-# or a wheel:
+python -m pip install cffi
+python -m pip install -e ".[dev,serve]"
+```
+
+Install `cffi` first: maturin needs it importable by the target interpreter.
+To build a wheel instead of an editable installation:
+
+```bash
+python -m pip install cffi "maturin>=1.14,<2"
 maturin build --release -b cffi --out dist
 ```
 
@@ -31,9 +68,46 @@ maturin build --release -b cffi --out dist
 python -m pytest tests/unit -q
 ```
 
-The suite runs entirely over the ctypes path. Verify the live backend if in doubt:
+Runtime semantic tests use provisioned components and the public API through the
+ctypes path. They do not depend on monorepo source files. Platform skips must be
+classified in `tests/unit/skip_reasons_baseline.json`; PowerShell scenarios on Windows
+ARM64 skip only when Rust explicitly reports the parser unavailable.
+
+Verify the live backend if in doubt:
 `python -c "import intentumdiff.rust_core as r; print(type(r._load_backend()).__name__)"`
 must print `_CtypesBackend`.
 
 Gotcha: a leftover pyo3-era `src/intentumdiff/*.pyd` or a standalone `intentumdiff_rust_core`
 pip install shadows the fresh cdylib — remove/uninstall them after rebuilds.
+
+
+### Reviewed parser registry for 0.0.2
+
+Wheel provisioning pins registry commit `59d7c91fa4e466b4130628202e6a126792b6f9d7`
+(registry PR #9), including verified SAS, ADF, Databricks workflow and MDX fixes,
+as well as the earlier Svelte inline-script fix. Core commit
+`3393821c4e45a8dd81d5c564ea1c91ab43bb824e` includes CSS/SCSS source-range enrichment,
+the markup text-span corrections and reconciled invariance catalogue declarations.
+Installed-wheel acceptance requires source-judged ranges and meaningful SAS/MDX edits. It retains
+the reconciliation of the post-rebrand component set with the reviewed
+JS/TS incomplete-source fix; reading the registry default branch had silently
+omitted that fix. An incomplete `function f(` → `function g(` edit must produce
+Rust-owned source fallback with an explicit parse-error indication, never empty
+style-only success. Installed-wheel smoke checks cover Python, JavaScript and
+TypeScript with exact changed identifier ranges. Parser bytes remain checksum
+verified and the wheel includes its complete Wasm provenance.
+
+
+### Rust-owned terminal presentation
+
+Default diff output and `--format terminal --output FILE` use the same Rust
+`rs-rich` renderer as the native CLI. Python passes the authoritative diff DTO,
+terminal width and colour preference through the existing C ABI, then writes the
+returned text without interpreting markup. `NO_COLOR` and redirected output
+remain colour-free. Narrow terminals use wrapping and stacked panels so protected
+values and identifiers remain visible. Source fallback explicitly says semantic
+equivalence is unknown. JSON, patch, HTML, LLM and SARIF do not use this renderer.
+
+This is bounded adoption for diff summaries, change tables and their guardrail
+rows. Command help, banners and other CLI screens still use the existing host
+presentation; their migration is separate from this change.

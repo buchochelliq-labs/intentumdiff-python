@@ -1,0 +1,146 @@
+"""No wheel is promoted for a platform the suite does not run on.
+
+This is issue #9's definition of done, encoded so it cannot quietly stop being true:
+
+    "No wheel is published for a platform on which the full suite and the artefact smoke
+     have not both passed. If we cannot test a platform, we do not ship a wheel for it -
+     an untested artefact is a claim we have not earned."
+
+The gap it closes was invisible for a reason worth remembering. `publish.yml` grew a wheel
+target per platform as demand appeared, and `ci.yml` stayed on windows-latest. Neither file
+mentions the other, so nothing anywhere related the set of artefacts we ship to the set of
+platforms we test, and three of four wheels went out having never had a test executed on the
+platform they target.
+
+Adding a wheel target is a one-line change to a file nobody reads alongside the test config.
+That is exactly the kind of drift a human reviewer misses and a comparison catches.
+
+Reads the workflow YAML and promotion allowlist - no network or GitHub API.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+import ast
+
+# PyYAML is a RUNTIME dependency of this package, not a dev extra, so it cannot be absent in
+# any environment where the tests can run at all. An importorskip here would only ever
+# convert a broken environment into a silent pass - and it added an unclassified skip reason
+# that the skip ratchet then failed on, which is the ratchet working exactly as intended.
+import yaml
+
+WORKFLOWS = Path(__file__).resolve().parents[2] / ".github" / "workflows"
+
+
+def _load(name: str) -> dict:
+    path = WORKFLOWS / name
+    assert path.is_file(), f"{path} does not exist"
+    return yaml.safe_load(path.read_text(encoding="utf-8"))
+
+
+def _matrix_os(job: dict) -> set[str]:
+    """Every `os` a job's matrix expands to, whether declared as a list or via `include`."""
+    matrix = job.get("strategy", {}).get("matrix", {})
+    found: set[str] = set()
+
+    declared = matrix.get("os")
+    if isinstance(declared, str):
+        found.add(declared)
+    elif isinstance(declared, list):
+        found.update(declared)
+
+    for entry in matrix.get("include", []) or []:
+        if isinstance(entry, dict) and "os" in entry:
+            found.add(entry["os"])
+
+    # A job with no matrix still runs somewhere.
+    if not found:
+        runs_on = job.get("runs-on")
+        if isinstance(runs_on, str) and "${{" not in runs_on:
+            found.add(runs_on)
+
+    return found
+
+
+def _jobs_producing_wheels() -> dict[str, dict]:
+    """CI jobs producing real, tested release wheels."""
+    out = {}
+    for name, job in _load("ci.yml").get("jobs", {}).items():
+        runs = "\n".join(str(s.get("run", "")) for s in job.get("steps", []))
+        if "maturin build" in runs or "pip wheel" in runs or "build --wheel" in runs:
+            out[name] = job
+    return out
+
+
+def _approved_platforms() -> set[str]:
+    """Use the actual immutable promotion allowlist, independently of CI."""
+    source = (WORKFLOWS.parents[1] / "scripts" / "promote_reviewed_wheels.py").read_text()
+    tree = ast.parse(source)
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(
+            isinstance(target, ast.Name) and target.id == "PLATFORMS"
+            for target in node.targets
+        ):
+            mapping = ast.literal_eval(node.value)
+            assert isinstance(mapping, dict), "platform allowlist must be literal"
+            return set(mapping)
+    raise AssertionError("promotion allowlist missing")
+
+
+def test_we_can_see_both_sides() -> None:
+    """Guard the guard: require nonempty build, test and publish sets."""
+    built = set().union(*(_matrix_os(j) for j in _jobs_producing_wheels().values()))
+    tested = _matrix_os(_load("ci.yml")["jobs"]["python-suite"])
+    approved = _approved_platforms()
+
+    assert built, "found no wheel-building job in ci.yml"
+    assert tested, "found no full-suite test platforms"
+    assert approved, "found no approved publication platforms"
+    assert len(approved) >= 2, f"expected several platform wheels, found {sorted(approved)}"
+
+
+def test_every_platform_we_build_a_wheel_for_is_also_tested() -> None:
+    built = set().union(*(_matrix_os(j) for j in _jobs_producing_wheels().values()))
+    tested = _matrix_os(_load("ci.yml")["jobs"]["python-suite"])
+    approved = _approved_platforms()
+    assert built == tested == approved, (
+        "Wheel builders, full-suite platforms and publication allowlist diverge: "
+        f"built={sorted(built)}, tested={sorted(tested)}, approved={sorted(approved)}. "
+        "No platform may ship without its own built and tested wheel (#9)."
+    )
+
+
+def test_publication_promotes_ci_wheels_without_building() -> None:
+    jobs = _load("publish.yml")["jobs"]
+    assert {"promote", "publish", "publish-testpypi"} <= set(jobs)
+    runs = "\n".join(
+        str(step.get("run", ""))
+        for job in jobs.values()
+        for step in job.get("steps", [])
+    )
+    assert "scripts/promote_reviewed_wheels.py metadata" in runs
+    assert "scripts/promote_reviewed_wheels.py wheels" in runs
+    assert "pip wheel" not in runs
+    assert "maturin build" not in runs
+    assert "build --wheel" not in runs
+    assert any(
+        step.get("with", {}).get("name") == "reviewed-pypi-wheels"
+        for step in jobs["promote"]["steps"]
+    ), "the approved source-byte artifact is not retained"
+
+
+def test_the_suite_leg_also_smokes_a_real_wheel() -> None:
+    """Running the suite on a platform is not the same as exercising the artefact.
+
+    The suite runs against an editable install, which resolves imports from the source
+    checkout. Every 0.0.1 defect passed that and appeared on first contact with a real wheel,
+    so the leg has to build one and install it clean.
+    """
+    steps = _load("ci.yml")["jobs"]["python-suite"]["steps"]
+    blob = "\n".join(str(s.get("run", "")) for s in steps)
+
+    assert "pip wheel" in blob, "the matrix leg no longer builds a wheel"
+    assert "smoke_published_wheel.py" in blob, (
+        "the matrix leg no longer smoke-tests the wheel it built. Testing the source tree "
+        "and shipping a wheel are different claims; only the second one reaches a user."
+    )

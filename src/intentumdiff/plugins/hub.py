@@ -20,8 +20,7 @@ Plugins can be installed from two sources:
 
 For official plugins (no ``repo``), the short name is expanded to the
 full package in the ``buchochelliq-labs`` GitHub org:
-  ``dbt``  ->  ``intentumdiff-dbt``
-  ->  ``https://github.com/buchochelliq-labs/intentumdiff-dbt``
+  ``dbt``  ->  package ``intentumdiff-dbt`` in that org
 
 Security model
 --------------

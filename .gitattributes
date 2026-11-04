@@ -1,0 +1,2 @@
+# The guest corpus is verified byte-for-byte against its recorded SHA-256.
+/tests/fixtures/host_utils_guest/cases.json text eol=lf

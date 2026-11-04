@@ -1,52 +1,98 @@
-# intentumdiff (Python)
+# IntentumDiff
 
 [![CI](https://github.com/buchochelliq-labs/intentumdiff-python/actions/workflows/ci.yml/badge.svg)](https://github.com/buchochelliq-labs/intentumdiff-python/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
 
-The **Python binding and `intentumdiff` PyPI package** — a thin shell over the IntentumDiff
-engine. Semantic code review: detect intent, moves, refactorings, and style changes.
+**Semantic code review — see what a change means, not which lines moved.**
 
-All diffing, matching, classification, guardrails, and presentation live in the engine
-([intentumdiff-core](https://github.com/buchochelliq-labs/intentumdiff-core), Rust). This
-package is the public Python API, CLI, and VCS/config orchestration: it loads the
-engine's cdylib via ctypes and drives the stable C ABI (`intentumdiff_call`). The binding
-does zero functional work.
+A textual diff shows that 40 lines changed. It cannot tell you whether that is a rename, a
+function moved between files, a reformat, or a behavioural change hiding among them.
+IntentumDiff parses both sides, matches the trees, and classifies every change by what it
+does: **meaningful**, **refactoring**, **moved**, or **ignored style**.
+
+## Install
+
+```bash
+pip install --pre intentumdiff-python
+```
+
+0.0.2b2 is a pre-release, so `--pre` is needed; without it pip installs the older 0.0.1.
+Requires **Python 3.12+**. The wheel bundles the Rust engine and language parser
+components; built-in parsing needs no separate component download.
+
+**0.0.2 candidate platform limitation:** PowerShell is unavailable on Windows ARM64
+because of the tracked compiler limitation in [#42](https://github.com/buchochelliq-labs/intentumdiff-python/issues/42).
+Rust reports this parser as unavailable; the package does not substitute a Python engine.
+
+> The distribution is `intentumdiff-python`; the import package is `intentumdiff`.
+
+## Quick start
 
 ```python
 from intentumdiff import SemanticDiffer
+
+old = """def greet(name):
+    return 'hi ' + name
+"""
+new = """def greet(name):
+    if not name:
+        return None
+    return 'hi ' + name
+"""
 
 diff = SemanticDiffer().diff_strings(old, new, "example.py")
 for change in diff.changes:
     print(change.change_type, change.description)
 ```
 
-## Building from source
-
-The wheel bundles two provisioned build inputs — the engine and the parser components:
-
-```bash
-python scripts/provision_build_inputs.py \
-    --core-dir /path/to/intentumdiff-core \      # or let it clone the repo
-    --wasm-dir /path/to/built/components       # built by the parser repos
-pip install -e .[dev]
+```text
+ChangeType.ADDITION Insert -> if_statement('if_statement')
 ```
 
-Released wheels on PyPI are pre-built per platform — installing from source is a
-development workflow, not the user path.
+A line diff reports three added lines. IntentumDiff reports that a **guard clause** was
+introduced — the thing a reviewer needs to know.
 
-## Tests
+## Command line
 
 ```bash
-python -m pytest tests/unit -q
+intentumdiff --help          # or: python -m intentumdiff --help
+intentumdiff file old.py new.py
+intentumdiff git --help      # diff against a ref in a git repository
 ```
 
-The suite runs entirely over the ctypes path (there is no other path — the engine has
-no Python dependency and this package has no engine).
+## See the 0.0.2 candidate CLI
 
-## Provenance
+This real installed-wheel recording changes the assigned value from `1` to `2`.
+Rust reports one modification; the main diff panel and table use **rs-rich**.
 
-Migrated files-only (no history) from the IntentumDiff monorepo
-(`buchochelliq-labs/intentumdiff`), which remains the archive of record.
+[![Installed 0.0.2b1 candidate showing one integer-value modification](https://raw.githubusercontent.com/buchochelliq-labs/intentumdiff-docs/1c082d29f58a616136290db7003baec96aa3c200/docs/assets/cli/current/meaningful.png)](https://github.com/buchochelliq-labs/intentumdiff-docs/blob/1c082d29f58a616136290db7003baec96aa3c200/docs/assets/cli/current/meaningful.mp4)
 
-License: MIT.
+[Watch the CLI examples and read their exact provenance](https://github.com/buchochelliq-labs/intentumdiff-docs/blob/1c082d29f58a616136290db7003baec96aa3c200/docs/cli-demos/index.md).
+The recordings use the verified Python #98 Linux wheel and **rs-rich-record**. They are
+pre-publication candidate evidence, not a claim that 0.0.2 is available on PyPI.
+Standalone guardrail reports and errors still use the existing presentation paths.
+
+## Documentation
+
+**https://buchochelliq-labs.github.io/intentumdiff-docs/**
+
+- [Getting started](https://buchochelliq-labs.github.io/intentumdiff-docs/getting-started/)
+- [Library and CLI reference](https://buchochelliq-labs.github.io/intentumdiff-docs/python/)
+- [How it works](https://buchochelliq-labs.github.io/intentumdiff-docs/concepts/)
+- [Troubleshooting](https://buchochelliq-labs.github.io/intentumdiff-docs/troubleshooting/)
+
+There is also a [VS Code extension](https://github.com/buchochelliq-labs/intentumdiff-vscode),
+which uses this package as its engine.
+
+## Privacy
+
+Everything runs locally and there is no telemetry. The optional LLM explainer is off by
+default and bring-your-own-key; when enabled for a cloud endpoint it sends a privacy-safe fact
+sheet — counts, categories and flags — never your source, identifiers or literals. See the
+[privacy policy](https://buchochelliq-labs.github.io/intentumdiff-docs/privacy/).
+
+## Licence
+
+MIT. Contributing and build-from-source instructions are in
+[CONTRIBUTING.md](CONTRIBUTING.md).

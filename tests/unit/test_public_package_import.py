@@ -6,6 +6,8 @@ import sys
 import textwrap
 from pathlib import Path
 
+from intentumdiff import __version__
+
 
 def test_public_package_import_does_not_require_pytest() -> None:
     script = textwrap.dedent(
@@ -39,4 +41,4 @@ def test_public_package_import_does_not_require_pytest() -> None:
         text=True,
     )
 
-    assert result.stdout.splitlines() == ["0.0.1", "PluginTestHarness"]
+    assert result.stdout.splitlines() == [__version__, "PluginTestHarness"]

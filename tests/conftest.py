@@ -20,44 +20,8 @@ SRC_ROOT = REPO_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-# ── #82 split guard ─────────────────────────────────────────────────────────
-# The split python repo does not carry the monorepo's release/CI tooling under
-# scripts/ (some of it travels to other split repos, e.g. the media validator to
-# intentumdiff-vscode). Ignore each tooling test when its script module is absent;
-# in the monorepo every script exists, so nothing is ever ignored here.
-_SCRIPT_TESTS = {
-    "unit/test_github_action.py": "github_action.py",
-    "unit/test_prepare_release_dist.py": "prepare_release_dist.py",
-    "unit/test_release_media_manifest_validator.py": "validate_release_media_manifest.py",
-    "unit/test_release_readiness_accounting.py": "release_readiness_accounting.py",
-    "unit/test_sem_benchmark_docker_runner.py": "benchmark_sem_docker.py",
-    "unit/test_sem_benchmark_harness.py": "benchmark_sem.py",
-    "unit/test_set_release_version.py": "set_release_version.py",
-    "unit/test_security_prereq_check.py": "security_prereq_check.py",
-    "unit/test_vendor_monaco.py": "vendor_monaco.py",
-    "unit/test_verify_artifacts.py": "verify_artifacts.py",
-}
-collect_ignore = [
-    test
-    for test, script in _SCRIPT_TESTS.items()
-    if not (REPO_ROOT / "scripts" / script).exists()
-]
-# Same guard for monorepo ROOT tooling files (the parser build helper, the pre-commit gate).
-_ROOT_TESTS = {
-    "unit/test_build_helper.py": "build.py",
-    "unit/test_pre_commit_security_gate.py": "scripts/pre_commit_security_gate.py",
-}
-collect_ignore += [
-    test for test, rel in _ROOT_TESTS.items() if not (REPO_ROOT / rel).exists()
-]
-
-# ---------------------------------------------------------------------------
-# Set INTENTUMDIFF_ALLOW_VULNERABLE_WASMTIME=1 at import time so benchmark modules
-# that run availability probes during collection keep working in unsynced
-# local environments. The normal lockfile path uses wasmtime>=45.0.
-# The session fixture below restores the original value after the run.
-# ---------------------------------------------------------------------------
-os.environ.setdefault("INTENTUMDIFF_ALLOW_VULNERABLE_WASMTIME", "1")
+# Never manufacture a Wasmtime security waiver in test collection.
+# The 0.0.2 release candidate must exercise production's fail-closed policy.
 
 _GIT_REPO_REFS: list[weakref.ReferenceType[Any]] = []
 _ORIGINAL_GIT_REPO_INIT: Any = None
@@ -143,25 +107,18 @@ def _clear_tracked_git_repos() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Allow Wasm plugins to load during tests even when a local environment has not
-# yet synced the fixed wasmtime. Tests that specifically verify the security
-# policy clear this env var themselves.
+# Native GitPython handles must still be released after the test session,
+# without altering the runtime's security controls.
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(autouse=True, scope="session")
-def _allow_vulnerable_wasmtime_in_tests():
-    """Keep non-policy plugin tests runnable in stale local environments."""
+def _release_git_repo_process_handles():
+    """Close GitPython helpers without waiving Wasmtime security checks."""
     _install_git_repo_tracker()
-    prev = os.environ.get("INTENTUMDIFF_ALLOW_VULNERABLE_WASMTIME")
-    os.environ["INTENTUMDIFF_ALLOW_VULNERABLE_WASMTIME"] = "1"
     yield
     _clear_tracked_git_repos()
     _restore_git_repo_tracker()
     gc.collect()
-    if prev is None:
-        os.environ.pop("INTENTUMDIFF_ALLOW_VULNERABLE_WASMTIME", None)
-    else:
-        os.environ["INTENTUMDIFF_ALLOW_VULNERABLE_WASMTIME"] = prev
 
 
 # ---------------------------------------------------------------------------

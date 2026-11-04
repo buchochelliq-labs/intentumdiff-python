@@ -2,12 +2,11 @@
 intentumdiff.lsp.exceptions
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Non-fatal LSP warning exceptions.
+LSP transport exceptions used to report failures through the public indexer.
 
-Both subclass ``Exception`` directly rather than a library-wide base so that
-callers can catch them without importing any other IntentumDiff symbol.
-They are treated as warnings in the pipeline — a file whose LSP enrichment
-fails is diffed without type information rather than aborting.
+Both subclass ``Exception`` directly so callers can distinguish connection
+failures and timeouts. A requested type-enrichment failure must not be
+reported as a successfully completed bare semantic index.
 """
 
 from __future__ import annotations
@@ -16,12 +15,12 @@ from __future__ import annotations
 class LspConnectionError(Exception):
     """Raised when the TCP connection to the LSP server cannot be established.
 
-    This is non-fatal: the diff pipeline continues without type enrichment.
+    Type enrichment cannot certify the file while connection is unavailable.
     """
 
 
 class LspTimeoutError(Exception):
     """Raised when an LSP request does not receive a response within the timeout.
 
-    This is non-fatal: the affected node is left with ``type_info=None``.
+    The failing hover request is not silently treated as unknown type.
     """

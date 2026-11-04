@@ -148,3 +148,67 @@ def test_default_cap_does_not_break_normal_parses() -> None:
     plugin = load_plugin(str(wasm), trusted=True)
     payload = plugin.call_process('{"a": [1, 2, 3]}', "json", "ok.json")
     assert _tree_or_typed_error(payload)
+
+
+def test_failed_fuel_configuration_denies_guest_execution(monkeypatch: pytest.MonkeyPatch) -> None:
+    """#281: a failed per-call fuel cap must reject the call before guest dispatch."""
+    from intentumdiff.plugins import loader
+    from intentumdiff.plugins.exceptions import PluginSecurityError
+
+    # Substituting a local WasmtimeError makes failure deterministic without
+    # compiling a Wasm component in this test.
+    monkeypatch.setattr(loader, "WasmtimeError", RuntimeError)
+    lookups: list[str] = []
+
+    class UnmeteredStore:
+        def set_fuel(self, budget: int) -> None:
+            assert budget == 1000
+            raise RuntimeError("fuel metering unavailable")
+
+    class Guest:
+        def get_export_index(self, _store, name: str, *parents):
+            if parents:
+                lookups.append(name)
+                raise AssertionError("guest lookup reached after fuel failure")
+            return 1
+
+        def get_func(self, *_args):
+            raise AssertionError("guest function reached after fuel failure")
+
+    plugin = loader.LoadedPlugin(
+        "unmetered.wasm", Guest(), UnmeteredStore(), 1000, loader.LoadedPlugin._PARSER_IFACE
+    )
+    with pytest.raises(PluginSecurityError, match="required Wasm fuel cap"):
+        plugin.call_process("input", "python", "test.py")
+
+    assert lookups == []
+    assert plugin._tainted is True
+    records = plugin.drain_telemetry()
+    assert len(records) == 1
+    assert records[0]["status"] == "fuel_set_failed"
+    assert records[0]["fuel_budget"] == 1000
+
+
+def test_explicit_unlimited_fuel_still_allows_guest_call() -> None:
+    """#281: explicit -1 remains the only route to an intentionally uncapped call."""
+    from intentumdiff.plugins.loader import LoadedPlugin
+
+    class UnlimitedStore:
+        def set_fuel(self, _budget: int) -> None:
+            raise AssertionError("unlimited mode must not attempt set_fuel")
+
+    class Guest:
+        def get_export_index(self, _store, _name: str, *_parents):
+            return 1
+
+        def get_func(self, _store, _index: int):
+            return lambda _store, *_args: "ok"
+
+    plugin = LoadedPlugin(
+        "unlimited.wasm", Guest(), UnlimitedStore(), -1, LoadedPlugin._PARSER_IFACE
+    )
+    assert plugin._call("process", "input", "python", "test.py") == "ok"
+    records = plugin.drain_telemetry()
+    assert len(records) == 1
+    assert records[0]["status"] == "ok"
+    assert records[0]["fuel_budget"] is None

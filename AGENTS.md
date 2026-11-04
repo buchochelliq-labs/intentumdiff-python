@@ -8,10 +8,11 @@ The **thin Python binding** + PyPI package. Zero functional work here.
   reasons: classify in `skip_reasons_baseline.json` or fix — never accumulate.
 - There is no Python fallback engine; a missing cdylib fails loudly.
 
-## Build + test (Python 3.12, Rust 1.93.0)
+## Build + test (Python 3.12, Rust 1.95.0)
 ```bash
-python scripts/provision_build_inputs.py --core-dir <core> --wasm-dir <components>
-pip install cffi && pip install -e .[dev,serve]
+python scripts/provision_build_inputs.py --core-dir /path/to/intentumdiff-core --wasm-dir /path/to/components
+python -m pip install cffi
+python -m pip install -e ".[dev,serve]"
 python -m pytest tests/unit -q
 ```
 Backend check: `type(_load_backend()).__name__ == "_CtypesBackend"`.

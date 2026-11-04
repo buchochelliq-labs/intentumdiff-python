@@ -1,62 +1,34 @@
-"""
-intentumdiff.lsp_server._diagnostics
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+"""Rust-owned LSP diagnostics output, structured into Python transport DTOs.
 
-Translate a ``SemanticDiff`` into a list of LSP ``Diagnostic`` objects.
+Semantic classification and UTF-8 byte→UTF-16 ranges belong to the Rust core.
+The source-aware C ABI refuses invalid spans rather than publishing displaced
+editor annotations. Python performs no diagnostic semantic classification.
 """
-
 from __future__ import annotations
 
 from lsprotocol import types as lsp_types
+from lsprotocol.converters import get_converter
 
-from intentumdiff.core.models import ChangeType, SemanticDiff, SemanticNode
-
-# Sentinel range covering the whole document — used for parse-error diagnostics.
-_FULL_DOC_RANGE = lsp_types.Range(
-    start=lsp_types.Position(line=0, character=0),
-    end=lsp_types.Position(line=2**31 - 1, character=0),
-)
+from intentumdiff.core.models import SemanticDiff, SemanticNode
+from intentumdiff.rust_core import _c_abi_call
 
 
-def node_to_lsp_range(node: SemanticNode) -> lsp_types.Range:
-    """Convert a ``SemanticNode``'s position to an LSP ``Range``.
+def node_to_lsp_range(node: SemanticNode, source: str) -> lsp_types.Range:
+    """Marshal a Rust source-judged UTF-16 range, requiring the actual source."""
+    value = _c_abi_call("lsp_utf16_range", node.model_dump_json(), source)
+    if not isinstance(value, dict):
+        raise ValueError("Rust LSP range must be an object")
+    return get_converter().structure(value, lsp_types.Range)
 
-    ``NodePosition`` fields are already 0-indexed so no adjustment is needed.
-    """
-    pos = node.position
-    return lsp_types.Range(
-        start=lsp_types.Position(line=pos.start_line, character=pos.start_col),
-        end=lsp_types.Position(line=pos.end_line, character=pos.end_col),
+
+def semantic_diff_to_diagnostics(
+    diff: SemanticDiff, *, new_source: str,
+) -> list[lsp_types.Diagnostic]:
+    """Decode Rust's source-aware diagnostic inventory (no Python fallback)."""
+    value = _c_abi_call(
+        "lsp_server_diagnostics_utf16", diff.model_dump_json(), new_source,
     )
-
-
-def semantic_diff_to_diagnostics(diff: SemanticDiff) -> list[lsp_types.Diagnostic]:
-    """Translate *diff* into a list of LSP diagnostics.
-
-    * ``STYLE_ONLY`` changes → ``Hint`` severity (informational, on ``new_node``).
-    * Parse errors → ``Warning`` severity (full-document range).
-    """
-    diags: list[lsp_types.Diagnostic] = []
-
-    for change in diff.changes:
-        if change.change_type == ChangeType.STYLE_ONLY and change.new_node is not None:
-            diags.append(
-                lsp_types.Diagnostic(
-                    range=node_to_lsp_range(change.new_node),
-                    severity=lsp_types.DiagnosticSeverity.Hint,
-                    message="Style-only change — no semantic impact",
-                    source="intentumdiff",
-                )
-            )
-
-    for err in diff.parse_errors:
-        diags.append(
-            lsp_types.Diagnostic(
-                range=_FULL_DOC_RANGE,
-                severity=lsp_types.DiagnosticSeverity.Warning,
-                message=f"Parse error: {err}",
-                source="intentumdiff",
-            )
-        )
-
-    return diags
+    if not isinstance(value, list):
+        raise ValueError("Rust LSP diagnostics must be an array")
+    converter = get_converter()
+    return [converter.structure(row, lsp_types.Diagnostic) for row in value]

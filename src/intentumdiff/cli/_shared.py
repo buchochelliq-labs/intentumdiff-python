@@ -23,6 +23,7 @@ import os
 import shlex
 import sys
 import time
+from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
@@ -300,131 +301,52 @@ def _record_diagnostics_db(
 
 
 def _render_terminal(diff: SemanticDiff) -> None:
-    if diff.guardrail_violations:
-        guardrail_table = Table(
-            title="Protected semantic changes",
-            title_style="bold red",
-            box=box.SIMPLE_HEAVY,
-            border_style="red",
-        )
-        guardrail_table.add_column("Severity", style="bold", no_wrap=True)
-        guardrail_table.add_column("Location", style="cyan")
-        guardrail_table.add_column("Message")
-        guardrail_table.add_column("Value", style="dim")
-        for violation in diff.guardrail_violations:
-            color = "red" if violation.severity == GuardrailSeverity.IMMUTABLE else "yellow"
-            old_new = ""
-            if violation.old_value or violation.new_value:
-                old_new = f"{violation.old_value!r} -> {violation.new_value!r}"
-            guardrail_table.add_row(
-                f"[{color}]{violation.severity.value.upper()}[/{color}]",
-                f"{violation.file}::{violation.semantic_path}",
-                violation.message,
-                old_new,
-            )
-        _console.print(guardrail_table)
-        _console.print()
+    from intentumdiff.rust_core import render_cli_review
 
-    if not diff.has_semantic_changes:
-        state_style = "green"
-        state_title = "No changes detected"
-        state_message = "IntentumDiff found no semantic differences."
-        if diff.is_style_only:
-            state_style = "yellow"
-            state_title = "Style-only change"
-            state_message = "Formatting changed, but no semantic differences were found."
-        elif diff.is_fallback:
-            state_style = "yellow"
-            state_title = "Token fallback used"
-            state_message = "Parse errors were detected, so IntentumDiff used token-level fallback."
-        _console.print(
-            Panel(
-                state_message,
-                title=f"[bold {state_style}]{state_title}[/bold {state_style}]",
-                border_style=state_style,
-                box=box.ROUNDED,
-                expand=False,
-            )
-        )
-        return
-    scope_label = (diff.staging_status or "working tree").replace("_", " ")
-    header = Table.grid(padding=(0, 2))
-    header.add_column(style="bold")
-    header.add_column()
-    header.add_row("Old", diff.old_filename or "<unknown>")
-    header.add_row("New", diff.new_filename or "<unknown>")
-    header.add_row("Language", diff.language or "unknown")
-    header.add_row("Scope", scope_label)
-    header.add_row("Changes", str(len(diff.changes)))
-    _console.print(
-        Panel(
-            header,
-            title="[bold cyan]Semantic diff[/bold cyan]",
-            border_style="cyan",
-            box=box.ROUNDED,
-            expand=False,
-        )
+    # Python owns host I/O and terminal settings; Rust owns all presentation layout.
+    rendered = render_cli_review(
+        diff,
+        width=max(16, min(300, _console.width)),
+        # Direct writes bypass Rich's Win32 renderer on legacy consoles.
+        color=bool(
+            _console.is_terminal
+            and _console.color_system
+            and not _console.legacy_windows
+            and "NO_COLOR" not in os.environ
+        ),
     )
-    _console.print()
+    _console.file.write(rendered)
+    _console.file.flush()
 
-    changes_table = Table(
-        box=box.SIMPLE,
-        border_style="dim",
-        header_style="bold",
-        show_header=True,
-    )
-    changes_table.add_column("Type", no_wrap=True)
-    changes_table.add_column("Description", overflow="fold")
-    for change in diff.changes:
-        from intentumdiff.core.models import ChangeType
-        ct = (
-            change.change_type.value
-            if isinstance(change.change_type, ChangeType)
-            else str(change.change_type)
-        )
-        color_map = {
-            "ADDITION": "green",
-            "DELETION": "red",
-            "MODIFICATION": "yellow",
-            "MOVE": "cyan",
-            "REFACTORING": "magenta",
-            "STYLE_ONLY": "dim",
-        }
-        color = color_map.get(ct, "white")
-        changes_table.add_row(f"[{color}]{ct}[/{color}]", change.description)
-    _console.print(changes_table)
-    return
 
 def _render(diff: SemanticDiff, fmt: str, output: str | None, fuel: int | None = None) -> None:
     if fmt == "terminal" and not output:
         _render_terminal(diff)
         return
+    _write_output(_render_text(diff, fmt, fuel=fuel), output)
 
+
+def _render_text(diff: SemanticDiff, fmt: str, fuel: int | None = None) -> str:
+    """Render one diff to text for a file or a machine-readable stream (every format except
+    interactive terminal output). Multi-file callers combine these and write once (#280)."""
     if fmt == "terminal":
-        # Render to plain text file (no ANSI)
-        with open(output, "w", encoding="utf-8") as fh:
-            plain = Console(file=fh, highlight=False)
-            plain.print(
-                f"Semantic diff: {diff.old_filename} -> "
-                f"{diff.new_filename} ({diff.language})"
-            )
-            for violation in diff.guardrail_violations:
-                plain.print(
-                    f"  GUARDRAIL      {violation.severity.value.upper()} "
-                    f"{violation.file}::{violation.semantic_path} {violation.message}"
-                )
-            for change in diff.changes:
-                plain.print(f"  {change.change_type.value:14} {change.description}")
-        return
+        from intentumdiff.rust_core import render_cli_review
+
+        return render_cli_review(diff, width=80, color=False)
 
     if fmt == "json":
-        _write_output(diff.model_dump_json(indent=2), output)
-        return
+        return diff.model_dump_json(indent=2)
 
     # For patch / html / llm — delegate to the matching Wasm renderer plugin
     from intentumdiff.plugins.loader import load_plugin
 
-    wasm_dir = Path(__file__).parent / "wasm"
+    # Was `Path(__file__).parent / "wasm"`, which from inside `cli/` resolves to
+    # intentumdiff/cli/wasm/ — a directory that has never existed. The glob below found
+    # nothing, the fallback scan iterated the same empty path, and --format patch/html/llm
+    # reported "No renderer plugin found" for components that ship and load fine.
+    from intentumdiff.plugins.registry import builtin_wasm_dir
+
+    wasm_dir = builtin_wasm_dir()
     candidates = list(wasm_dir.glob(f"{fmt.replace('-', '_')}_renderer.wasm"))
     if not candidates:
         # Fallback: scan for any renderer plugin that reports this format name
@@ -444,8 +366,7 @@ def _render(diff: SemanticDiff, fmt: str, output: str | None, fuel: int | None =
         plugin_fuel = fuel if fuel is not None else 100_000_000
         adaptive_fuel = max(plugin_fuel, 20_000_000 + len(diff_json) * 100)
         pl = load_plugin(candidates[0], adaptive_fuel)
-        result = pl.call_render(diff_json)
-        _write_output(result, output)
+        return pl.call_render(diff_json)
     except Exception as exc:
         _err.print(f"[red]Renderer error: {exc}[/red]")
         sys.exit(1)
@@ -486,6 +407,69 @@ def _render_with_profile(
     started = time.perf_counter()
     _render(diff, args.format, args.output, fuel=fuel)
     _emit_phase_profiles(diff, render_ms=(time.perf_counter() - started) * 1000)
+
+
+def _combine_html_reviews(pages: list[tuple[str, str]]) -> str:
+    """One valid HTML document with independent, sandboxed renderer pages.
+
+    The Wasm HTML renderer emits a complete HTML document per diff. Joining
+    those documents produces malformed HTML; using sandboxed srcdoc frames
+    retains each renderer's own CSS without reinterpreting any diff semantics.
+    """
+    from html import escape
+
+    if len(pages) <= 1:
+        return pages[0][1] if pages else ""
+    frames = []
+    for filename, document in pages:
+        name = escape(filename)
+        attribute = escape(filename, quote=True)
+        content = escape(document, quote=True)
+        frames.append(
+            '<section class="review"><h2>' + name + '</h2>'
+            '<iframe title="' + attribute + '" sandbox="allow-scripts" '
+            'loading="lazy" srcdoc="' + content + '"></iframe></section>'
+        )
+    return (
+        '<!doctype html>\n<html lang="en"><head><meta charset="utf-8">'
+        '<title>IntentumDiff Git review</title>'
+        '<style>body{font:16px system-ui,sans-serif;margin:1.5rem}'
+        'section.review{margin:1.5rem 0;border:1px solid #888;border-radius:6px;'
+        'padding:1rem}iframe{display:block;width:100%;height:70vh;border:0}'
+        'h2{font-size:1.1rem}</style></head><body>\n'
+        + '\n'.join(frames) + '\n</body></html>\n'
+    )
+
+
+def _render_many_with_profile(
+    diffs: list[SemanticDiff],
+    args: argparse.Namespace,
+    *,
+    fuel: int | None = None,
+    title: Callable[[SemanticDiff], str] | None = None,
+) -> None:
+    """Render several diffs as one document without dropping any file (#280).
+
+    JSON is always an array. HTML embeds each original Wasm-rendered page in a
+    sandboxed frame. Other formats join renders, with per-file titles for
+    terminal output to a file.
+    """
+    parts: list[str] = []
+    for diff in diffs:
+        started = time.perf_counter()
+        text = _render_text(diff, args.format, fuel=fuel)
+        if args.format == "terminal" and title is not None:
+            text = f"== {title(diff)} ==\n{text}"
+        parts.append(text)
+        _emit_phase_profiles(diff, render_ms=(time.perf_counter() - started) * 1000)
+    if args.format == "json":
+        _write_output("[\n" + ",\n".join(parts) + "\n]", args.output)
+    elif args.format == "html":
+        labels = [title(diff) if title is not None else f"Diff {i + 1}"
+                  for i, diff in enumerate(diffs)]
+        _write_output(_combine_html_reviews(list(zip(labels, parts, strict=True))), args.output)
+    else:
+        _write_output("\n".join(parts), args.output)
 
 
 def _has_immutable_guardrail(diff: SemanticDiff) -> bool:

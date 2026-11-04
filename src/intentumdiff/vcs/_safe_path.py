@@ -48,3 +48,10 @@ def safe_working_tree_path(root: str | Path, file_path: str) -> Path:
             f"Unsafe file path: {file_path!r} - resolved path escapes {root_path!s}."
         ) from None
     return candidate
+
+
+def safe_policy_path(root: str | Path, file_path: str) -> str:
+    """Locate policy context for a repository blob without following its live leaf."""
+    relative = Path(safe_relative_path(file_path))
+    parent = safe_working_tree_path(root, str(relative.parent))
+    return str(parent / relative.name)
