@@ -14,9 +14,10 @@ does: **meaningful**, **refactoring**, **moved**, or **ignored style**.
 ## Install
 
 ```bash
-pip install intentumdiff-python
+pip install --pre intentumdiff-python
 ```
 
+0.0.2b2 is a pre-release, so `--pre` is needed; without it pip installs the older 0.0.1.
 Requires **Python 3.12+**. The wheel bundles the Rust engine and language parser
 components; built-in parsing needs no separate component download.
 
