@@ -3,8 +3,10 @@
 ## From PyPI (the user path)
 
 ```bash
-pip install intentumdiff-python
+pip install --pre intentumdiff-python
 ```
+
+0.0.2b2 is a pre-release, so `--pre` is needed; without it pip installs the older 0.0.1.
 
 Wheels are pre-built per platform and self-contained: the native engine and all parser
 components are bundled. Python ≥ 3.12.
