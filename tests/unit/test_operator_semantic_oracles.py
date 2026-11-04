@@ -48,3 +48,25 @@ def test_comment_or_spacing_only_edits_remain_style_only(old: str, new: str) -> 
     diff = SemanticDiffer().diff_strings(old, new, "calc.py")
     assert diff.is_style_only is True, diff.model_dump_json()
     assert diff.has_semantic_changes is False, diff.model_dump_json()
+
+
+@pytest.mark.parametrize(
+    "filename, old, new",
+    [
+        # Core #237: the keyword selects the iteration protocol; dropping it changes behaviour.
+        ("loop.js", "async function f(xs) {\n  for await (const x of xs) { g(x); }\n}\n",
+         "async function f(xs) {\n  for (const x of xs) { g(x); }\n}\n"),
+        ("loop.ts", "async function f(xs: AsyncIterable<number>) {\n  for await (const x of xs) { g(x); }\n}\n",
+         "async function f(xs: AsyncIterable<number>) {\n  for (const x of xs) { g(x); }\n}\n"),
+        ("keys.js", "function f(o) {\n  for (const k in o) { g(k); }\n}\n",
+         "function f(o) {\n  for (const k of o) { g(k); }\n}\n"),
+        ("comp.py", "async def f(xs):\n    return [x async for x in xs]\n",
+         "async def f(xs):\n    return [x for x in xs]\n"),
+    ],
+)
+def test_iteration_protocol_keyword_edits_are_semantic(filename: str, old: str, new: str) -> None:
+    for before, after in ((old, new), (new, old)):
+        diff = SemanticDiffer().diff_strings(before, after, filename)
+        assert diff.is_style_only is False, diff.model_dump_json()
+        assert diff.has_semantic_changes is True, diff.model_dump_json()
+        assert diff.changes, diff.model_dump_json()

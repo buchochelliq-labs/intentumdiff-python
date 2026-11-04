@@ -36,7 +36,9 @@ CORE_REPO = "https://github.com/buchochelliq-labs/intentumdiff-core"
 # batch inventories; Python #202 rejects omitted fields rather than defaulting.
 # Core #236 carries operators as leaf nodes (not labels) and #235 keeps Bash assignment
 # identity; together they fix the #232/#233/#234 regressions from the #231 operator fix.
-CORE_REF = os.environ.get("INTENTUMDIFF_CORE_REF", "161cdbcaaeb86ed6ae6559d68bcf9ac2b37212c8")
+# Core #238 (#237) also recovers iteration-protocol keywords (for await, for...in/of,
+# async comprehensions) so they are never certified style-only.
+CORE_REF = os.environ.get("INTENTUMDIFF_CORE_REF", "726fd07c77a83d2554d3eca68b6469e9461b87bc")
 # Reviewed registry RC candidate: source-anchored ABAP, Astro, PO, PostScript, Proto, ReasonML, SAS, Svelte, Vue, VB.NET, M/Q#/PHP parser Wasm.
 # Registry PR #13 CI vetted these source-span repairs; every staged byte
 # remains separately verified against its source artifact and SHA-256.
