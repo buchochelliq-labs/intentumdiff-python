@@ -2,6 +2,76 @@
 
 ## v0.0.2 — release candidate (not published)
 
+0.0.2 moves all semantic judgement into the shared Rust engine (IntentumDiff Core).
+The Python package is now a thin wrapper around it, so the CLI, the VS Code
+extension and the native live-server give the same answer for the same change.
+Where the engine cannot give a complete, trustworthy answer, 0.0.2 now says so
+instead of guessing.
+
+### Upgrading from 0.0.2b1
+
+- **`intentumdiff git --format json` output changed shape**: see *CLI output
+  contract* below.
+- **Wheels are platform-specific**: manylinux x86-64, macOS, Windows x64 and
+  Windows ARM64. Each bundles the same pinned, checksum-verified parser
+  components, so no separate component download is needed.
+
+### Fixed: changes that were reported as formatting-only
+
+These changes alter behaviour, but 0.0.2b1 could report them as "style only" with
+no changes listed. They are now reported as real changes:
+
+- **Operators:** `a + b` → `a - b`, `<` → `>`, `and` → `or`, `is` → `is not`,
+  `+=` → `-=`, across the supported languages (Core #229).
+- **Iteration keywords:** `for await (…)` → `for (…)` and `for (k in o)` →
+  `for (k of o)` in JavaScript and TypeScript, and an `async` comprehension
+  clause in Python (`[x async for x in xs]`) (Core #237).
+- **Python `async for` / `async with`** dropping `async`.
+
+Comment-only and whitespace-only edits are still reported as formatting-only.
+Follow-up fixes from the operator work: Bash assignment changes are classified
+as modifications again, Dart function renames no longer report a spurious
+return-statement deletion, and C# null-coalescing guards are semantic
+modifications (Core #232, #233, #234).
+
+### Fixed: reliability ("fail closed")
+
+When the engine's answer is incomplete or malformed, IntentumDiff now reports
+an error rather than a partial or silently simplified review:
+
+- **Git input:** incomplete Git inventories, unreadable or lossily-decoded
+  sources, missing baselines and truncated name-status output are rejected,
+  not half-reviewed. Binary blobs are recognised before text decoding.
+- **Guardrails:** a missing or broken guardrail policy fails the run instead of
+  being skipped. Policies are found from the file's real repository location
+  (including across moves and symlinks), not from the current directory.
+- **Plugins and parsers:** a parser component or plugin that fails to load is
+  an error, not a silent fallback to a different parser.
+- **LSP:** a failed review clears stale semantic results instead of leaving
+  them on screen.
+
+### Security
+
+- **GitHub App webhooks** are rejected unless signed. Previously an
+  unconfigured secret accepted unsigned deliveries (#283).
+- **Parser components** run with Wasm fuel metering, and a run fails if
+  metering cannot be installed (#281).
+- **Schema fetching** fails closed on DNS errors and refuses redirects to
+  private network addresses.
+
+### Fixed: CLI output
+
+- `intentumdiff git` with no changes now writes valid empty JSON, SARIF and
+  `--output` files instead of printing text (#280).
+- Guardrail SARIF regions use correct 1-based positions (#284).
+- `[staged]` labels and bracketed file names are no longer swallowed by Rich
+  markup in terminal output (#285).
+
+### Release process
+
+- Published wheels are the exact bytes CI built and tested on all four
+  platforms. They are promoted, not rebuilt from the tag (#279).
+
 ### CLI output contract
 
 - `intentumdiff git --format json` now returns **one JSON array** for zero, one, or
