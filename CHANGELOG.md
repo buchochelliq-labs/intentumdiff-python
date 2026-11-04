@@ -1,8 +1,10 @@
 # Changelog
 
-## v0.0.2 — release candidate (not published)
+## v0.0.2b2 — pre-release candidate (not published)
 
-0.0.2 moves all semantic judgement into the shared Rust engine (IntentumDiff Core).
+A pre-release (beta), following the release rule that a version is a pre-release until it
+has been used in anger. 0.0.2b2 moves all semantic judgement into the shared Rust engine
+(IntentumDiff Core).
 The Python package is now a thin wrapper around it, so the CLI, the VS Code
 extension and the native live-server give the same answer for the same change.
 Where the engine cannot give a complete, trustworthy answer, 0.0.2 now says so
