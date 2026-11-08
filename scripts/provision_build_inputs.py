@@ -27,22 +27,12 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CORE_REPO = "https://github.com/buchochelliq-labs/intentumdiff-core"
-# Immutable Core #204 NodeFacts-lifecycle parity candidate based on Core #187: metered Wasmtime 48.0.7, verified
-# parser availability, Rust-owned semantic promotions and fail-closed live
-# diff/commit-review completeness and Rust-owned live provenance. Core #204 exact-head Rust CI passed; four-platform Python acceptance must independently pass.
-# Override only for deliberate integration builds, not a moving branch.
-# Core #204 owns physical FileSource filename-scoped guardrail matching (#210) and malformed filename-filter rejection (#211); this exact pin is under fresh CI verification.
-# Core #187 now emits explicit guardrail_violations even for valid empty Rust
-# batch inventories; Python #202 rejects omitted fields rather than defaulting.
-# Core #236 carries operators as leaf nodes (not labels) and #235 keeps Bash assignment
-# identity; together they fix the #232/#233/#234 regressions from the #231 operator fix.
-# Core #238 (#237) also recovers iteration-protocol keywords (for await, for...in/of,
-# async comprehensions) so they are never certified style-only.
-CORE_REF = os.environ.get("INTENTUMDIFF_CORE_REF", "726fd07c77a83d2554d3eca68b6469e9461b87bc")
-# Reviewed registry RC candidate: source-anchored ABAP, Astro, PO, PostScript, Proto, ReasonML, SAS, Svelte, Vue, VB.NET, M/Q#/PHP parser Wasm.
-# Registry PR #13 CI vetted these source-span repairs; every staged byte
-# remains separately verified against its source artifact and SHA-256.
-REGISTRY_REF = "277a297a1088dbefd261dedb264b41b029a5d1a5"
+# Immutable 0.0.3 correctness-foundation candidate (Core #269).
+# Override only for deliberate integration builds, never a moving branch.
+CORE_REF = os.environ.get("INTENTUMDIFF_CORE_REF", "a664800748e5fad1770e14477f395d3aca0439a1")
+# Registry #17 pins the exact successful C/C++ character-literal CI artifact.
+# Each staged component remains separately verified by source commit and SHA-256.
+REGISTRY_REF = "8911328ede24630ad9ea6a33da8ed010f066d3b1"
 
 
 def load_reviewed_registry(get, api: str, org: str):
