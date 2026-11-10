@@ -39,8 +39,8 @@ _KNOWN_PYTHON_ENGINE_DEBT_PATHS = {
     "src/intentumdiff/_differ_presentation.py",
     "src/intentumdiff/_differ_runtime.py",
     # Guardrail orchestration/reporting: the RULE EVALUATION is Rust (A1.3,
-    # evaluate_guardrail_rules); this marshals trees + reads the keyed_profiles /
-    # resource_profiles language-set CONSTANTS and builds the report DTOs.
+    # evaluate_guardrail_rules; rule-language validation is parse_guardrail_policy);
+    # this marshals trees and builds the report DTOs.
     "src/intentumdiff/analysis/guardrails.py",
     # CLI package (issue #80 split): imports analysis.guardrail_reports (report formatting).
     "src/intentumdiff/cli/_commands.py",

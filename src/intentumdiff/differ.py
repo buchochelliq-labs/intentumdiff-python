@@ -1512,47 +1512,17 @@ class SemanticDiffer:
                 policy_old_filename=policy_old_filename,
                 diagnostics=diagnostics,
             )
-        # ── 9. GumTree matching ────────────────────────────────────────────────
-        # The matching engine is selected by (in priority order):
-        # 1. ``DiffConfig.test_matching_engine`` — test-only hard override used
-        #    by the dual-run truthiness matrix to certify both contracts.
-        # 2. The production default: Rust's language-agnostic matcher
-        #    (``intentumdiff_rust_core.diff_semantic_tree_json``) when the Rust
-        #    core is available and diagnostics are off. This is migration
-        #    step 2 of ``docs/ENGINE_BOUNDARY_AUDIT.md``. The four engine
-        #    gaps that previously blocked this swap (Python dedent, JS
-        #    calc_hash MOVE, YAML block↔flow, C# var↔explicit) are closed —
-        #    see ``the retired NOISE_SUPPRESSION_RETUNE doc (git history)`` Phases A–D.
-        # 3. (retired) The python GumTree oracle was deleted with the transitional
-        #    layer (issue #57 payoff, stage 4b) — no python matching fallback exists.
+        # ── 9. Matching + finalize routing ─────────────────────────────────────
+        # Rust owns matching and finalization; there is no Python matching path.
+        # ``DiffConfig.test_matching_engine`` is a test-only override of the routing
+        # decision below ("python" is retired and raises).
         test_engine = self._config.test_matching_engine
-        rust_attempt: Any = None
-        # Skip Rust matching when either tree is empty (file add/delete
-        # lifecycle). The Rust language-agnostic matcher treats empty-root
-        # ↔ content-root as a structural match, which produces a single
-        # MODIFICATION instead of the correct ADDITION (or DELETION) for
-        # the file-lifecycle case. Letting the Python oracle handle these
-        # edge cases preserves the ADDITION/DELETION shape that downstream
-        # tests and review UIs depend on.
-        either_tree_empty = (
-            not old_tree.children or not new_tree.children
-        )
-        use_rust_matching = (
-            test_engine == "rust"
-            or (
-                test_engine is None
-                and self._config.experimental_rust_core
-                and not diagnostics.enabled
-                and not either_tree_empty
-            )
-        )
         # ── 9-fin. Rust finalize routing (issue #57) ──────────────────────────
         # Certified languages skip the python edit-script/refinement/presentation stages
         # entirely: the Rust core runs the certified batch's refine+finalize from the
-        # semantic trees and returns the finished review. Eligibility is independent of
-        # the matching-engine choice (issue #57 payoff, fallback-tier closure):
+        # semantic trees and returns the finished review:
         # - empty-tree lifecycle is handled INSIDE Rust finalize (DELETION+ADDITION
-        #   root pair, python parity), so either_tree_empty no longer excludes;
+        #   root pair);
         # - enriched trees flow through routing (enrichment ran at stage 7b);
         # - registered diff analyzers run on the ROUTED diff below, mirroring 13.5.
         # Diagnostics mode routes too (issue #57 payoff, stage 4a): the shell-side

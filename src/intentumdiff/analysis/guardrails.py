@@ -9,8 +9,6 @@ from pathlib import Path
 
 
 from intentumdiff.analysis.diagnostics import DiagnosticsRecorder
-from intentumdiff.analysis.keyed_profiles import KEYED_DATA_LANGUAGES
-from intentumdiff.analysis.resource_profiles import RESOURCE_PROFILE_LANGUAGES
 from intentumdiff.core.models import (
     DiffConfig,
     GuardrailSeverity,
@@ -20,7 +18,8 @@ from intentumdiff.core.models import (
 )
 
 GUARDRAIL_POLICY_FILENAME = "intentumdiff.yaml"
-GUARDRAIL_CONFIG_LANGUAGES = KEYED_DATA_LANGUAGES | RESOURCE_PROFILE_LANGUAGES
+# Which languages a protected rule may target is Rust policy: core's
+# parse_guardrail_policy rejects unsupported languages (GUARDRAIL_RULE_LANGUAGES).
 
 
 @dataclass(frozen=True)
