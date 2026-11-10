@@ -905,17 +905,18 @@ class TestDiffCommit:
                 with pytest.raises(RuntimeError, match="No parser plugins could be loaded"):
                     cd.diff_commit(".")
 
-    def test_stream_finalization_rejects_partial_errors(self):
+    def test_stream_finalization_accepts_mixed_results_and_reports_file_errors(self):
         from intentumdiff.core.commit_differ import FileDiffError, FileDiffResult
 
         cd = self._make_differ()
         good = _semantic_diff("good.py", "good.py")
         result = FileDiffResult(good, "good.py", "good.py", "old", "new")
         error = FileDiffError("bad.py", "bad.py", "native engine unavailable", "pipeline_error")
-        with pytest.raises(RuntimeError, match="bad.py.*native engine unavailable"):
-            cd.finalize_commit_diff(
-                [result], [error], old_ref="HEAD~1", new_ref="HEAD"
-            )
+        finalized = cd.finalize_commit_diff(
+            [result, error], old_ref="HEAD~1", new_ref="HEAD"
+        )
+        assert finalized.file_diffs == [good]
+        assert finalized.parse_errors == ["bad.py: native engine unavailable"]
 
     def test_alternate_vcs_backend_fails_closed_on_mixed_results(self):
         from intentumdiff.vcs.base import ChangedFile
