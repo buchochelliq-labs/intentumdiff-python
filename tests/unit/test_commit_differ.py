@@ -841,8 +841,8 @@ class TestDiffCommit:
                 with pytest.raises(RuntimeError, match="fuel.py.*FUEL_EXCEEDED"):
                     cd.diff_commit(".")
 
-    def test_second_parse_missing_parser_aborts_after_per_file_success(self):
-        """A complete per-file diff does not certify the later cross-file index."""
+    def test_second_parse_missing_parser_is_reported_after_per_file_success(self):
+        """A missing index parser is visible without discarding the file diff."""
         from intentumdiff.plugins.exceptions import PluginNotFoundError
 
         cd = self._make_differ()
@@ -851,15 +851,20 @@ class TestDiffCommit:
         with self._patch_iter_changed_sources(
             [("old", "new", "good.py", "good.py", None)]
         ):
-            with pytest.raises(RuntimeError, match="good.py.*missing indexing parser") as exc:
-                cd.diff_commit(".")
-        assert isinstance(exc.value.__cause__, PluginNotFoundError)
+            result = cd.diff_commit(".")
+        assert len(result.file_diffs) == 1
+        assert [(error.file_path, error.side) for error in result.index_errors] == [
+            ("good.py", "old"), ("good.py", "new"),
+        ]
+        assert all("missing indexing parser" in error.reason for error in result.index_errors)
 
-    def test_missing_required_index_rejects_successful_commit(self):
+    def test_missing_commit_index_is_structured_instead_of_raising(self):
         from intentumdiff.core.commit_differ import FileDiffResult
+        from intentumdiff.core.models import CommitIndexError
 
         cd = self._make_differ()
-        cd._build_index = MagicMock(return_value=None)
+        error = CommitIndexError(file_path="good.py", side="old", reason="no tree")
+        cd._build_index_partial = MagicMock(return_value=(None, [error]))
         record = FileDiffResult(
             file_diff=_semantic_diff("good.py", "good.py"),
             old_path="good.py",
@@ -867,10 +872,41 @@ class TestDiffCommit:
             old_content="before",
             new_content="after",
         )
-        with pytest.raises(RuntimeError, match="missing old or new index"):
-            cd.finalize_commit_diff(
-                [record], [], old_ref="HEAD~1", new_ref="HEAD"
+        result = cd.finalize_commit_diff([record], [], old_ref="HEAD~1", new_ref="HEAD")
+        assert result.cross_file_changes == []
+        assert result.index_errors == [error, error]
+
+    def test_index_failure_is_reported_without_dropping_other_cross_file_changes(self):
+        from intentumdiff.core.commit_differ import FileDiffResult
+        cd = self._make_differ()
+        files = ["a.py", "b.py", "large.py"]
+        records = [FileDiffResult(_semantic_diff(path, path), path, path,
+                                  f"old:{path}", f"new:{path}") for path in files]
+        calls = []
+        def parse(filename, language, content):
+            calls.append((filename, content))
+            if filename == "large.py":
+                raise RuntimeError("FUEL_EXCEEDED")
+            contains_helper = (filename == "a.py" and content.startswith("old:")) or (
+                filename == "b.py" and content.startswith("new:")
             )
+            return SemanticNode(
+                id=f"{filename}-{content}", node_type="module", label="module",
+                position=_pos(), structural_hash=f"module-{filename}",
+                children=[_fn(f"{filename}-{content}-helper", "helper")] if contains_helper else [],
+            )
+        cd._parse_to_tree = parse
+
+        result = cd.finalize_commit_diff(records, [], old_ref="HEAD~1", new_ref="HEAD")
+
+        assert len(calls) == 6
+        assert any(change.change_type == "MOVE_TO_MODULE"
+                   and change.old_file == "a.py" and change.new_file == "b.py"
+                   for change in result.cross_file_changes)
+        assert [(error.file_path, error.side, error.reason) for error in result.index_errors] == [
+            ("large.py", "old", "FUEL_EXCEEDED"),
+            ("large.py", "new", "FUEL_EXCEEDED"),
+        ]
 
     def test_plugin_not_found_fails_closed(self):
         cd = self._make_differ()

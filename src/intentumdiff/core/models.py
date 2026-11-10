@@ -862,6 +862,14 @@ class GuardrailCheckResult(BaseModel, frozen=True):
         return self
 
 
+class CommitIndexError(BaseModel, frozen=True):
+    """A changed file that could not contribute to commit-wide indexing."""
+
+    file_path: str = Field(min_length=1)
+    side: Literal["old", "new"]
+    reason: str = Field(min_length=1)
+
+
 class CommitDiff(BaseModel, frozen=True):
     """
     The full semantic diff for a commit: per-file diffs plus cross-file
@@ -874,3 +882,4 @@ class CommitDiff(BaseModel, frozen=True):
     file_diffs: list[SemanticDiff] = Field(default_factory=list)
     cross_file_changes: list[CrossFileChange] = Field(default_factory=list)
     parse_errors: list[str] = Field(default_factory=list)
+    index_errors: list[CommitIndexError] = Field(default_factory=list)

@@ -38,7 +38,7 @@ import os
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable, Iterator
 
-from intentumdiff.core.models import CommitDiff, CrossFileChange, DiffConfig, SemanticDiff
+from intentumdiff.core.models import CommitDiff, CommitIndexError, CrossFileChange, DiffConfig, SemanticDiff
 from intentumdiff.differ import SemanticDiffer
 from intentumdiff.analysis.cross_file import detect_cross_file_changes
 from intentumdiff.core.index import SemanticIndex
@@ -333,17 +333,13 @@ class CommitDiffer:
             for result in results
         ]
         cross_file_changes: list[CrossFileChange] = []
+        index_errors: list[CommitIndexError] = []
         if old_file_contents:
-            old_index = self._build_index(old_file_contents)
-            new_index = self._build_index(new_file_contents)
-            # Both source sets are nonempty. An absent index means incomplete
-            # cross-file semantics, not an honest "no cross-file changes" result.
-            if old_index is None or new_index is None:
-                raise RuntimeError(
-                    "Commit semantic index incomplete: missing old or new index "
-                    "for changed text files"
-                )
-            cross_file_changes = self._detect_cross_file(old_index, new_index)
+            old_index, old_errors = self._build_index_partial(old_file_contents, side="old")
+            new_index, new_errors = self._build_index_partial(new_file_contents, side="new")
+            index_errors = [*old_errors, *new_errors]
+            if old_index is not None and new_index is not None:
+                cross_file_changes = self._detect_cross_file(old_index, new_index)
 
         return CommitDiff(
             old_ref=old_ref,
@@ -356,6 +352,7 @@ class CommitDiffer:
             file_diffs=file_diffs,
             cross_file_changes=cross_file_changes,
             parse_errors=parse_errors,
+            index_errors=index_errors,
         )
 
     # ------------------------------------------------------------------
@@ -454,6 +451,32 @@ class CommitDiffer:
 
         index.build()
         return index
+
+    def _build_index_partial(
+        self, file_contents: list[tuple[str, str, str]], *, side: str,
+    ) -> tuple[SemanticIndex | None, list[CommitIndexError]]:
+        """Index every parseable file and retain failures as structured metadata."""
+        if not file_contents:
+            return None, []
+        index = SemanticIndex()
+        errors: list[CommitIndexError] = []
+        indexed = 0
+        for filename, language, content in file_contents:
+            try:
+                tree = self._parse_to_tree(filename, language, content)
+                if tree is None:
+                    raise RuntimeError("parser returned no semantic tree")
+                index.add_tree(filename, language, tree)
+                indexed += 1
+            except (PluginNotFoundError, PluginError, ValueError, RuntimeError) as exc:
+                errors.append(CommitIndexError(
+                    file_path=filename, side=side,
+                    reason=str(exc),
+                ))
+        if not indexed:
+            return None, errors
+        index.build()
+        return index, errors
 
     def _detect_cross_file(
         self, old_index: SemanticIndex, new_index: SemanticIndex
