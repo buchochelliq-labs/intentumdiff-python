@@ -27,9 +27,9 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CORE_REPO = "https://github.com/buchochelliq-labs/intentumdiff-core"
-# Immutable 0.0.3 correctness-foundation candidate (Core #269).
+# Immutable core release/v0.0.3-rc head (merge of Core #304).
 # Override only for deliberate integration builds, never a moving branch.
-CORE_REF = os.environ.get("INTENTUMDIFF_CORE_REF", "a664800748e5fad1770e14477f395d3aca0439a1")
+CORE_REF = os.environ.get("INTENTUMDIFF_CORE_REF", "a84285f7d408bbb67cb1102fd62647f0235c2065")
 # Registry #17 pins the exact successful C/C++ character-literal CI artifact.
 # Each staged component remains separately verified by source commit and SHA-256.
 REGISTRY_REF = "8911328ede24630ad9ea6a33da8ed010f066d3b1"
