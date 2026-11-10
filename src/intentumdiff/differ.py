@@ -53,9 +53,6 @@ from intentumdiff._differ_gate import (
     _rust_certified_languages as _rust_certified_languages,
 )
 from intentumdiff._differ_gate import (
-    _rust_finalize_languages as _rust_finalize_languages,
-)
-from intentumdiff._differ_gate import (
     _validate_git_ref as _validate_git_ref,
 )
 from intentumdiff._differ_presentation import (
@@ -1247,27 +1244,15 @@ class SemanticDiffer:
             # Rust owns profile enrichment. Missing ABI handlers are fatal:
             # accepting un-enriched trees silently changes identity matching
             # and can suppress a meaningful diff. Never substitute Python logic.
-            # Gated by language so non-profile diffs pay no tree-JSON roundtrip.
-            if language.lower() in {"json", "yaml"}:
-                _identity_fields = tuple(schema_resolution.identity_fields)
-                old_tree = try_rust_profile_label_enrichment(
-                    old_tree, old_raw, language, identity_fields=_identity_fields
-                )
-                new_tree = try_rust_profile_label_enrichment(
-                    new_tree, new_raw, language, identity_fields=_identity_fields
-                )
-            if language.lower() in {"css", "scss", "html", "xml", "mdx"}:
-                old_tree = try_rust_profile_label_enrichment(old_tree, old_raw, language)
-                new_tree = try_rust_profile_label_enrichment(new_tree, new_raw, language)
-            if language.lower() in {"hcl", "puppet"}:
-                old_tree = try_rust_profile_label_enrichment(old_tree, old_raw, language)
-                new_tree = try_rust_profile_label_enrichment(new_tree, new_raw, language)
-            if language.lower() == "sql":
-                old_tree = try_rust_profile_label_enrichment(old_tree, old_raw, language)
-                new_tree = try_rust_profile_label_enrichment(new_tree, new_raw, language)
-            if language.lower() in {"asm", "bash", "delphi"}:
-                old_tree = try_rust_profile_label_enrichment(old_tree, old_raw, language)
-                new_tree = try_rust_profile_label_enrichment(new_tree, new_raw, language)
+            # Every language is sent: core decides which profile family (if any)
+            # applies and returns other trees unchanged.
+            _identity_fields = tuple(sorted(schema_resolution.identity_fields))
+            old_tree = try_rust_profile_label_enrichment(
+                old_tree, old_raw, language, identity_fields=_identity_fields
+            )
+            new_tree = try_rust_profile_label_enrichment(
+                new_tree, new_raw, language, identity_fields=_identity_fields
+            )
             _validate_tree_ids(old_tree, filename)
             _validate_tree_ids(new_tree, filename)
         diagnostics.record(
@@ -1328,9 +1313,10 @@ class SemanticDiffer:
         # decision below ("python" is retired and raises).
         test_engine = self._config.test_matching_engine
         # ── 9-fin. Rust finalize routing (issue #57) ──────────────────────────
-        # Certified languages skip the python edit-script/refinement/presentation stages
-        # entirely: the Rust core runs the certified batch's refine+finalize from the
-        # semantic trees and returns the finished review:
+        # Every parser language (first-party, dbt, third-party plugins) is finalized
+        # by core: there is no Python language allowlist in front of it. The Rust
+        # core runs the certified batch's refine+finalize from the semantic trees and
+        # returns the finished review:
         # - empty-tree lifecycle is handled INSIDE Rust finalize (DELETION+ADDITION
         #   root pair);
         # - enriched trees flow through routing (enrichment ran at stage 7b);
@@ -1342,7 +1328,7 @@ class SemanticDiffer:
         rust_finalize_eligible = test_engine == "rust" or (
             test_engine is None and self._config.experimental_rust_core
         )
-        if rust_finalize_eligible and language in _rust_finalize_languages():
+        if rust_finalize_eligible:
             from intentumdiff.rust_core import try_rust_finalize_review
 
             with profiler.phase("rust_finalize_review"):
