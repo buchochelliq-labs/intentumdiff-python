@@ -31,63 +31,6 @@ logger = logging.getLogger(__name__)
 _COMPLETE_STATUS = "complete"
 _BATCH_ENGINE = "rust_core_batch_v4"
 _PYTHON_NATIVE_CERTIFICATION = "python_native_v4kb"
-_CANONICAL_PYTHON_PLUGIN_ID = "intentumdiff:python:python"
-_PYTHON_PLUGIN_IDS = frozenset(
-    {
-        "",
-        "python",
-        "python-parser",
-        "python_parser",
-        _CANONICAL_PYTHON_PLUGIN_ID,
-    }
-)
-#: Distributions that ship the FIRST-PARTY Python parser. The plugin id is qualified by the
-#: distribution name, and this package is published as ``intentumdiff-python`` while the import
-#: package is ``intentumdiff`` — so the same certified parser is spelled two ways depending on
-#: how it was catalogued. Deliberately an allowlist, not a prefix match: canonicalising an
-#: arbitrary ``<dist>:python:python`` would let a third-party plugin claim the certified path.
-_PYTHON_PLUGIN_DISTRIBUTIONS = frozenset(
-    {"intentumdiff", "intentumdiff-python", "intentumdiff_python"}
-)
-
-
-def _canonical_python_plugin_id(parser_plugin_id: str | None) -> str | None:
-    """Normalise a first-party Python parser id to the certified spelling.
-
-    This was a no-op returning its argument, which meant the certified batch path rejected
-    the parser as an "unsupported parser plugin" and silently fell through to routed
-    finalize. The diff was still correct and still Rust — so no gate fired and nothing looked
-    broken — but the certified path was never taken, and the facts that only it derives went
-    missing.
-
-    Invisible until parser plugins could be catalogued at all: before that the id was absent
-    and the ``is not None`` guard let everything through.
-    """
-    if not parser_plugin_id:
-        return parser_plugin_id
-    parts = parser_plugin_id.split(":")
-    if (
-        len(parts) == 3
-        and parts[0] in _PYTHON_PLUGIN_DISTRIBUTIONS
-        and parts[1] == "python"
-        and parts[2] == "python"
-    ):
-        return _CANONICAL_PYTHON_PLUGIN_ID
-    return parser_plugin_id
-
-
-def _canonicalize_file_plugin_ids(files: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    normalized: list[dict[str, Any]] = []
-    for file in files:
-        item = dict(file)
-        if "parser_plugin_id" in item:
-            item["parser_plugin_id"] = _canonical_python_plugin_id(item["parser_plugin_id"])
-        if "parserPluginId" in item:
-            item["parserPluginId"] = _canonical_python_plugin_id(item["parserPluginId"])
-        normalized.append(item)
-    return normalized
-
-
 @dataclass(frozen=True)
 class RustCoreBatchAttempt:
     diff: SemanticDiff | None = None
@@ -1522,9 +1465,6 @@ def try_rust_core_batch_diff(
         return RustCoreBatchAttempt(fallback_reason="disabled")
     if language != "python":
         return RustCoreBatchAttempt(fallback_reason="unsupported language")
-    parser_plugin_id = _canonical_python_plugin_id(parser_plugin_id)
-    if parser_plugin_id is not None and parser_plugin_id not in _PYTHON_PLUGIN_IDS:
-        return RustCoreBatchAttempt(fallback_reason="unsupported parser plugin")
     if config.diagnostics:
         return RustCoreBatchAttempt(fallback_reason="diagnostics require Python pipeline")
 
@@ -1706,7 +1646,6 @@ def try_rust_core_batch_diffs(
                 backend_version=backend_version,
             )
         phase_started = time.perf_counter()
-        normalized_files = _canonicalize_file_plugin_ids(files)
         request = {
             "schema_version": 1,
             "mode": "commit_batch",
@@ -1714,7 +1653,7 @@ def try_rust_core_batch_diffs(
             "config": config.model_dump(mode="json"),
             "parallel": parallel,
             "max_workers": max_workers,
-            "files": normalized_files,
+            "files": files,
         }
         _record_adapter_phase("rust_core_request_construction", phase_started)
         phase_started = time.perf_counter()
@@ -2062,7 +2001,6 @@ def try_rust_core_commit_json(
                 backend_version=backend_version,
             )
         phase_started = time.perf_counter()
-        normalized_files = _canonicalize_file_plugin_ids(files)
         request = {
             "schema_version": 1,
             "mode": "commit_json",
@@ -2072,7 +2010,7 @@ def try_rust_core_commit_json(
             "config": config.model_dump(mode="json"),
             "parallel": parallel,
             "max_workers": max_workers,
-            "files": normalized_files,
+            "files": files,
         }
         _record_adapter_phase("rust_core_commit_request_construction", phase_started)
         phase_started = time.perf_counter()
@@ -2283,7 +2221,7 @@ def run_rust_core_candidate_batch(
             "candidate": True,
             "python_parser_backend": python_parser_backend,
             "config": config.model_dump(mode="json"),
-            "files": _canonicalize_file_plugin_ids(files),
+            "files": files,
         }
         data = _load_tree_payload(diff_batch(json.dumps(request)))
         engine = str(data.get("engine") or "")

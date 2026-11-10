@@ -140,7 +140,7 @@ def test_rust_core_batch_complete_result_is_used(monkeypatch: Any) -> None:
     }.issubset(adapter_phases)
 
 
-def test_rust_core_batch_accepts_canonical_python_parser_id(
+def test_rust_core_batch_forwards_distribution_qualified_parser_id_unchanged(
     monkeypatch: Any,
 ) -> None:
     captured_request: dict[str, Any] = {}
@@ -176,12 +176,12 @@ def test_rust_core_batch_accepts_canonical_python_parser_id(
         new_filename="example.py",
         parser_wasm_path="python_parser.wasm",
         language="python",
-        parser_plugin_id="intentumdiff:python:python",
+        parser_plugin_id="intentumdiff-python:python:python",
         config=DiffConfig(experimental_rust_core=True),
     )
 
     assert attempt.used is True
-    assert captured_request["files"][0]["parser_plugin_id"] == "intentumdiff:python:python"
+    assert captured_request["files"][0]["parser_plugin_id"] == "intentumdiff-python:python:python"
 
 
 def test_rust_core_batch_fallback_item_is_not_used(monkeypatch: Any) -> None:
