@@ -55,10 +55,6 @@ class RustCoreBatchDiffsAttempt:
         return bool(self.diffs)
 
 
-def rust_core_enabled(config: DiffConfig) -> bool:
-    return bool(config.experimental_rust_core)
-
-
 def _pyo3_extension_module_name() -> str | None:
     """Return the importable name of the compiled PyO3 extension, or ``None``.
 
@@ -1125,8 +1121,6 @@ def try_rust_core_batch_diff(
     file_lifecycle: str | None = None,
 ) -> RustCoreBatchAttempt:
     """Try the planned Rust V4 batch boundary and fall back unless final output is ready."""
-    if not rust_core_enabled(config):
-        return RustCoreBatchAttempt(fallback_reason="disabled")
     if language != "python":
         return RustCoreBatchAttempt(fallback_reason="unsupported language")
     if config.diagnostics:
@@ -1264,8 +1258,6 @@ def try_rust_core_batch_diffs(
     python_parser_backend: str = "native",
 ) -> RustCoreBatchDiffsAttempt:
     """Try the Rust V4 batch boundary for multiple certified Python file pairs."""
-    if not rust_core_enabled(config):
-        return RustCoreBatchDiffsAttempt(fallback_reason="disabled")
     if config.diagnostics:
         return RustCoreBatchDiffsAttempt(
             fallback_reason="diagnostics require Python pipeline"

@@ -572,21 +572,33 @@ class EditDelta(BaseModel, frozen=True):
 # ---------------------------------------------------------------------------
 
 
-def _native_rust_core_default() -> bool:
-    """Return the default certified Rust-core policy.
+_RUST_CORE_ENV_VARS = ("INTENTUMDIFF_RUST_CORE", "INTENTUMDIFF_EXPERIMENTAL_RUST_CORE")
+_RUST_CORE_ON_VALUES = frozenset({"1", "true", "yes", "on", "auto", "native"})
 
-    IntentumDiff ships the first-party Rust core in release wheels, so supported
-    native paths should use it automatically.  The legacy
-    ``INTENTUMDIFF_EXPERIMENTAL_RUST_CORE`` env var is still accepted for compatibility,
-    while ``INTENTUMDIFF_RUST_CORE=0`` is the explicit fallback escape hatch.
+
+class RustCoreRequiredError(ValueError):
+    """The configuration asked to run without the Rust core, which is mandatory."""
+
+
+def _native_rust_core_default() -> bool:
+    """Validate the legacy Rust-core environment switches; the core is mandatory.
+
+    ``INTENTUMDIFF_RUST_CORE`` (and the legacy ``INTENTUMDIFF_EXPERIMENTAL_RUST_CORE``)
+    may be unset, empty or an "on" value. There is no Python engine to fall back to, so
+    a disable value (``0``/``false``/``off``/...) or any unrecognised value raises
+    instead of silently routing every file to a fallback review.
     """
 
-    raw = os.getenv("INTENTUMDIFF_RUST_CORE")
-    if raw is None:
-        raw = os.getenv("INTENTUMDIFF_EXPERIMENTAL_RUST_CORE")
-    if raw is None or raw.strip() == "":
-        return True
-    return raw.strip().lower() in {"1", "true", "yes", "on", "auto", "native"}
+    for name in _RUST_CORE_ENV_VARS:
+        raw = os.getenv(name)
+        if raw is None or raw.strip() == "" or raw.strip().lower() in _RUST_CORE_ON_VALUES:
+            continue
+        raise RustCoreRequiredError(
+            f"{name}={raw.strip()!r} is not supported: the Rust core is mandatory and cannot "
+            f"be disabled (there is no Python engine). Unset {name} or set it to one of "
+            f"{sorted(_RUST_CORE_ON_VALUES)}."
+        )
+    return True
 
 
 class Match(NamedTuple):
@@ -629,7 +641,17 @@ class DiffConfig(BaseModel):
     experimental_rust_core: bool = Field(
         default_factory=_native_rust_core_default,
     )
-    """Use the certified Rust core for supported first-party native paths."""
+    """Compatibility field: the Rust core is mandatory, so only ``True`` is accepted."""
+
+    @field_validator("experimental_rust_core")
+    @classmethod
+    def _rust_core_is_mandatory(cls, value: bool) -> bool:
+        if value is not True:
+            raise RustCoreRequiredError(
+                "experimental_rust_core=False is not supported: the Rust core is mandatory "
+                "(there is no Python engine)."
+            )
+        return value
     diagnostics_max_events: int = Field(default=500, ge=0)
     guardrails_enabled: bool = True
     guardrails_strict: bool = False

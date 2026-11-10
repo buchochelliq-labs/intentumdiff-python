@@ -233,7 +233,7 @@ def test_legacy_diff_cache_cannot_replay_a_false_style_only_result(tmp_path: Pat
     from intentumdiff.core.models import SemanticDiff
 
     cache = _InMemoryCache()
-    differ = SemanticDiffer(config=DiffConfig(experimental_rust_core=False), cache=cache)
+    differ = SemanticDiffer(config=DiffConfig(), cache=cache)
     old, new = "def f(): pass", "def g(): pass"
     fake = SemanticDiff(
         changes=[], old_filename="test.py", new_filename="test.py",
@@ -251,7 +251,10 @@ def test_legacy_diff_cache_cannot_replay_a_false_style_only_result(tmp_path: Pat
 
     digest = differ._wasm_hash_for(parser)
     cache.put_diff(cache.diff_key(old, new, "python", digest), fake.model_dump_json())
-    with patch.object(differ._registry, "detect_parser", return_value=(parser, "python")):
+    # Skip the certified batch shortcut (it parses inside core) so the routed path that
+    # owns the host parse cache runs with the mocked parser.
+    with patch.object(differ._registry, "detect_parser", return_value=(parser, "python")), \
+            patch("intentumdiff.differ._rust_certified_languages", return_value=frozenset()):
         with pytest.raises(RuntimeError, match="parser execution required"):
             differ.diff_strings(old, new, "test.py")
     assert cache.diff_hits == 0
@@ -263,7 +266,7 @@ def test_missing_wasm_rejects_legacy_unknown_diff_cache_hit(tmp_path: Path):
     from intentumdiff.core.models import SemanticDiff
 
     cache = _InMemoryCache()
-    differ = SemanticDiffer(config=DiffConfig(experimental_rust_core=False), cache=cache)
+    differ = SemanticDiffer(config=DiffConfig(), cache=cache)
     old, new = "def f(): pass", "def g(): pass"
     fake = SemanticDiff(
         changes=[], old_filename="test.py", new_filename="test.py",
@@ -279,7 +282,10 @@ def test_missing_wasm_rejects_legacy_unknown_diff_cache_hit(tmp_path: Path):
     parser.trivia_node_types = []
     parser.preprocess_source.side_effect = lambda value: value
 
-    with patch.object(differ._registry, "detect_parser", return_value=(parser, "python")):
+    # Skip the certified batch shortcut (it parses inside core) so the routed path that
+    # owns the host parse cache runs with the mocked parser.
+    with patch.object(differ._registry, "detect_parser", return_value=(parser, "python")), \
+            patch("intentumdiff.differ._rust_certified_languages", return_value=frozenset()):
         with pytest.raises(RuntimeError, match="cannot fingerprint parser Wasm"):
             differ.diff_strings(old, new, "test.py")
     assert cache.diff_hits == 0

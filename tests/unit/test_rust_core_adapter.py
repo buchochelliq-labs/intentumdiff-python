@@ -52,22 +52,6 @@ def _empty_scope_trails_json(request_json: str) -> str:
     return json.dumps({"scope_trails": {"old": [], "new": []}})
 
 
-def test_rust_core_defaults_to_native_first_and_can_be_disabled(monkeypatch: Any) -> None:
-    monkeypatch.delenv("INTENTUMDIFF_RUST_CORE", raising=False)
-    monkeypatch.delenv("INTENTUMDIFF_EXPERIMENTAL_RUST_CORE", raising=False)
-    assert DiffConfig().experimental_rust_core is True
-
-    monkeypatch.setenv("INTENTUMDIFF_RUST_CORE", "0")
-    assert DiffConfig().experimental_rust_core is False
-
-    monkeypatch.delenv("INTENTUMDIFF_RUST_CORE", raising=False)
-    monkeypatch.setenv("INTENTUMDIFF_EXPERIMENTAL_RUST_CORE", "0")
-    assert DiffConfig().experimental_rust_core is False
-
-    monkeypatch.setenv("INTENTUMDIFF_EXPERIMENTAL_RUST_CORE", "1")
-    assert DiffConfig().experimental_rust_core is True
-
-
 def test_rust_core_unavailable_raises_required_engine_error(monkeypatch: Any) -> None:
     # Even a stubbed pipeline result cannot turn a missing required engine into success.
     monkeypatch.setattr(SemanticDiffer, "_run_stages_1_to_11", _python_fallback)
@@ -1214,6 +1198,8 @@ def test_semantic_differ_batch_decline_requires_native_finalize_handler(monkeypa
         # Exercise the real Rust NodeFacts contract; only batch/finalize decline is mocked.
         # An absent enrichment handler must fail closed, not return un-enriched trees.
         enrich_node_facts_json=real_backend.enrich_node_facts_json,
+        # Every language's trees go to core profile enrichment (S1); use the real op.
+        enrich_profile_labels_json=real_backend.enrich_profile_labels_json,
         version=lambda: "0.4.0",
         supports_language=lambda language: language == "python",
         diff_batch=lambda *args: json.dumps(payload),
@@ -1525,7 +1511,6 @@ def test_ctypes_batch_marks_outer_abi_corruption_invalid(
 
     monkeypatch.setattr(rust_core, "_c_abi_call", fake_c_abi_call)
     monkeypatch.setattr(rust_core, "_load_backend", rust_core._CtypesBackend)
-    monkeypatch.setattr(rust_core, "rust_core_enabled", lambda _config: True)
     attempt = rust_core.try_rust_core_batch_diffs(
         files=[{
             "old_source": "x = 1", "new_source": "x = 2",
@@ -1698,7 +1683,6 @@ def test_ctypes_native_operation_errors_fail_closed_in_every_commit_adapter(
         ),
     )
     monkeypatch.setattr(rust_core, "_load_backend", rust_core._CtypesBackend)
-    monkeypatch.setattr(rust_core, "rust_core_enabled", lambda _config: True)
 
     config = DiffConfig(experimental_rust_core=True)
     files = [{
@@ -1744,7 +1728,6 @@ def test_ctypes_explicit_rust_batch_decline_remains_routable(monkeypatch: Any) -
         ),
     )
     monkeypatch.setattr(rust_core, "_load_backend", rust_core._CtypesBackend)
-    monkeypatch.setattr(rust_core, "rust_core_enabled", lambda _config: True)
     attempt = rust_core.try_rust_core_batch_diffs(
         files=[{
             "old_source": "x = 1", "new_source": "x = 2",

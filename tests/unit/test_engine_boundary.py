@@ -157,34 +157,6 @@ def test_strict_rust_gate_allows_batch_decline_to_native_finalize(monkeypatch) -
     assert diff.has_semantic_changes is True
 
 
-def test_strict_rust_gate_blocks_commit_token_fallback(monkeypatch) -> None:
-    # The commit fan-out re-runs every source through the native single-file path. With the
-    # Rust core disabled (kill switch) that path reaches the token-level fallback, which the
-    # RUST_ONLY gate blocks — and the fan-out re-raises the RustOnlyGateError instead of
-    # swallowing it as an ordinary per-file error (a swallow would silently drop the file).
-    import intentumdiff.differ as differ_module
-
-    monkeypatch.setenv(STRICT_GATE_ENV, "1")
-    changed_files = [
-        ("def f():\n    return 1\n", "def f():\n    return 2\n", "a.py", "a.py", None),
-    ]
-
-    with (
-        patch("git.Repo", return_value=MagicMock()),
-        patch(
-            "intentumdiff.sources.git_source.iter_changed_sources",
-            return_value=iter(changed_files),
-        ),
-        pytest.raises(
-            RuntimeError,
-            match=r"Rust-only engine gate prevented fallback: rust core disabled",
-        ),
-    ):
-        differ_module.SemanticDiffer(
-            DiffConfig(experimental_rust_core=False)
-        ).diff_commit(".")
-
-
 def test_strict_rust_gate_allows_commit_batch_decline_to_native(monkeypatch) -> None:
     # A commit whose per-file certified-batch attempts decline re-runs each source through
     # the native per-stage Rust finalize path. That is Rust->Rust, not a Python fallback, so

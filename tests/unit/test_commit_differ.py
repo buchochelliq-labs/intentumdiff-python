@@ -113,6 +113,14 @@ class TestConstruction:
 # ---------------------------------------------------------------------------
 
 
+def _fanout_differ(config: DiffConfig) -> SemanticDiffer:
+    """A differ whose commit batch shortcut is skipped, so every file takes the per-file
+    fan-out the test patches (``_run_pipeline``)."""
+    differ = SemanticDiffer(config)
+    differ._rust_core_python_batch_skip_reason = lambda: "test drives the per-file fan-out"
+    return differ
+
+
 class TestSemanticDifferParallelCommit:
     @contextmanager
     def _patch_sources(self, changed_files: list[tuple]):
@@ -132,7 +140,7 @@ class TestSemanticDifferParallelCommit:
         )
 
     def test_parallel_commit_uses_worker_local_registries(self):
-        differ = SemanticDiffer(DiffConfig(parallel=2, experimental_rust_core=False))
+        differ = _fanout_differ(DiffConfig(parallel=2))
         barrier = threading.Barrier(2)
         registry_ids: list[int] = []
         seen_lock = threading.Lock()
@@ -164,7 +172,7 @@ class TestSemanticDifferParallelCommit:
         assert id(differ._registry) not in registry_ids
 
     def test_parallel_commit_preserves_source_order(self):
-        differ = SemanticDiffer(DiffConfig(parallel=2, experimental_rust_core=False))
+        differ = _fanout_differ(DiffConfig(parallel=2))
 
         def fake_pipeline(self, old, new, filename, language_hint, **kwargs):
             if filename == "a.py":
@@ -195,7 +203,7 @@ class TestSemanticDifferParallelCommit:
         """Missing parsers cannot silently omit changed text, even alongside a success."""
         from intentumdiff.plugins.exceptions import PluginNotFoundError
 
-        differ = SemanticDiffer(DiffConfig(parallel=parallel, experimental_rust_core=False))
+        differ = _fanout_differ(DiffConfig(parallel=parallel))
 
         def fake_pipeline(self, old, new, filename, language_hint, **kwargs):
             if filename == "unknown.xyz":
@@ -235,8 +243,8 @@ class TestSemanticDifferParallelCommit:
     )
     def test_commit_file_failure_is_not_silent_partial_success(self, parallel, error):
         """A failed changed file must not disappear behind a successful sibling."""
-        differ = SemanticDiffer(
-            DiffConfig(parallel=parallel, experimental_rust_core=False)
+        differ = _fanout_differ(
+            DiffConfig(parallel=parallel)
         )
 
         def fake_pipeline(self, old, new, filename, language_hint, **kwargs):
@@ -262,8 +270,8 @@ class TestSemanticDifferParallelCommit:
         assert caught.value.__cause__ is error
 
     def test_phase_profile_records_source_collection_once(self):
-        differ = SemanticDiffer(
-            DiffConfig(parallel=2, profile_phases=True, experimental_rust_core=False)
+        differ = _fanout_differ(
+            DiffConfig(parallel=2, profile_phases=True)
         )
 
         def fake_pipeline(self, old, new, filename, language_hint, **kwargs):
