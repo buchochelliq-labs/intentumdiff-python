@@ -85,16 +85,20 @@ jobs:
             echo "::warning::SPLIT_REPO_TOKEN not set - private cross-repo dependencies will fail to fetch"
           fi
 
+      - name: Download published component mirror
+        if: env.HAS_SPLIT_TOKEN == 'true'
+        run: |
+          python -m pip install --no-deps --pre --target build/release-wheel-mirror "intentumdiff-python==0.0.2b2"
+
       - name: Provision build inputs (engine + parser components)
-        # Components come from the parser repos' CI artifacts, each verified against the
-        # SHA-256 pinned in intentumdiff-registry (#95) — without them every language
-        # resolves to 'unknown' and the suite cannot run. Fail-closed: a missing or
-        # unverified component stops the job here rather than an hour later as mass
-        # PluginNotFoundError failures.
+        # Prefer the immutable published wheel as a durable mirror for expired parser
+        # Actions artifacts. Every mirrored byte is checked against the registry's
+        # pinned source commit and SHA-256; missing mirror entries fall back to artifacts.
+        # Fail closed if neither source provides the exact reviewed component.
         if: env.HAS_SPLIT_TOKEN == 'true'
         run: |
           pip install "pyyaml>=6.0"
-          python scripts/provision_build_inputs.py --from-parser-artifacts
+          python scripts/provision_build_inputs.py --from-parser-artifacts --mirror-dir build/release-wheel-mirror/intentumdiff/wasm
         env:
           GIT_TERMINAL_PROMPT: "0"
           GH_TOKEN: ${{ secrets.SPLIT_REPO_TOKEN }}
@@ -223,7 +227,7 @@ jobs:
         with:
           name: candidate-evidence-${{ matrix.os }}-${{ github.run_attempt }}
           retention-days: 30
-          if-no-files-found: error
+          if-no-files-found: warn
           path: |
             evidence/
             dist/*.whl

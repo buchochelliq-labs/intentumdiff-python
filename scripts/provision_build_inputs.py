@@ -147,6 +147,41 @@ def verified_renderer_archive(blob: bytes, pins: dict[str, str]) -> dict[str, by
     return checked
 
 
+def verified_mirror_component(slug: str, mirror: Path, ref: str | None,
+                              pinned: str | None) -> tuple[str, str, str, bytes, dict] | None:
+    """Return a mirrored parser only when its provenance and bytes match registry pins.
+
+    Published wheels outlive GitHub Actions artifacts. Their embedded provenance
+    preserves the original parser build attribution; the registry remains the root
+    of trust for both source commit and payload checksum.
+    """
+    import hashlib
+    import json
+
+    name = f"{slug.replace('-', '_')}_parser.wasm"
+    if Path(name).name != name or not ref or not pinned:
+        raise RuntimeError(f"invalid mirrored component identity: {slug}")
+    manifest = mirror / "wasm_provenance.json"
+    payload_path = mirror / name
+    if not manifest.is_file() or not payload_path.is_file():
+        return None
+    try:
+        record = json.loads(manifest.read_text())["artifacts"].get(name)
+        source = record["source"]
+        if source.get("commit") != ref:
+            return None
+        if (record.get("sha256") != pinned
+                or source.get("repository") != f"https://github.com/buchochelliq-labs/intentumdiff-{slug}-parser"):
+            raise RuntimeError(f"mirror source/checksum disagrees with registry for {name}")
+        payload = payload_path.read_bytes()
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
+        raise RuntimeError(f"invalid mirror provenance for {name}: {exc}") from exc
+    digest = hashlib.sha256(payload).hexdigest()
+    if digest != pinned:
+        raise RuntimeError(f"mirror checksum mismatch for {name}")
+    return name, ref, digest, payload, dict(source)
+
+
 
 def write_reviewed_wasm_manifest(
     wasm_dir: Path,
@@ -263,7 +298,8 @@ def _successful_artifact_runs(get, api: str, org: str, repo: str, ref: str | Non
     return []
 
 
-def stage_wasm_from_artifacts(token: str, org: str = "buchochelliq-labs") -> int:
+def stage_wasm_from_artifacts(token: str, org: str = "buchochelliq-labs",
+                              mirror_dir: Path | None = None) -> int:
     import hashlib as _hashlib
     import io
     import http.client
@@ -381,6 +417,32 @@ def stage_wasm_from_artifacts(token: str, org: str = "buchochelliq-labs") -> int
             if (not isinstance(ref, str) or len(ref) != 40
                     or any(c not in "0123456789abcdef" for c in ref)):
                 missing.append((name, "registry has no immutable parser source commit"))
+                continue
+            slug = name.removeprefix("intentumdiff-").removesuffix("-parser")
+            mirror_component = (verified_mirror_component(
+                slug, mirror_dir, ref, pins.get(f"{slug.replace('-', '_')}_parser.wasm"),
+            ) if mirror_dir else None)
+            if mirror_component:
+                out, source_ref, digest, payload, mirror_source = mirror_component
+                metadata = (registry.get("plugins") or {}).get(name, {})
+                abi_target = metadata.get("abi_target")
+                if not isinstance(abi_target, str) or not abi_target:
+                    missing.append((name, f"{out} has no registry WIT/ABI target"))
+                    continue
+                if mirror_source.get("commit") != source_ref:
+                    missing.append((name, f"{out} mirror source commit changed during verification"))
+                    continue
+                provenance_sources[out] = {
+                    "repository": mirror_source["repository"],
+                    "commit": source_ref,
+                    "artifact": mirror_source.get("artifact", "parser-wasm"),
+                    "artifact_id": mirror_source.get("artifact_id"),
+                    "artifact_archive_sha256": mirror_source.get("artifact_archive_sha256"),
+                    "abi_target": abi_target,
+                }
+                (WASM_DEST / out).write_bytes(payload)
+                staged += 1
+                print(f"  verified {out} from published-wheel mirror")
                 continue
             wr = _successful_artifact_runs(get, api, org, name, ref)
             if not wr:
@@ -508,13 +570,15 @@ def main() -> None:
     ap.add_argument("--from-parser-artifacts", action="store_true",
                     help="stage components from the parser repos' latest CI artifacts "
                          "(needs GH_TOKEN / GITHUB_TOKEN with read access)")
+    ap.add_argument("--mirror-dir", type=Path,
+                    help="Wasm directory extracted from the published candidate wheel; exact pins are verified")
     args = ap.parse_args()
     stage_core(args.core_dir)
     if args.from_parser_artifacts:
         token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN") or ""
         if not token:
             sys.exit("--from-parser-artifacts needs GH_TOKEN or GITHUB_TOKEN")
-        missing = stage_wasm_from_artifacts(token)
+        missing = stage_wasm_from_artifacts(token, mirror_dir=args.mirror_dir)
         if missing:
             # Fail closed. A partial (or empty) component staging does not surface as a
             # provisioning error later — it surfaces as hundreds of
