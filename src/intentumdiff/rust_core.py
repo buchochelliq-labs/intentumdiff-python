@@ -6,13 +6,11 @@ shared decisions belong to Rust, never a Python fallback correctness engine.
 
 from __future__ import annotations
 
-import importlib
 import json
 import logging
 import os
 import time
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any
 
 from pydantic import ValidationError
@@ -30,7 +28,6 @@ logger = logging.getLogger(__name__)
 
 _COMPLETE_STATUS = "complete"
 _BATCH_ENGINE = "rust_core_batch_v4"
-_PYTHON_NATIVE_CERTIFICATION = "python_native_v4kb"
 @dataclass(frozen=True)
 class RustCoreBatchAttempt:
     diff: SemanticDiff | None = None
@@ -56,43 +53,6 @@ class RustCoreBatchDiffsAttempt:
     @property
     def used(self) -> bool:
         return bool(self.diffs)
-
-
-@dataclass(frozen=True)
-class RustCoreCandidateBatchAttempt:
-    payload: dict[str, Any] | None = None
-    fallback_reason: str = ""
-    backend_version: str = ""
-
-    @property
-    def used(self) -> bool:
-        return self.payload is not None
-
-
-@dataclass(frozen=True)
-class RustCoreCommitJsonAttempt:
-    control: dict[str, Any] = field(default_factory=dict)
-    commit_diff_json: bytes = b""
-    adapter_phase_timings: list[dict[str, Any]] = field(default_factory=list)
-    backend_version: str = ""
-    fallback_reason: str = ""
-
-    @property
-    def used(self) -> bool:
-        return bool(self.commit_diff_json)
-
-    def to_model(self) -> Any:
-        """Lazily validate the certified JSON into the public CommitDiff model."""
-        from intentumdiff.core.models import CommitDiff
-
-        return CommitDiff.model_validate_json(self.commit_diff_json)
-
-
-@dataclass(frozen=True)
-class RustInvarianceResult:
-    changes: list[Change]
-    change_groups: list[ChangeGroup] = field(default_factory=list)
-    ignored_style_changes: list[dict[str, Any]] = field(default_factory=list)
 
 
 def rust_core_enabled(config: DiffConfig) -> bool:
@@ -297,9 +257,7 @@ class _CtypesBackend:
     stateless pyfunction surface.
 
     Naming: the C-ABI handler names dropped the Python-transport ``_json`` suffix (``finalize_review``
-    for the pyfunction ``finalize_review_json``), so a trailing ``_json`` is stripped — except the two
-    commit handlers, which keep the suffix AND return the ``(control_json, commit_bytes)`` binary tuple
-    the callers expect (the C ABI marshals it as a ``{control, commit_diff_json}`` envelope).
+    for the pyfunction ``finalize_review_json``), so a trailing ``_json`` is stripped.
 
     Result encoding: ``_c_abi_call`` returns the *parsed* ``result``. The PyO3 pyfunctions were
     heterogeneous — some returned native values used directly (``supports_language`` -> bool,
@@ -309,7 +267,6 @@ class _CtypesBackend:
     with ``json.dumps`` so the caller's parse still works. ``_RAW_HANDLERS`` is the (small) native set.
     """
 
-    _COMMIT_TUPLE = frozenset({"diff_batch_commit_json", "diff_working_tree_python_commit_json"})
     _RAW_HANDLERS = frozenset({
         "version",
         "supports_language",
@@ -328,31 +285,6 @@ class _CtypesBackend:
     def __getattr__(self, name: str) -> Any:
         if name.startswith("__"):
             raise AttributeError(name)
-        if name in self._COMMIT_TUPLE:
-            def _commit(request_json: str, _name: str = name) -> tuple[str, bytes | None]:
-                envelope = _c_abi_call(_name, request_json)
-                # A malformed claimed-success C ABI result must not raise a
-                # generic AttributeError here: the commit adapters would treat
-                # it as a normal backend failure and silently reroute (#207).
-                # Check transport types before encoding; Rust owns the control
-                # status and CommitDiff semantics, which the callers validate.
-                if not isinstance(envelope, dict) or not isinstance(
-                    envelope.get("control"), dict
-                ):
-                    raise _InvalidNativeCommitDto(
-                        f"Rust {_name} returned malformed C ABI commit envelope"
-                    )
-                payload = envelope.get("commit_diff_json")
-                if payload is not None and not isinstance(payload, str):
-                    raise _InvalidNativeCommitDto(
-                        f"Rust {_name} returned non-string commit_diff_json in C ABI envelope"
-                    )
-                return (
-                    json.dumps(envelope["control"]),
-                    payload.encode("utf-8") if payload is not None else None,
-                )
-
-            return _commit
         handler = name[:-5] if name.endswith("_json") else name
         if handler == "vcs_backend_get_blob":
             # The C ABI wraps blob content in {"content": …} so JSON-valued content is not
@@ -401,218 +333,6 @@ def enrich_node_facts(tree: SemanticNode) -> SemanticNode:
         return SemanticNode.model_validate_json(enrich(tree.model_dump_json()))
     except Exception as exc:  # noqa: BLE001 - native failures must never become success.
         raise RuntimeError(f"Rust node facts enrichment failed: {exc}") from exc
-
-
-def apply_invariances(
-    changes: list[Change],
-    *,
-    old_tree: SemanticNode,
-    new_tree: SemanticNode,
-    old_source: str,
-    new_source: str,
-    language: str,
-) -> RustInvarianceResult:
-    """Apply built-in invariance rules in the Rust engine."""
-
-    return _run_invariance_request(
-        {
-            "mode": "apply",
-            "changes": [change.model_dump(mode="json") for change in changes],
-            "old_tree": old_tree.model_dump(mode="json"),
-            "new_tree": new_tree.model_dump(mode="json"),
-            "old_source": old_source,
-            "new_source": new_source,
-            "language": language,
-        }
-    )
-
-
-def build_style_only_evidence(
-    *,
-    old_source: str,
-    new_source: str,
-    language: str,
-    old_cst_json: str | None = None,
-    new_cst_json: str | None = None,
-) -> RustInvarianceResult:
-    """Build source-span style-only evidence in the Rust engine."""
-
-    return _run_invariance_request(
-        {
-            "mode": "style_only",
-            "old_source": old_source,
-            "new_source": new_source,
-            "language": language,
-            "old_cst_json": old_cst_json,
-            "new_cst_json": new_cst_json,
-        }
-    )
-
-
-def build_zero_change_literal_evidence(
-    *,
-    old_tree: SemanticNode,
-    new_tree: SemanticNode,
-    old_source: str,
-    new_source: str,
-    language: str,
-) -> RustInvarianceResult:
-    """Build zero-change literal evidence in the Rust engine."""
-
-    return _run_invariance_request(
-        {
-            "mode": "zero_change_literal",
-            "old_tree": old_tree.model_dump(mode="json"),
-            "new_tree": new_tree.model_dump(mode="json"),
-            "old_source": old_source,
-            "new_source": new_source,
-            "language": language,
-        }
-    )
-
-
-def build_scope_trails(
-    *,
-    old_tree: SemanticNode,
-    new_tree: SemanticNode,
-    changes: list[Change],
-) -> dict[str, Any]:
-    """Build hunk scope breadcrumb metadata in the Rust engine."""
-
-    try:
-        backend = _load_backend()
-        scope_fn = getattr(backend, "scope_trails_json", None)
-        if not callable(scope_fn):
-            raise RuntimeError("backend does not expose scope_trails_json")
-        payload = scope_fn(
-            json.dumps(
-                {
-                    "old_tree": old_tree.model_dump(mode="json"),
-                    "new_tree": new_tree.model_dump(mode="json"),
-                    "changes": [change.model_dump(mode="json") for change in changes],
-                }
-            )
-        )
-        data = json.loads(payload)
-    except Exception as exc:  # noqa: BLE001 - scope computation belongs to Rust.
-        raise RuntimeError(f"Rust scope trail engine unavailable: {exc}") from exc
-
-    scope_trails = data.get("scope_trails") if isinstance(data, dict) else None
-    if not isinstance(scope_trails, dict):
-        raise RuntimeError("Rust scope trail response requires scope_trails object")
-    if any(not isinstance(scope_trails.get(side), list) for side in ("old", "new")):
-        raise RuntimeError("Rust scope trail response requires old/new arrays")
-    if any(
-        not isinstance(entry, dict)
-        for side in ("old", "new")
-        for entry in scope_trails[side]
-    ):
-        raise RuntimeError("Rust scope trail response contains non-object entry")
-    return dict(scope_trails)
-
-
-def try_rust_generic_text_review(
-    old_source: str,
-    new_source: str,
-    raw_change_count: int,
-) -> tuple[list[Change], list[ChangeGroup]] | None:
-    """Decode Rust-owned generic text review or an explicit Rust size-cap decline.
-
-    Only Rust may decline this stage. Missing handlers, invalid envelopes and
-    engine failures cannot silently become successful Python pass-throughs.
-    """
-    try:
-        backend = _load_backend()
-        review_fn = getattr(backend, "generic_text_review_json", None)
-        if not callable(review_fn):
-            raise RuntimeError("required Rust generic-text review handler is unavailable")
-        data = json.loads(review_fn(old_source, new_source, raw_change_count))
-        if not isinstance(data, dict):
-            raise ValueError("Rust generic-text review must return a JSON object")
-        used = data.get("used")
-        if used is False:
-            if data.get("reason") != "input too large for LCS table":
-                raise ValueError("uncertified Rust generic-text review decline")
-            return None
-        if used is not True:
-            raise ValueError("Rust generic-text review missing explicit used=true")
-        if not isinstance(data.get("changes"), list):
-            raise ValueError("Rust generic-text review missing changes list")
-        if "group" not in data:
-            raise ValueError("Rust generic-text review missing group field")
-        group = data["group"]
-        if group is not None and not isinstance(group, dict):
-            raise ValueError("Rust generic-text review group must be an object or null")
-        changes = [Change.model_validate(item) for item in
-                   _require_source_anchored_changes(data["changes"], "Rust generic-text review")]
-        groups = [ChangeGroup.model_validate(group)] if group is not None else []
-        return changes, groups
-    except Exception as exc:  # noqa: BLE001 - fail closed on native/DTO failures.
-        raise RuntimeError(f"Rust generic-text review failed: {exc}") from exc
-
-
-def try_rust_markdown_section_review(
-    old_source: str,
-    new_source: str,
-) -> dict[str, object] | None:
-    """Run required Rust Markdown section review; malformed native data must fail closed.
-
-    Engine-side port of the markdown post-presentation rules (issue #36): section
-    identity by content hash, LIS insertion-shift discrimination for moves, and
-    unique-body-hash heading renames.
-    """
-    try:
-        backend = _load_backend()
-        review_fn = getattr(backend, "markdown_section_review_json", None)
-        if not callable(review_fn):
-            raise RuntimeError("required Rust markdown section review handler is unavailable")
-        data = json.loads(review_fn(old_source, new_source))
-        # The Rust markdown_section_review_impl always emits used=true and the
-        # complete DTO envelope, including real empty arrays for no-op reviews.
-        # Missing fields are engine-contract failures, never a Python decline.
-        if not isinstance(data, dict) or data.get("used") is not True:
-            raise ValueError("Rust markdown section review requires used=true")
-        for key in ("moves", "renames", "moved_labels", "old_heading_lines", "new_heading_lines"):
-            if not isinstance(data.get(key), list):
-                raise ValueError(f"Rust markdown section review requires {key} array")
-        if any(not isinstance(label, str) for label in data["moved_labels"]):
-            raise ValueError("Rust markdown section review has invalid moved_labels")
-        for key in ("old_heading_lines", "new_heading_lines"):
-            if any(type(line) is not int or line < 0 for line in data[key]):
-                raise ValueError(f"Rust markdown section review has invalid {key}")
-        for key in ("move_group", "rename_group"):
-            if key not in data or (data[key] is not None and not isinstance(data[key], dict)):
-                raise ValueError(f"Rust markdown section review requires {key} object or null")
-        return {
-            "moves": [Change.model_validate(item) for item in
-                      _require_source_anchored_changes(data["moves"], "Rust Markdown moves")],
-            "moved_labels": set(data["moved_labels"]),
-            "move_group": (
-                ChangeGroup.model_validate(data["move_group"])
-                if data["move_group"] is not None else None
-            ),
-            "renames": [Change.model_validate(item) for item in
-                        _require_source_anchored_changes(data["renames"], "Rust Markdown renames")],
-            "old_heading_lines": set(data["old_heading_lines"]),
-            "new_heading_lines": set(data["new_heading_lines"]),
-            "rename_group": (
-                ChangeGroup.model_validate(data["rename_group"])
-                if data["rename_group"] is not None else None
-            ),
-        }
-    except Exception as exc:  # noqa: BLE001 - an engine failure is not an unsupported decline.
-        raise RuntimeError(f"Rust markdown section review failed: {exc}") from exc
-
-
-def try_rust_collect_hover_targets(root: SemanticNode) -> list[tuple[str, int, int]]:
-    """Decode Rust-owned hover targets; required engine failures propagate.
-
-    The historical name is retained for compatibility. There is no Python walker.
-    """
-    data = _required_engine_json(
-        "lsp_collect_hover_targets_json", root.model_dump_json(), result_type=list,
-    )
-    return _hover_target_dtos(data)
 
 
 def collect_lsp_hover_targets(root: SemanticNode, source: str) -> list[tuple[str, int, int]]:
@@ -867,11 +587,6 @@ def try_rust_build_reference_table(files_json: str) -> str:
 def try_rust_diff_symbol_tables(old_json: str, new_json: str) -> list[dict[str, Any]]:
     """Compare symbol tables in Rust; an empty list means successful no-change."""
     return _required_engine_json("diff_symbol_tables_json", old_json, new_json, result_type=list)
-
-
-def try_rust_evaluate_guardrail_rules(request: dict[str, Any]) -> list[dict[str, Any]]:
-    """Evaluate in Rust; engine failure must never report a passed guardrail."""
-    return _required_engine_json("evaluate_guardrail_rules_json", json.dumps(request), result_type=list)
 
 
 def load_project_diff_config_data(
@@ -1203,21 +918,6 @@ def git_repo_toplevel(repo_path: str) -> str:
     return fn(repo_path)
 
 
-def changed_commit_sources(
-    repo_path: str, old_ref: str, new_ref: str
-) -> list[tuple[str, str, str, str, str | None]]:
-    """Yield changed-source rows for a commit-to-commit diff via the Rust core.
-
-    Each row is ``(old_content, new_content, old_path, new_path, staging_status)`` with
-    ``staging_status`` always ``None`` for commit-to-commit. Binary files are skipped.
-    """
-    backend = _load_backend()
-    fn = getattr(backend, "changed_commit_sources_json", None)
-    if not callable(fn):
-        raise RuntimeError("backend does not expose changed_commit_sources_json")
-    return [tuple(row) for row in json.loads(fn(repo_path, old_ref, new_ref))]
-
-
 def changed_sources(
     repo_path: str, old_ref: str, new_ref: str
 ) -> list[tuple[str, str, str, str, str | None]]:
@@ -1365,16 +1065,11 @@ def live_handle_review(
 
     Rust resolves changed files via the bundled-parser manifest in *wasm_dir*.
     Missing or non-certified results are declines, not permission for a live
-    transport to manufacture a successful Python-path review. Older ABI
-    signature compatibility does not relax result certification.
+    transport to manufacture a successful Python-path review.
     """
-    backend = _load_backend()
-    try:
-        raw = backend.live_handle_review_json(repo_path, old_ref, new_ref, config_json, wasm_dir)
-    except TypeError:
-        # Older core: no wasm_dir parameter -> Python-only certified commit (non-Python falls back).
-        raw = backend.live_handle_review_json(repo_path, old_ref, new_ref, config_json)
-    return json.loads(raw)
+    return json.loads(
+        _load_backend().live_handle_review_json(repo_path, old_ref, new_ref, config_json, wasm_dir)
+    )
 
 
 def live_handle_asset_diff(
@@ -1415,37 +1110,6 @@ def try_register_user_xml_dialects(dialects: list[dict[str, Any]]) -> bool:
     register_fn(payload)
     _registered_xml_dialects_fingerprint = payload
     return True
-
-
-def _run_invariance_request(request: dict[str, Any]) -> RustInvarianceResult:
-    try:
-        backend = _load_backend()
-        apply_fn = getattr(backend, "apply_invariances_json", None)
-        if not callable(apply_fn):
-            raise RuntimeError("backend does not expose apply_invariances_json")
-        payload = apply_fn(json.dumps(request))
-        data = json.loads(payload)
-    except Exception as exc:  # noqa: BLE001 - public engine boundary requires Rust here.
-        raise RuntimeError(f"Rust invariance engine unavailable: {exc}") from exc
-
-    if not isinstance(data, dict):
-        raise RuntimeError("Rust invariance engine returned a non-object payload")
-    # Every Rust invariance mode returns all three arrays, even for genuinely
-    # empty results. Missing/null/mistyped fields cannot certify a style-only
-    # or no-change result and must not be silently replaced with empty lists.
-    for field in ("changes", "change_groups", "ignored_style_changes"):
-        if not isinstance(data.get(field), list):
-            raise RuntimeError(f"invalid Rust invariance result: {field} must be an array")
-    if any(not isinstance(item, dict) for item in data["ignored_style_changes"]):
-        raise RuntimeError(
-            "invalid Rust invariance result: ignored_style_changes entries must be objects"
-        )
-    return RustInvarianceResult(
-        changes=[Change.model_validate(item) for item in
-                 _require_source_anchored_changes(data["changes"], "Rust invariance review")],
-        change_groups=[ChangeGroup.model_validate(item) for item in data["change_groups"]],
-        ignored_style_changes=[dict(item) for item in data["ignored_style_changes"]],
-    )
 
 
 def try_rust_core_batch_diff(
@@ -1825,54 +1489,6 @@ class _InvalidNativeCommitDto(RuntimeError):
     """Native claimed complete output but sent an invalid public commit DTO."""
 
 
-def _decode_native_commit_control(raw: Any, operation: str) -> dict[str, Any]:
-    """Reject malformed Rust control transport; only an explicit decline can fall back."""
-    try:
-        control = json.loads(raw)
-    except (TypeError, ValueError) as exc:
-        raise _InvalidNativeCommitDto(
-            f"Rust {operation} returned malformed control JSON: {exc}"
-        ) from exc
-    if not isinstance(control, dict) or not isinstance(control.get("status"), str):
-        raise _InvalidNativeCommitDto(
-            f"Rust {operation} requires a control object with status string"
-        )
-    if not control["status"]:
-        raise _InvalidNativeCommitDto(f"Rust {operation} returned empty control status")
-    # Rust commit_json_control emits only these two statuses. Unknown statuses
-    # are malformed transport, never a valid explicit Rust decline.
-    if control["status"] not in (_COMPLETE_STATUS, "fallback"):
-        raise _InvalidNativeCommitDto(
-            f"Rust {operation} returned unknown control status: {control['status']!r}"
-        )
-    return control
-
-
-def _require_claimed_complete_commit_bytes(
-    control: dict[str, Any], payload: Any, operation: str
-) -> bytes:
-    """Do not reinterpret an invalid claimed-complete result as a Rust decline."""
-    if control.get("certification") != _PYTHON_NATIVE_CERTIFICATION:
-        raise _InvalidNativeCommitDto(
-            f"Rust {operation} claimed complete with invalid certification: "
-            f"{control.get('certification')!r}"
-        )
-    if not isinstance(payload, (bytes, bytearray, memoryview)):
-        raise _InvalidNativeCommitDto(
-            f"Rust {operation} claimed complete without valid commit JSON bytes"
-        )
-    commit_json = bytes(payload)
-    if not commit_json:
-        raise _InvalidNativeCommitDto(f"Rust {operation} claimed complete with empty commit JSON")
-    declared_size = control.get("commit_diff_byte_size")
-    if type(declared_size) is not int or declared_size != len(commit_json):
-        raise _InvalidNativeCommitDto(
-            f"Rust {operation} commit JSON byte size mismatch: "
-            f"control={declared_size!r}, payload={len(commit_json)}"
-        )
-    return commit_json
-
-
 def _require_native_commit_diff_json(payload: bytes, operation: str) -> None:
     """Validate Rust-authored commit bytes before exposing a successful adapter attempt."""
     from intentumdiff.core.models import CommitDiff
@@ -1938,320 +1554,6 @@ def _require_native_commit_diff_json(payload: bytes, operation: str) -> None:
                 )
     except (ValidationError, ValueError, TypeError) as exc:
         raise _InvalidNativeCommitDto(f"Rust {operation} returned malformed CommitDiff JSON: {exc}") from exc
-
-
-def try_rust_core_commit_json(
-    *,
-    files: list[dict[str, Any]],
-    old_ref: str,
-    new_ref: str,
-    config: DiffConfig,
-    parallel: bool = False,
-    max_workers: int | None = None,
-    python_parser_backend: str = "native",
-) -> RustCoreCommitJsonAttempt:
-    """Return certified Rust CommitDiff JSON bytes without Pydantic hot-path validation."""
-    if not rust_core_enabled(config):
-        return RustCoreCommitJsonAttempt(fallback_reason="disabled")
-    if config.diagnostics:
-        return RustCoreCommitJsonAttempt(
-            fallback_reason="diagnostics require Python pipeline"
-        )
-    if python_parser_backend != "native":
-        return RustCoreCommitJsonAttempt(
-            fallback_reason="certified commit JSON requires native Python backend"
-        )
-    if not files:
-        return RustCoreCommitJsonAttempt()
-
-    adapter_phase_timings: list[dict[str, Any]] = []
-
-    def _record_adapter_phase(
-        name: str, started: float, *, summary_exclude: bool = False
-    ) -> None:
-        phase = {
-            "name": name,
-            "duration_ms": round((time.perf_counter() - started) * 1000, 3),
-            "shared": True,
-        }
-        if summary_exclude:
-            phase["summary_exclude"] = True
-        adapter_phase_timings.append(phase)
-
-    try:
-        backend = _load_backend()
-    except (RuntimeError, OSError):
-        # Missing Rust runtime is not an explicit Rust decline.
-        raise
-    except Exception as exc:  # noqa: BLE001 - optional accelerator must never break diffing.
-        logger.debug("Rust core unavailable: %s", exc)
-        return RustCoreCommitJsonAttempt(fallback_reason=f"unavailable: {exc}")
-
-    try:
-        supports = getattr(backend, "supports_language", None)
-        if callable(supports) and not supports("python"):
-            return RustCoreCommitJsonAttempt(
-                fallback_reason="backend does not support python"
-            )
-        backend_version = str(getattr(backend, "version", lambda: "")())
-        diff_batch_commit_json = getattr(backend, "diff_batch_commit_json", None)
-        if not callable(diff_batch_commit_json):
-            return RustCoreCommitJsonAttempt(
-                fallback_reason="backend does not expose diff_batch_commit_json",
-                backend_version=backend_version,
-            )
-        phase_started = time.perf_counter()
-        request = {
-            "schema_version": 1,
-            "mode": "commit_json",
-            "old_ref": old_ref,
-            "new_ref": new_ref,
-            "python_parser_backend": python_parser_backend,
-            "config": config.model_dump(mode="json"),
-            "parallel": parallel,
-            "max_workers": max_workers,
-            "files": files,
-        }
-        _record_adapter_phase("rust_core_commit_request_construction", phase_started)
-        phase_started = time.perf_counter()
-        request_json = json.dumps(request)
-        _record_adapter_phase("rust_core_commit_request_json_encode", phase_started)
-        phase_started = time.perf_counter()
-        control_json, commit_payload = diff_batch_commit_json(request_json)
-        _record_adapter_phase(
-            "rust_core_commit_pyo3_call",
-            phase_started,
-            summary_exclude=True,
-        )
-        phase_started = time.perf_counter()
-        control = _decode_native_commit_control(control_json, "certified commit")
-        _record_adapter_phase("rust_core_commit_control_decode", phase_started)
-        phase_started = time.perf_counter()
-        status = str(control.get("status") or "")
-        if status != _COMPLETE_STATUS:
-            reason = str(control.get("reason") or status or "commit JSON incomplete")
-            _record_adapter_phase("rust_core_commit_control_validation", phase_started)
-            return RustCoreCommitJsonAttempt(
-                control=control,
-                adapter_phase_timings=adapter_phase_timings,
-                backend_version=backend_version,
-                fallback_reason=reason,
-            )
-        commit_json = _require_claimed_complete_commit_bytes(
-            control, commit_payload, "certified commit"
-        )
-        _record_adapter_phase("rust_core_commit_control_validation", phase_started)
-        # The C ABI control status and matching byte count are not proof that
-        # the bytes constitute a valid CommitDiff. Validate every successful
-        # native response, even when the legacy debug env flag is unset.
-        phase_started = time.perf_counter()
-        _require_native_commit_diff_json(commit_json, "certified commit")
-        _record_adapter_phase("rust_core_commit_pydantic_validation", phase_started)
-        return RustCoreCommitJsonAttempt(
-            control=control,
-            commit_diff_json=commit_json,
-            adapter_phase_timings=adapter_phase_timings,
-            backend_version=backend_version,
-        )
-    except (_InvalidNativeCommitDto, _InvalidNativeCAbiEnvelope, _NativeCAbiOperationFailure):
-        raise
-    except (ValidationError, ValueError, TypeError) as exc:
-        logger.debug("Rust core certified commit JSON rejected: %s", exc)
-        return RustCoreCommitJsonAttempt(
-            fallback_reason=f"invalid output: {exc}",
-            adapter_phase_timings=adapter_phase_timings,
-        )
-    except (RuntimeError, OSError):
-        # Rust failures cannot be treated as successful alternate routes.
-        raise
-    except Exception as exc:  # noqa: BLE001 - optional accelerator must fall back.
-        logger.debug("Rust core certified commit JSON failed: %s", exc, exc_info=True)
-        return RustCoreCommitJsonAttempt(
-            fallback_reason=f"failed: {exc}",
-            adapter_phase_timings=adapter_phase_timings,
-        )
-
-
-def try_rust_core_working_tree_commit_json(
-    *,
-    repo_path: str | Path,
-    old_ref: str,
-    config: DiffConfig,
-    parallel: bool = False,
-    max_workers: int | None = None,
-    python_parser_backend: str = "native",
-) -> RustCoreCommitJsonAttempt:
-    """Return Rust-certified CommitDiff JSON with Rust-side source collection."""
-    if not rust_core_enabled(config):
-        return RustCoreCommitJsonAttempt(fallback_reason="disabled")
-    if config.diagnostics:
-        return RustCoreCommitJsonAttempt(
-            fallback_reason="diagnostics require Python pipeline"
-        )
-
-    adapter_phase_timings: list[dict[str, Any]] = []
-
-    def _record_adapter_phase(
-        name: str, started: float, *, summary_exclude: bool = False
-    ) -> None:
-        phase = {
-            "name": name,
-            "duration_ms": round((time.perf_counter() - started) * 1000, 3),
-            "shared": True,
-        }
-        if summary_exclude:
-            phase["summary_exclude"] = True
-        adapter_phase_timings.append(phase)
-
-    try:
-        backend = _load_backend()
-    except (RuntimeError, OSError):
-        # Missing Rust runtime is not an explicit Rust decline.
-        raise
-    except Exception as exc:  # noqa: BLE001 - optional accelerator must fall back.
-        logger.debug("Rust core unavailable: %s", exc)
-        return RustCoreCommitJsonAttempt(fallback_reason=f"unavailable: {exc}")
-
-    try:
-        backend_version = str(getattr(backend, "version", lambda: "")())
-        entrypoint = getattr(backend, "diff_working_tree_python_commit_json", None)
-        if not callable(entrypoint):
-            return RustCoreCommitJsonAttempt(
-                fallback_reason="backend does not expose diff_working_tree_python_commit_json",
-                backend_version=backend_version,
-            )
-
-        phase_started = time.perf_counter()
-        request = {
-            "schema_version": 1,
-            "mode": "working_tree_commit_json",
-            "repo_path": str(repo_path),
-            "old_ref": old_ref,
-            "new_ref": "",
-            "python_parser_backend": python_parser_backend,
-            "config": config.model_dump(mode="json"),
-            "parallel": parallel,
-            "max_workers": max_workers,
-        }
-        _record_adapter_phase("rust_core_working_tree_request_construction", phase_started)
-        phase_started = time.perf_counter()
-        request_json = json.dumps(request)
-        _record_adapter_phase("rust_core_working_tree_request_json_encode", phase_started)
-        phase_started = time.perf_counter()
-        control_json, commit_payload = entrypoint(request_json)
-        _record_adapter_phase(
-            "rust_core_working_tree_pyo3_call",
-            phase_started,
-            summary_exclude=True,
-        )
-        phase_started = time.perf_counter()
-        control = _decode_native_commit_control(control_json, "working-tree commit")
-        _record_adapter_phase("rust_core_working_tree_control_decode", phase_started)
-
-        phase_started = time.perf_counter()
-        status = str(control.get("status") or "")
-        if status != _COMPLETE_STATUS:
-            reason = str(control.get("reason") or status or "working-tree JSON incomplete")
-            _record_adapter_phase("rust_core_working_tree_control_validation", phase_started)
-            return RustCoreCommitJsonAttempt(
-                control=control,
-                adapter_phase_timings=adapter_phase_timings,
-                backend_version=backend_version,
-                fallback_reason=reason,
-            )
-        commit_json = _require_claimed_complete_commit_bytes(
-            control, commit_payload, "working-tree commit"
-        )
-        _record_adapter_phase("rust_core_working_tree_control_validation", phase_started)
-        phase_started = time.perf_counter()
-        _require_native_commit_diff_json(commit_json, "working-tree commit")
-        _record_adapter_phase("rust_core_working_tree_pydantic_validation", phase_started)
-        return RustCoreCommitJsonAttempt(
-            control=control,
-            commit_diff_json=commit_json,
-            adapter_phase_timings=adapter_phase_timings,
-            backend_version=backend_version,
-        )
-    except (_InvalidNativeCommitDto, _InvalidNativeCAbiEnvelope, _NativeCAbiOperationFailure):
-        raise
-    except (ValidationError, ValueError, TypeError) as exc:
-        logger.debug("Rust core working-tree commit JSON rejected: %s", exc)
-        return RustCoreCommitJsonAttempt(
-            fallback_reason=f"invalid output: {exc}",
-            adapter_phase_timings=adapter_phase_timings,
-        )
-    except (RuntimeError, OSError):
-        # Rust failures cannot be treated as successful alternate routes.
-        raise
-    except Exception as exc:  # noqa: BLE001 - optional accelerator must fall back.
-        logger.debug("Rust core working-tree commit JSON failed: %s", exc, exc_info=True)
-        return RustCoreCommitJsonAttempt(
-            fallback_reason=f"failed: {exc}",
-            adapter_phase_timings=adapter_phase_timings,
-        )
-
-
-def run_rust_core_candidate_batch(
-    *,
-    files: list[dict[str, Any]],
-    config: DiffConfig,
-    python_parser_backend: str = "wasm",
-) -> RustCoreCandidateBatchAttempt:
-    """Run the internal V4-A candidate lane without making it product-visible."""
-    if not rust_core_enabled(config):
-        return RustCoreCandidateBatchAttempt(fallback_reason="disabled")
-
-    try:
-        backend = _load_backend()
-    except Exception as exc:  # noqa: BLE001 - optional benchmark lane records failures.
-        logger.debug("Rust core unavailable for candidate batch: %s", exc)
-        return RustCoreCandidateBatchAttempt(fallback_reason=f"unavailable: {exc}")
-
-    try:
-        backend_version = str(getattr(backend, "version", lambda: "")())
-        diff_batch = getattr(backend, "diff_batch", None)
-        if not callable(diff_batch):
-            return RustCoreCandidateBatchAttempt(
-                fallback_reason="backend does not expose diff_batch",
-                backend_version=backend_version,
-            )
-        request = {
-            "schema_version": 1,
-            "mode": "candidate_batch",
-            "candidate": True,
-            "python_parser_backend": python_parser_backend,
-            "config": config.model_dump(mode="json"),
-            "files": files,
-        }
-        data = _load_tree_payload(diff_batch(json.dumps(request)))
-        engine = str(data.get("engine") or "")
-        if engine != _BATCH_ENGINE:
-            return RustCoreCandidateBatchAttempt(
-                fallback_reason=f"unexpected engine: {engine or '<missing>'}",
-                backend_version=backend_version,
-            )
-        for item in data.get("diffs") or []:
-            if not isinstance(item, dict):
-                continue
-            candidate_diff = item.get("candidate_diff")
-            if candidate_diff is not None:
-                SemanticDiff.model_validate(candidate_diff)
-        return RustCoreCandidateBatchAttempt(
-            payload=data if isinstance(data, dict) else None,
-            backend_version=backend_version,
-        )
-    except (ValidationError, ValueError, TypeError) as exc:
-        logger.debug("Rust core candidate output rejected: %s", exc)
-        return RustCoreCandidateBatchAttempt(
-            fallback_reason=f"invalid output: {exc}",
-            backend_version=locals().get("backend_version", ""),
-        )
-    except Exception as exc:  # noqa: BLE001 - benchmark lane must report failures.
-        logger.debug("Rust core candidate batch failed: %s", exc, exc_info=True)
-        return RustCoreCandidateBatchAttempt(
-            fallback_reason=f"failed: {exc}",
-            backend_version=locals().get("backend_version", ""),
-        )
 
 
 def _load_tree_payload(payload: Any) -> dict[str, Any]:

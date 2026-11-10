@@ -38,7 +38,6 @@ except ModuleNotFoundError:  # pragma: no cover - exercised only in minimal dev 
 from rich import box
 from rich.console import Console
 from rich.panel import Panel
-from rich.table import Table
 from rich.text import Text
 
 from intentumdiff import (

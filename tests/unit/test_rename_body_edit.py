@@ -167,13 +167,29 @@ def test_extraction_declines_binding_or_definition_side_effects(differ, old, new
     assert not any(c.refactoring_kind == "EXTRACT_FUNCTION" for c in diff.changes)
 
 
+def _core_apply_invariances(changes, *, old_tree, new_tree, old_source, new_source, language):
+    """Call core's apply_invariances op directly over the C ABI (no Python adapter)."""
+    import json
+
+    from intentumdiff.rust_core import _load_backend
+
+    return json.loads(_load_backend().apply_invariances_json(json.dumps({
+        "mode": "apply",
+        "changes": [change.model_dump(mode="json") for change in changes],
+        "old_tree": old_tree.model_dump(mode="json"),
+        "new_tree": new_tree.model_dump(mode="json"),
+        "old_source": old_source,
+        "new_source": new_source,
+        "language": language,
+    })))
+
+
 @pytest.mark.parametrize("before,after,equivalent", [
     ("1", "0x1", True), ("1_000", "1000", True),
     ("50", "75", False), ("9007199254740992", "9007199254740993", False),
 ])
 def test_rust_literal_equivalence_against_exact_integer_expectations(before, after, equivalent):
     # Rust alone owns canonical integer semantics; deleted Python evaluators stay absent.
-    from intentumdiff.rust_core import apply_invariances as rust_apply
     from intentumdiff.core.models import Change, NodePosition, SemanticNode
 
     def node(value):
@@ -184,10 +200,10 @@ def test_rust_literal_equivalence_against_exact_integer_expectations(before, aft
     old, new = node(before), node(after)
     change = Change(change_type="MODIFICATION", old_node=old, new_node=new,
                     confidence=1, description="Integer edit")
-    result = rust_apply([change], old_tree=old, new_tree=new,
+    result = _core_apply_invariances([change], old_tree=old, new_tree=new,
                         old_source=before, new_source=after, language="python")
-    assert bool(result.changes) is not equivalent
-    assert bool(result.change_groups) is equivalent
+    assert bool(result["changes"]) is not equivalent
+    assert bool(result["change_groups"]) is equivalent
 
 
 @pytest.mark.parametrize("extension,language,parameter", [

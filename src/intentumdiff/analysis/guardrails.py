@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -12,7 +11,6 @@ from intentumdiff.analysis.diagnostics import DiagnosticsRecorder
 from intentumdiff.core.models import (
     DiffConfig,
     GuardrailSeverity,
-    GuardrailViolation,
     SemanticDiff,
     SemanticNode,
 )
@@ -195,68 +193,6 @@ def apply_guardrails_to_diff(
             )
 
     return result
-
-
-def _evaluate_policy_rules(
-    diff: SemanticDiff,
-    old_tree: SemanticNode,
-    new_tree: SemanticNode,
-    rules: Iterable[ProtectedRule],
-) -> list[GuardrailViolation]:
-    """Rust-authoritative (#91 A1.3b): rule matching + violation construction run in
-    the Rust core (``evaluate_guardrail_rules_json``), which reuses the same
-    semantic-path derivation. Python marshals the parsed policy + the diff's
-    changed-node ids in and rebuilds GuardrailViolation objects out; the Python
-    matching mirror (rule loop, ``_semantic_paths``, ``_node_value_summary``,
-    ``_file_matches``) was deleted. Engine failures raise; only a successful empty result means no violations.
-    """
-    from intentumdiff.rust_core import try_rust_evaluate_guardrail_rules
-
-    request = {
-        "language": diff.language,
-        "old_filename": diff.old_filename,
-        "new_filename": diff.new_filename,
-        "old_tree": json.loads(old_tree.model_dump_json()),
-        "new_tree": json.loads(new_tree.model_dump_json()),
-        "changes": [
-            {
-                "old_node_id": change.old_node.id if change.old_node is not None else None,
-                "new_node_id": change.new_node.id if change.new_node is not None else None,
-            }
-            for change in diff.changes
-        ],
-        "rules": [
-            {
-                "rule_id": rule.rule_id,
-                "severity": rule.severity.value,
-                "language": rule.language,
-                "path": rule.path,
-                "message": rule.message,
-                "files": list(rule.files),
-            }
-            for rule in rules
-        ],
-    }
-    violations = try_rust_evaluate_guardrail_rules(request)
-    if not violations:
-        return []
-    return [
-        GuardrailViolation(
-            rule_id=item["rule_id"],
-            severity=GuardrailSeverity(item["severity"]),
-            file=item["file"],
-            language=item["language"],
-            semantic_path=item["semantic_path"],
-            node_type=item.get("node_type", ""),
-            old_node_id=item.get("old_node_id"),
-            new_node_id=item.get("new_node_id"),
-            position=item.get("position"),
-            old_value=item.get("old_value", ""),
-            new_value=item.get("new_value", ""),
-            message=item.get("message", ""),
-        )
-        for item in violations
-    ]
 
 
 def _is_policy_file(filename: str | None) -> bool:

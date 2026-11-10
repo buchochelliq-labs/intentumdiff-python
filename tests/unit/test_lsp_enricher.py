@@ -10,7 +10,17 @@ import pytest
 
 from intentumdiff.core.models import NodePosition, SemanticNode
 from intentumdiff.lsp.enricher import TypeEnricher
-from intentumdiff.rust_core import try_rust_collect_hover_targets
+from intentumdiff import rust_core
+
+
+def try_rust_collect_hover_targets(root: SemanticNode) -> list[tuple[str, int, int]]:
+    # The byte-position hover-target op is exercised directly over the C ABI; production
+    # uses the UTF-16 variant (collect_lsp_hover_targets).
+    return rust_core._hover_target_dtos(
+        rust_core._required_engine_json(
+            "lsp_collect_hover_targets_json", root.model_dump_json(), result_type=list
+        )
+    )
 from intentumdiff.lsp.exceptions import LspConnectionError, LspTimeoutError
 
 
@@ -190,7 +200,6 @@ def test_rust_hover_target_collection_matches_known_expectations() -> None:
     (excluded), declarations/parameters (first-name-leaf position under the DECL id),
     a declaration without a name leaf (skipped), a non-leaf name type (skipped), and
     duplicate ids (first pre-order occurrence wins)."""
-    from intentumdiff.rust_core import try_rust_collect_hover_targets
 
     root = _node(
         "root",
@@ -269,7 +278,6 @@ def test_source_judged_hover_corpus():
     import os
     from pathlib import Path
     import subprocess
-    from intentumdiff.rust_core import try_rust_collect_hover_targets
     cases = json.loads((Path(__file__).parents[1] / "fixtures/hover_targets.json").read_text(encoding="utf-8"))
     for case in cases:
         targets = try_rust_collect_hover_targets(SemanticNode.model_validate(case["tree"]))

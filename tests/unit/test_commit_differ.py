@@ -10,9 +10,7 @@ mocked so the tests run without a real repository.
 
 from __future__ import annotations
 
-import json
 import os
-import subprocess
 import threading
 import time
 from contextlib import contextmanager
@@ -35,7 +33,7 @@ from intentumdiff.core.models import (
 )
 from intentumdiff.differ import SemanticDiffer
 from intentumdiff.plugins.exceptions import PluginFuelExhausted
-from intentumdiff.rust_core import RustCoreBatchDiffsAttempt, RustCoreCommitJsonAttempt
+from intentumdiff.rust_core import RustCoreBatchDiffsAttempt
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -118,17 +116,8 @@ class TestConstruction:
 class TestSemanticDifferParallelCommit:
     @contextmanager
     def _patch_sources(self, changed_files: list[tuple]):
-        # Neutralise BOTH source collectors. The certified working-tree path tries
-        # collect_working_tree_python_sources_fast first; since #98/A2.4.3 that shells
-        # git directly (no longer via the mocked git.Repo), so it must be patched to
-        # None to fall back to the mocked iter_changed_sources — otherwise it runs real
-        # git against the test's cwd.
         with (
             patch("intentumdiff.vcs.git_cli.resolve_repo_root", return_value=str(Path.cwd())),
-            patch(
-                "intentumdiff.sources.git_source.collect_working_tree_python_sources_fast",
-                return_value=None,
-            ),
             patch(
                 "intentumdiff.sources.git_source.iter_changed_sources",
                 return_value=iter(changed_files),
@@ -558,198 +547,6 @@ class TestSemanticDifferParallelCommit:
             results = differ.diff_commit(".")
 
         assert [result.staging_status for result in results] == ["staged", None]
-
-    def test_certified_commit_json_collects_python_batch_without_model_conversion(self):
-        differ = SemanticDiffer(DiffConfig(experimental_rust_core=True))
-        changed_files = [
-            ("old a", "new a", "a.py", "a.py", "staged"),
-            ("old b", "new b", "b.py", "b.py", None),
-        ]
-        commit_bytes = json.dumps(
-            {
-                "old_ref": "HEAD",
-                "new_ref": "",
-                "guardrail_violations": [],
-                "file_diffs": [
-                    _semantic_diff("a.py", "a.py").model_dump(mode="json"),
-                    _semantic_diff("b.py", "b.py").model_dump(mode="json"),
-                ],
-                "cross_file_changes": [],
-                "parse_errors": [],
-            }
-        ).encode("utf-8")
-        calls: list[dict[str, Any]] = []
-
-        def fake_commit_json(**kwargs):
-            calls.append(kwargs)
-            return RustCoreCommitJsonAttempt(
-                control={"status": "complete", "certification": "python_native_v4kb"},
-                commit_diff_json=commit_bytes,
-                adapter_phase_timings=[
-                    {
-                        "name": "rust_core_commit_pyo3_call",
-                        "duration_ms": 3.0,
-                        "shared": True,
-                        "summary_exclude": True,
-                    }
-                ],
-                backend_version="0.4.0",
-            )
-
-        repo_patch, sources_patch = self._patch_git_inputs(changed_files)
-        with (
-            repo_patch,
-            sources_patch,
-            patch(
-                "intentumdiff.plugins.builtins.python_parser_entry",
-                return_value="python_parser.wasm",
-            ),
-            patch(
-                "intentumdiff.differ.try_rust_core_working_tree_commit_json",
-                return_value=RustCoreCommitJsonAttempt(fallback_reason="unavailable: test"),
-            ),
-            patch(
-                "intentumdiff.differ.try_rust_core_commit_json",
-                side_effect=fake_commit_json,
-            ),
-        ):
-            attempt = differ._diff_commit_certified_json(".")
-
-        assert attempt.used is True
-        assert attempt.commit_diff_json == commit_bytes
-        assert calls[0]["old_ref"] == "HEAD"
-        assert calls[0]["new_ref"] == ""
-        assert calls[0]["parallel"] is True
-        assert calls[0]["max_workers"] == min(os.cpu_count() or 1, 2)
-        assert [file["staging_status"] for file in calls[0]["files"][:1]] == ["staged"]
-        assert calls[0]["files"][0]["parser_plugin_id"] == "python"
-        phase_names = [phase["name"] for phase in attempt.adapter_phase_timings]
-        assert phase_names[0] == "source_collection"
-        assert "rust_core_commit_source_filtering" in phase_names
-        assert "rust_core_commit_pyo3_call" in phase_names
-        assert attempt.control["source_collection_ms"] >= 0
-        assert attempt.control["source_filter_ms"] >= 0
-
-    def test_certified_commit_json_falls_back_for_mixed_languages_without_backend_call(
-        self, monkeypatch
-    ):
-        # This asserts the NON-strict decline-return contract (the certified-JSON fast
-        # path returns a fallback attempt for a mixed-language batch so the caller can
-        # re-run natively). Under the RUST_ONLY gate the same decline instead RAISES —
-        # that strict behaviour is covered by
-        # test_certified_commit_json_strict_rust_gate_blocks_unavailable_backend_fallback —
-        # so pin this test to the non-strict mode regardless of the ambient suite env.
-        from intentumdiff.differ import STRICT_RUST_GATE_ENV
-
-        monkeypatch.delenv(STRICT_RUST_GATE_ENV, raising=False)
-        differ = SemanticDiffer(DiffConfig(experimental_rust_core=True))
-        changed_files = [
-            ("old a", "new a", "a.py", "a.py", None),
-            ("old go", "new go", "main.go", "main.go", None),
-        ]
-
-        def fail_commit_json(**kwargs):
-            raise AssertionError("mixed-language commit should not reach Rust JSON fast path")
-
-        repo_patch, sources_patch = self._patch_git_inputs(changed_files)
-        with (
-            repo_patch,
-            sources_patch,
-            patch(
-                "intentumdiff.plugins.builtins.python_parser_entry",
-                return_value="python_parser.wasm",
-            ),
-            patch(
-                "intentumdiff.differ.try_rust_core_working_tree_commit_json",
-                return_value=RustCoreCommitJsonAttempt(fallback_reason="unavailable: test"),
-            ),
-            patch(
-                "intentumdiff.differ.try_rust_core_commit_json",
-                side_effect=fail_commit_json,
-            ),
-        ):
-            attempt = differ._diff_commit_certified_json(".")
-
-        assert attempt.used is False
-        assert attempt.fallback_reason == (
-            "certified commit JSON requires all changed files to be Python"
-        )
-
-    def test_certified_commit_json_strict_rust_gate_blocks_python_batch_skip(self, monkeypatch):
-        from intentumdiff.differ import STRICT_RUST_GATE_ENV
-
-        monkeypatch.setenv(STRICT_RUST_GATE_ENV, "1")
-        differ = SemanticDiffer(
-            DiffConfig(experimental_rust_core=True, extra_grammars={"python": "custom.py"})
-        )
-
-        with pytest.raises(
-            RuntimeError,
-            match=(
-                r"Rust-only engine gate prevented fallback: "
-                "custom Python grammar requires Python pipeline"
-            ),
-        ):
-            differ._diff_commit_certified_json(".")
-
-    def test_certified_commit_json_strict_rust_gate_blocks_working_tree_fallback(self, monkeypatch):
-        from intentumdiff.differ import STRICT_RUST_GATE_ENV
-
-        monkeypatch.setenv(STRICT_RUST_GATE_ENV, "1")
-        differ = SemanticDiffer(DiffConfig(experimental_rust_core=True))
-
-        with (
-            patch(
-                "intentumdiff.differ.try_rust_core_working_tree_commit_json",
-                return_value=RustCoreCommitJsonAttempt(fallback_reason="backend unavailable"),
-            ),
-            pytest.raises(
-                RuntimeError,
-                match=r"Rust-only engine gate prevented fallback: backend unavailable",
-            ),
-        ):
-            differ._diff_commit_certified_json(".")
-
-    def test_certified_commit_json_strict_rust_gate_blocks_unavailable_backend_fallback(
-        self, monkeypatch
-    ):
-        from intentumdiff.differ import STRICT_RUST_GATE_ENV
-
-        monkeypatch.setenv(STRICT_RUST_GATE_ENV, "1")
-        differ = SemanticDiffer(DiffConfig(experimental_rust_core=True))
-
-        with (
-            patch(
-                "intentumdiff.differ.try_rust_core_working_tree_commit_json",
-                return_value=RustCoreCommitJsonAttempt(fallback_reason="unavailable: test"),
-            ),
-            patch(
-                "intentumdiff.plugins.builtins.python_parser_entry",
-                return_value="python_parser.wasm",
-            ),
-            patch(
-                "intentumdiff.sources.git_source.iter_changed_sources",
-                return_value=iter(
-                    [
-                        ("old a", "new a", "a.py", "a.py", None),
-                        ("old b", "new b", "main.go", "main.go", None),
-                    ]
-                ),
-            ),
-            patch(
-                "intentumdiff.sources.git_source.collect_working_tree_python_sources_fast",
-                return_value=None,
-            ),
-            pytest.raises(
-                RuntimeError,
-                match=(
-                    r"Rust-only engine gate prevented fallback: "
-                    "certified commit JSON requires all changed files to be Python"
-                ),
-            ),
-        ):
-            differ._diff_commit_certified_json(".")
-
 
 class TestDiffCommit:
     def _make_differ(self) -> CommitDiffer:

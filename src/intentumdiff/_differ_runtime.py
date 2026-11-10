@@ -72,7 +72,6 @@ class _PhaseProfiler:
         }
 
 
-_DEFAULT_PLUGIN_FUEL = 100_000_000
 _EXPLICIT_FUEL_EXHAUSTION_TEST_CAP = 1_000_000
 # Hotspot thresholds are calibrated to the measured worst legitimate parser plus ~30%
 # headroom. Two effects moved the floor in 2026-07: literal-container text capture in the

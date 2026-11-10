@@ -30,7 +30,6 @@ except ImportError:
 from intentumdiff.core.models import DiffConfig
 from intentumdiff.differ import SemanticDiffer
 from intentumdiff.lsp_server._codelens import semantic_diff_to_codelens
-from intentumdiff.lsp_server._diagnostics import semantic_diff_to_diagnostics
 from intentumdiff.lsp_server._handlers import (
     _ServerState,
     _do_diff,

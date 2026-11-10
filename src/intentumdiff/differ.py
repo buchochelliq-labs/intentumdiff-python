@@ -41,9 +41,6 @@ from intentumdiff._differ_gate import (
     RUST_CERTIFIED_LANGUAGES as RUST_CERTIFIED_LANGUAGES,
 )
 from intentumdiff._differ_gate import (
-    RUST_FINALIZE_LANGUAGES as RUST_FINALIZE_LANGUAGES,
-)
-from intentumdiff._differ_gate import (
     STRICT_RUST_GATE_ENV as STRICT_RUST_GATE_ENV,
 )
 from intentumdiff._differ_gate import (
@@ -59,13 +56,7 @@ from intentumdiff._differ_gate import (
     _rust_finalize_languages as _rust_finalize_languages,
 )
 from intentumdiff._differ_gate import (
-    _strict_rust_only_enabled as _strict_rust_only_enabled,
-)
-from intentumdiff._differ_gate import (
     _validate_git_ref as _validate_git_ref,
-)
-from intentumdiff._differ_presentation import (
-    _count_cst_nodes as _count_cst_nodes,
 )
 from intentumdiff._differ_presentation import (
     _count_semantic_nodes as _count_semantic_nodes,
@@ -80,37 +71,13 @@ from intentumdiff._differ_presentation import (
     _has_error_node as _has_error_node,
 )
 from intentumdiff._differ_presentation import (
-    _markdown_section_heading_rename_presentation as _markdown_section_heading_rename_presentation,
-)
-from intentumdiff._differ_presentation import (
-    _markdown_section_move_presentation as _markdown_section_move_presentation,
-)
-from intentumdiff._differ_presentation import (
-    _node_to_dict as _node_to_dict,
-)
-from intentumdiff._differ_presentation import (
-    _root_structural_hash as _root_structural_hash,
-)
-from intentumdiff._differ_presentation import (
     _token_fallback_diff as _token_fallback_diff,
 )
 from intentumdiff._differ_presentation import (
     _validate_tree_ids as _validate_tree_ids,
 )
 from intentumdiff._differ_runtime import (
-    _DEFAULT_PLUGIN_FUEL as _DEFAULT_PLUGIN_FUEL,
-)
-from intentumdiff._differ_runtime import (
-    _EXPLICIT_FUEL_EXHAUSTION_TEST_CAP as _EXPLICIT_FUEL_EXHAUSTION_TEST_CAP,
-)
-from intentumdiff._differ_runtime import (
     _FUEL_HOTSPOT_ABSOLUTE as _FUEL_HOTSPOT_ABSOLUTE,
-)
-from intentumdiff._differ_runtime import (
-    _FUEL_HOTSPOT_PER_KB as _FUEL_HOTSPOT_PER_KB,
-)
-from intentumdiff._differ_runtime import (
-    _FUEL_HOTSPOT_PER_LINE as _FUEL_HOTSPOT_PER_LINE,
 )
 from intentumdiff._differ_runtime import (
     _apply_file_lifecycle_to_diff as _apply_file_lifecycle_to_diff,
@@ -126,9 +93,6 @@ from intentumdiff._differ_runtime import (
 )
 from intentumdiff._differ_runtime import (
     _fuel_budget as _fuel_budget,
-)
-from intentumdiff._differ_runtime import (
-    _fuel_hotspot_for_call as _fuel_hotspot_for_call,
 )
 from intentumdiff._differ_runtime import (
     _infer_file_lifecycle as _infer_file_lifecycle,
@@ -155,7 +119,6 @@ from intentumdiff.analysis.guardrails import (
 # resource) are now Rust-authoritative — no Python enricher on the diff path (#90).
 from intentumdiff.analysis.schema_resolver import (
     resolve_schema,
-    schema_cache_fingerprint,
     schema_resolution_metadata,
 )
 from intentumdiff.analysis.user_schemas import (
@@ -165,7 +128,6 @@ from intentumdiff.analysis.user_schemas import (
 from intentumdiff.cache.store import CacheStore
 from intentumdiff.core.models import (
     Change,
-    ChangeGroupKind,
     ChangeStreamEvent,
     ChangeStreamPhase,
     ChangeType,
@@ -181,16 +143,12 @@ from intentumdiff.plugins.exceptions import (
     PluginNotFoundError,
     PluginOutputError,
 )
-from intentumdiff.plugins.loader import _strip_trivia_impl
 from intentumdiff.plugins.registry import PluginRegistry
 from intentumdiff.rust_core import (
-    RustCoreCommitJsonAttempt,
     enrich_node_facts,
     try_register_user_xml_dialects,
     try_rust_core_batch_diff,
     try_rust_core_batch_diffs,
-    try_rust_core_commit_json,
-    try_rust_core_working_tree_commit_json,
     try_rust_profile_label_enrichment,
 )
 from intentumdiff.sources.base import Source
@@ -397,14 +355,6 @@ class SemanticDiffer:
             return "enrichers require Python pipeline"
         if self._registry.get_diff_analyzers("python"):
             return "diff analyzers require Python pipeline"
-        return None
-
-    @staticmethod
-    def _rust_core_parallel_workers(parallel: int | bool) -> int | None:
-        if parallel is True:
-            return os.cpu_count() or 1
-        if isinstance(parallel, int) and parallel > 0:
-            return parallel
         return None
 
     @staticmethod
@@ -643,137 +593,6 @@ class SemanticDiffer:
         adaptive_fuel = _fuel_budget(self._config.plugin_fuel, 20_000_000 + len(diff_json) * 100)
         return renderer.render(diff_json, fuel=adaptive_fuel)
 
-    def _diff_commit_certified_json(
-        self,
-        repo_path: str | os.PathLike[str] = ".",
-        old_ref: str = "HEAD",
-        new_ref: str = "",
-    ) -> RustCoreCommitJsonAttempt:
-        """Return Rust-certified CommitDiff JSON bytes for narrow Python batches."""
-        _validate_git_ref(old_ref)
-        _validate_git_ref(new_ref)
-        rust_batch_skip_reason = self._rust_core_python_batch_skip_reason()
-        if rust_batch_skip_reason is not None:
-            _raise_rust_only_gate_error(rust_batch_skip_reason)
-            return RustCoreCommitJsonAttempt(fallback_reason=rust_batch_skip_reason)
-
-        if not new_ref:
-            rust_batch_parallel, rust_batch_workers, _rust_batch_parallel_auto = (
-                True,
-                self._rust_core_parallel_workers(self._config.parallel),
-                True,
-            )
-            working_tree_attempt = try_rust_core_working_tree_commit_json(
-                repo_path=repo_path,
-                old_ref=old_ref,
-                config=self._config,
-                parallel=rust_batch_parallel,
-                max_workers=rust_batch_workers,
-            )
-            if working_tree_attempt.used:
-                return working_tree_attempt
-            if working_tree_attempt.fallback_reason and not (
-                "does not expose diff_working_tree_python_commit_json"
-                in working_tree_attempt.fallback_reason
-                or working_tree_attempt.fallback_reason.startswith("unavailable:")
-            ):
-                _raise_rust_only_gate_error(working_tree_attempt.fallback_reason)
-                return working_tree_attempt
-
-        from intentumdiff.plugins.builtins import python_parser_entry
-        from intentumdiff.sources.git_source import (
-            collect_working_tree_python_sources_fast,
-            iter_changed_sources,
-        )
-
-        source_started = time.perf_counter()
-        fast_collection = (
-            collect_working_tree_python_sources_fast(repo_path, old_ref) if not new_ref else None
-        )
-        if fast_collection is None:
-            sources = list(iter_changed_sources(repo_path, old_ref, new_ref))
-            fast_fallback_reason = None
-        else:
-            sources, fast_fallback_reason = fast_collection
-        source_collection_ms = (time.perf_counter() - source_started) * 1000
-        if fast_fallback_reason is not None:
-            _raise_rust_only_gate_error(fast_fallback_reason)
-            return RustCoreCommitJsonAttempt(fallback_reason=fast_fallback_reason)
-        if not sources:
-            return RustCoreCommitJsonAttempt()
-
-        parser_wasm_path = python_parser_entry()
-        request_files: list[dict[str, Any]] = []
-        source_filter_started = time.perf_counter()
-        for old_content, new_content, old_path, new_path, staging_status in sources:
-            effective_new_path = new_path if new_path is not None else old_path
-            file_lifecycle = _infer_file_lifecycle(old_content, new_content, staging_status)
-            old_path_lower = old_path.lower()
-            effective_new_path_lower = effective_new_path.lower()
-            if not (
-                old_path_lower.endswith((".py", ".pyi"))
-                or effective_new_path_lower.endswith((".py", ".pyi"))
-            ):
-                fallback_attempt = RustCoreCommitJsonAttempt(
-                    fallback_reason="certified commit JSON requires all changed files to be Python"
-                )
-                _raise_rust_only_gate_error(fallback_attempt.fallback_reason)
-                return fallback_attempt
-            # Protected guardrail rules currently apply only to config/profile
-            # languages, not Python.  Avoid a per-file policy search here; any
-            # actual policy-file change is excluded by the Python-only gate.
-            request_file: dict[str, Any] = {
-                "old_source": old_content,
-                "new_source": new_content,
-                "old_filename": old_path,
-                "new_filename": effective_new_path,
-                "language": "python",
-                "parser_plugin_id": "python",
-                "parser_wasm_path": parser_wasm_path,
-                "file_lifecycle": file_lifecycle,
-            }
-            if staging_status is not None:
-                request_file["staging_status"] = staging_status
-            request_files.append(request_file)
-        source_filter_ms = (time.perf_counter() - source_filter_started) * 1000
-
-        rust_batch_parallel, rust_batch_workers, _rust_batch_parallel_auto = (
-            self._rust_core_batch_parallel_plan(len(request_files), self._config.parallel)
-        )
-        attempt = try_rust_core_commit_json(
-            files=request_files,
-            old_ref=old_ref,
-            new_ref=new_ref,
-            config=self._config,
-            parallel=rust_batch_parallel,
-            max_workers=rust_batch_workers,
-        )
-        if not attempt.used:
-            _raise_rust_only_gate_error(attempt.fallback_reason)
-            return attempt
-        adapter_phase_timings = [
-            {
-                "name": "source_collection",
-                "duration_ms": round(source_collection_ms, 3),
-                "shared": True,
-            },
-            {
-                "name": "rust_core_commit_source_filtering",
-                "duration_ms": round(source_filter_ms, 3),
-                "shared": True,
-            },
-            *attempt.adapter_phase_timings,
-        ]
-        control = dict(attempt.control)
-        control["source_collection_ms"] = round(source_collection_ms, 3)
-        control["source_filter_ms"] = round(source_filter_ms, 3)
-        return RustCoreCommitJsonAttempt(
-            control=control,
-            commit_diff_json=attempt.commit_diff_json,
-            adapter_phase_timings=adapter_phase_timings,
-            backend_version=attempt.backend_version,
-        )
-
     def diff_commit(
         self,
         repo_path: str | os.PathLike[str] = ".",
@@ -814,7 +633,6 @@ class SemanticDiffer:
         sources = list(iter_changed_sources(policy_root, old_ref, new_ref))
         source_collection_ms = (time.perf_counter() - source_started) * 1000
         rust_batch_results: dict[int, SemanticDiff] = {}
-        rust_batch_attempted: set[int] = set()
         rust_batch_skip_reason = self._rust_core_python_batch_skip_reason()
         if rust_batch_skip_reason is None and sources:
             from intentumdiff.plugins.builtins import python_parser_entry
@@ -860,7 +678,6 @@ class SemanticDiffer:
                 time.perf_counter() - rust_batch_source_filter_started
             ) * 1000
             if request_files:
-                rust_batch_attempted = set(request_to_source_index)
                 (
                     rust_batch_parallel,
                     rust_batch_workers,
@@ -1223,10 +1040,6 @@ class SemanticDiffer:
             _dialects = user_xml_dialects_payload(_user_profiles)
             # Empty configuration must clear previously registered native dialects.
             try_register_user_xml_dialects(_dialects)
-        schema_fingerprint = schema_cache_fingerprint(schema_resolution)
-        cache_schema_suffix = (
-            "" if schema_fingerprint == "schema:none" else f"|{schema_fingerprint}"
-        )
         schema_metadata = schema_resolution_metadata(schema_resolution)
         if schema_metadata is not None:
             diagnostics.summary["schema"] = schema_metadata
@@ -1251,9 +1064,6 @@ class SemanticDiffer:
                 reason="C/C++ compile database context resolved",
                 metadata=compile_metadata,
             )
-        compile_cache_suffix = (
-            "" if compile_metadata is None else f"|compile:{compile_metadata['fingerprint']}"
-        )
 
         # Both physical sides may carry protection. Display aliases must not
         # hide the source policy on moves out of protected directories (#262).

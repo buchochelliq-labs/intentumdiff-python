@@ -11,7 +11,6 @@ OPERATIONS = [
     ('try_rust_build_symbol_table', 'build_symbol_table_json', ('[]',), '{}'),
     ('try_rust_build_reference_table', 'build_reference_table_json', ('[]',), '{}'),
     ('try_rust_diff_symbol_tables', 'diff_symbol_tables_json', ('{}', '{}'), '[]'),
-    ('try_rust_evaluate_guardrail_rules', 'evaluate_guardrail_rules_json', ({},), '[]'),
 ]
 
 

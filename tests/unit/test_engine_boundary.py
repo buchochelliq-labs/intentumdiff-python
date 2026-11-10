@@ -32,11 +32,8 @@ _KNOWN_PYTHON_ENGINE_DEBT_PATHS = {
     # logic — identity fields are marshaled into the Rust core's keyed matching.
     "src/intentumdiff/analysis/schema_resolver.py",
     "src/intentumdiff/analysis/user_schemas.py",
-    # differ.py's DTO/presentation + telemetry helper families (issue #81 split):
-    # _differ_presentation imports analysis.text_review (line-review presentation assembly;
-    # the review compute itself is Rust — text_review_generic.rs); _differ_runtime imports
+    # differ.py's telemetry helper family (issue #81 split): _differ_runtime imports
     # analysis.diagnostics (the DiagnosticsRecorder telemetry sink).
-    "src/intentumdiff/_differ_presentation.py",
     "src/intentumdiff/_differ_runtime.py",
     # Guardrail orchestration/reporting: the RULE EVALUATION is Rust (A1.3,
     # evaluate_guardrail_rules; rule-language validation is parse_guardrail_policy);
