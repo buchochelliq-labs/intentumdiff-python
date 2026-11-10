@@ -27,22 +27,12 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CORE_REPO = "https://github.com/buchochelliq-labs/intentumdiff-core"
-# Immutable Core #204 NodeFacts-lifecycle parity candidate based on Core #187: metered Wasmtime 48.0.7, verified
-# parser availability, Rust-owned semantic promotions and fail-closed live
-# diff/commit-review completeness and Rust-owned live provenance. Core #204 exact-head Rust CI passed; four-platform Python acceptance must independently pass.
-# Override only for deliberate integration builds, not a moving branch.
-# Core #204 owns physical FileSource filename-scoped guardrail matching (#210) and malformed filename-filter rejection (#211); this exact pin is under fresh CI verification.
-# Core #187 now emits explicit guardrail_violations even for valid empty Rust
-# batch inventories; Python #202 rejects omitted fields rather than defaulting.
-# Core #236 carries operators as leaf nodes (not labels) and #235 keeps Bash assignment
-# identity; together they fix the #232/#233/#234 regressions from the #231 operator fix.
-# Core #238 (#237) also recovers iteration-protocol keywords (for await, for...in/of,
-# async comprehensions) so they are never certified style-only.
-CORE_REF = os.environ.get("INTENTUMDIFF_CORE_REF", "726fd07c77a83d2554d3eca68b6469e9461b87bc")
-# Reviewed registry RC candidate: source-anchored ABAP, Astro, PO, PostScript, Proto, ReasonML, SAS, Svelte, Vue, VB.NET, M/Q#/PHP parser Wasm.
-# Registry PR #13 CI vetted these source-span repairs; every staged byte
-# remains separately verified against its source artifact and SHA-256.
-REGISTRY_REF = "277a297a1088dbefd261dedb264b41b029a5d1a5"
+# Immutable 0.0.3 correctness-foundation candidate (Core #269).
+# Override only for deliberate integration builds, never a moving branch.
+CORE_REF = os.environ.get("INTENTUMDIFF_CORE_REF", "a664800748e5fad1770e14477f395d3aca0439a1")
+# Registry #17 pins the exact successful C/C++ character-literal CI artifact.
+# Each staged component remains separately verified by source commit and SHA-256.
+REGISTRY_REF = "8911328ede24630ad9ea6a33da8ed010f066d3b1"
 
 
 def load_reviewed_registry(get, api: str, org: str):
@@ -155,6 +145,41 @@ def verified_renderer_archive(blob: bytes, pins: dict[str, str]) -> dict[str, by
     if missing:
         raise ValueError(f"renderer-components artifact missing {sorted(missing)}")
     return checked
+
+
+def verified_mirror_component(slug: str, mirror: Path, ref: str | None,
+                              pinned: str | None) -> tuple[str, str, str, bytes, dict] | None:
+    """Return a mirrored parser only when its provenance and bytes match registry pins.
+
+    Published wheels outlive GitHub Actions artifacts. Their embedded provenance
+    preserves the original parser build attribution; the registry remains the root
+    of trust for both source commit and payload checksum.
+    """
+    import hashlib
+    import json
+
+    name = f"{slug.replace('-', '_')}_parser.wasm"
+    if Path(name).name != name or not ref or not pinned:
+        raise RuntimeError(f"invalid mirrored component identity: {slug}")
+    manifest = mirror / "wasm_provenance.json"
+    payload_path = mirror / name
+    if not manifest.is_file() or not payload_path.is_file():
+        return None
+    try:
+        record = json.loads(manifest.read_text())["artifacts"].get(name)
+        source = record["source"]
+        if source.get("commit") != ref:
+            return None
+        if (record.get("sha256") != pinned
+                or source.get("repository") != f"https://github.com/buchochelliq-labs/intentumdiff-{slug}-parser"):
+            raise RuntimeError(f"mirror source/checksum disagrees with registry for {name}")
+        payload = payload_path.read_bytes()
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
+        raise RuntimeError(f"invalid mirror provenance for {name}: {exc}") from exc
+    digest = hashlib.sha256(payload).hexdigest()
+    if digest != pinned:
+        raise RuntimeError(f"mirror checksum mismatch for {name}")
+    return name, ref, digest, payload, dict(source)
 
 
 
@@ -273,7 +298,8 @@ def _successful_artifact_runs(get, api: str, org: str, repo: str, ref: str | Non
     return []
 
 
-def stage_wasm_from_artifacts(token: str, org: str = "buchochelliq-labs") -> int:
+def stage_wasm_from_artifacts(token: str, org: str = "buchochelliq-labs",
+                              mirror_dir: Path | None = None) -> int:
     import hashlib as _hashlib
     import io
     import http.client
@@ -391,6 +417,32 @@ def stage_wasm_from_artifacts(token: str, org: str = "buchochelliq-labs") -> int
             if (not isinstance(ref, str) or len(ref) != 40
                     or any(c not in "0123456789abcdef" for c in ref)):
                 missing.append((name, "registry has no immutable parser source commit"))
+                continue
+            slug = name.removeprefix("intentumdiff-").removesuffix("-parser")
+            mirror_component = (verified_mirror_component(
+                slug, mirror_dir, ref, pins.get(f"{slug.replace('-', '_')}_parser.wasm"),
+            ) if mirror_dir else None)
+            if mirror_component:
+                out, source_ref, digest, payload, mirror_source = mirror_component
+                metadata = (registry.get("plugins") or {}).get(name, {})
+                abi_target = metadata.get("abi_target")
+                if not isinstance(abi_target, str) or not abi_target:
+                    missing.append((name, f"{out} has no registry WIT/ABI target"))
+                    continue
+                if mirror_source.get("commit") != source_ref:
+                    missing.append((name, f"{out} mirror source commit changed during verification"))
+                    continue
+                provenance_sources[out] = {
+                    "repository": mirror_source["repository"],
+                    "commit": source_ref,
+                    "artifact": mirror_source.get("artifact", "parser-wasm"),
+                    "artifact_id": mirror_source.get("artifact_id"),
+                    "artifact_archive_sha256": mirror_source.get("artifact_archive_sha256"),
+                    "abi_target": abi_target,
+                }
+                (WASM_DEST / out).write_bytes(payload)
+                staged += 1
+                print(f"  verified {out} from published-wheel mirror")
                 continue
             wr = _successful_artifact_runs(get, api, org, name, ref)
             if not wr:
@@ -518,13 +570,15 @@ def main() -> None:
     ap.add_argument("--from-parser-artifacts", action="store_true",
                     help="stage components from the parser repos' latest CI artifacts "
                          "(needs GH_TOKEN / GITHUB_TOKEN with read access)")
+    ap.add_argument("--mirror-dir", type=Path,
+                    help="Wasm directory extracted from the published candidate wheel; exact pins are verified")
     args = ap.parse_args()
     stage_core(args.core_dir)
     if args.from_parser_artifacts:
         token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN") or ""
         if not token:
             sys.exit("--from-parser-artifacts needs GH_TOKEN or GITHUB_TOKEN")
-        missing = stage_wasm_from_artifacts(token)
+        missing = stage_wasm_from_artifacts(token, mirror_dir=args.mirror_dir)
         if missing:
             # Fail closed. A partial (or empty) component staging does not surface as a
             # provisioning error later — it surfaces as hundreds of
