@@ -4,23 +4,24 @@ The **thin Python binding** + PyPI package. Zero functional work here.
 
 ## Mandatory preflight
 
-Before doing any work in this repository, read this file and
-`docs/ARCHITECTURE.md`. Before proposing or making a Python change, confirm that
-it stays within the thin-binding boundary below.
+Before doing any work in this repository, read this file, `docs/ARCHITECTURE.md`,
+and `.claude/skills/intentumdiff-python-boundary/SKILL.md`. Before proposing or
+making a Python change, follow the skill and confirm that the change stays within
+the binding boundary.
 
 ## Designer’s architecture rule
 
-Python is only a thin binding over `intentumdiff-core`. Anything beyond the
-minimal binding responsibilities is prohibited in the Python library unless
-the project designer explicitly directs that specific exception.
+Python is only a thin binding over `intentumdiff-core`. The Python library may
+contain only the minimal transport needed to expose core APIs (such as C-ABI
+calls, serialization/DTO marshalling, and error translation). Any behavior
+beyond that boundary is prohibited unless the project designer explicitly
+directs that specific exception.
 
-Python may provide the public API and DTO marshalling, C-ABI transport,
-host I/O, and presentation/orchestration. It must not implement semantic,
-domain, policy, classification, parsing, matching, or fallback behavior.
-Shared behavior and decisions belong in `intentumdiff-core` and must be
-exposed through the core API. If a requested change needs such behavior, change
-or extend core and keep the Python adapter minimal. Never add Python fallback
-logic.
+Semantic, domain, policy, classification, parsing, matching, fallback,
+filesystem, network, or orchestration behavior that is not strictly required
+to invoke the core API belongs in core or another explicitly designated
+component. If core lacks a needed operation, extend core and expose it through
+the binding. Never implement a Python fallback or alternate semantic path.
 
 ## Hard invariants
 
