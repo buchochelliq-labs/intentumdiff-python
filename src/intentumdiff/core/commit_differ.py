@@ -216,8 +216,8 @@ class CommitDiffer:
 
     def finalize_commit_diff(
         self,
-        results: list[FileDiffResult],
-        errors: list[FileDiffError],
+        results: list[FileDiffResult | FileDiffError],
+        errors: list[FileDiffError] | None = None,
         *,
         old_ref: str,
         new_ref: str,
@@ -230,13 +230,17 @@ class CommitDiffer:
         terminal ``CommitDiff``. This is the counterpart to
         :meth:`iter_file_diffs`.
         """
-        changed_file_count = len(results) + len(errors)
+        successful = [item for item in results if isinstance(item, FileDiffResult)]
+        collected_errors = [item for item in results if isinstance(item, FileDiffError)]
+        collected_errors.extend(errors or [])
+        changed_file_count = len(successful) + len(collected_errors)
         return self._finalize_commit_diff(
-            results=results,
-            errors=errors,
+            results=successful,
+            errors=collected_errors,
             changed_file_count=changed_file_count,
             old_ref=old_ref,
             new_ref=new_ref,
+            allow_partial_errors=True,
         )
 
     def _collect_file_diffs(
@@ -302,19 +306,16 @@ class CommitDiffer:
         changed_file_count: int,
         old_ref: str,
         new_ref: str,
+        allow_partial_errors: bool = False,
     ) -> CommitDiff:
         """Assemble the terminal CommitDiff from per-file results + errors."""
         file_diffs = [result.file_diff for result in results]
-        parse_errors = [
-            f"{error.old_path}: {error.reason}"
-            for error in errors
-            if error.kind == "pipeline_error"
-        ]
+        parse_errors = [f"{error.old_path}: {error.reason}" for error in errors]
 
         self._raise_if_all_parsers_failed(
             changed_file_count, file_diffs, parse_errors, file_errors=errors
         )
-        if errors:
+        if errors and not allow_partial_errors:
             details = "; ".join(
                 f"{err.old_path}: {err.kind}: {err.reason}" for err in errors
             )
@@ -322,7 +323,6 @@ class CommitDiffer:
                 f"Commit diff incomplete ({len(errors)} of {changed_file_count} text files failed): "
                 f"{details}"
             )
-
         # Build semantic indexes for changed files only.
         old_file_contents = [
             (result.old_path, result.file_diff.language, result.old_content)
@@ -403,7 +403,7 @@ class CommitDiffer:
         file_errors: list[FileDiffError] | None = None,
     ) -> None:
         """Fail loudly when changed files exist but no parser plugin loaded."""
-        if changed_file_count <= 0 or file_diffs or parse_errors:
+        if changed_file_count <= 0 or file_diffs:
             return
         summary_fn = getattr(self._differ._registry, "parser_load_failure_summary", None)
         if not callable(summary_fn):
