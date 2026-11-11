@@ -119,7 +119,10 @@ def _cmd_git(args: argparse.Namespace) -> None:
     from intentumdiff.sources.git_source import StagedSource, _REF_STAGED, _REF_UNPUSHED
     from intentumdiff.vcs.git_cli import NotAGitRepositoryError
 
-    repo_path = args.repo  # '.' when not supplied
+    if getattr(args, "repo_option", None) is not None and args.repo != ".":
+        _err.print("[red]Name the repository once: --repo or the REPO positional.[/red]")
+        sys.exit(2)
+    repo_path = getattr(args, "repo_option", None) or args.repo  # --repo, REPO or '.' (#317)
 
     # Resolve the effective new_ref from mutually-exclusive scope flags.
     new_ref: str = args.new  # may be "", ":staged", ":unpushed", or an explicit ref
@@ -131,10 +134,8 @@ def _cmd_git(args: argparse.Namespace) -> None:
     # Smart --old default: HEAD for working-tree / scoped modes; HEAD~1 when an
     # explicit commit ref is given for --new so that `intentumdiff git --new HEAD`
     # means "show the last commit" rather than HEAD vs HEAD = no diff.
-    _is_working_tree_mode = not new_ref or new_ref in (_REF_STAGED, _REF_UNPUSHED)
-    old_ref: str = args.old if args.old is not None else (
-        "HEAD" if _is_working_tree_mode else "HEAD~1"
-    )
+    working_tree_mode = not new_ref or new_ref in (_REF_STAGED, _REF_UNPUSHED)
+    old_ref: str = args.old if args.old is not None else ("HEAD" if working_tree_mode else "HEAD~1")
 
     try:
         if args.file:
@@ -231,13 +232,12 @@ def _cmd_git(args: argparse.Namespace) -> None:
             _err.print(f"[red]Repository path not found:[/red] {repo_path}")
             # When the repo path looks like a git ref name (e.g. "main", "HEAD",
             # "new") the user probably typed '-- ref' instead of '--new ref'.
-            if not Path(repo_path).is_absolute():
-                import re as _re
-                if _re.fullmatch(r"[A-Za-z0-9_/.\-]+", repo_path):
-                    _err.print(
-                        f"[yellow]Hint: '{repo_path}' looks like a git ref. "
-                        f"Did you mean [bold]--new {repo_path}[/bold]?[/yellow]"
-                    )
+            import re as _re
+            if not Path(repo_path).is_absolute() and _re.fullmatch(r"[A-Za-z0-9_/.\-]+", repo_path):
+                _err.print(
+                    f"[yellow]Hint: '{repo_path}' looks like a git ref. "
+                    f"Did you mean [bold]--new {repo_path}[/bold]?[/yellow]"
+                )
         else:
             _err.print(
                 f"[red]Not a git repository:[/red] {repo_path!r}  "

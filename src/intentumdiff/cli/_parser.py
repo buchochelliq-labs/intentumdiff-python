@@ -119,19 +119,18 @@ def _build_parser() -> argparse.ArgumentParser:
     git_p = sub.add_parser("git", help="Diff a file between two git commits.")
     git_p.set_defaults(repo=".", file=None)
     git_p.add_argument(
-        "_git_pos", nargs="*", action=_GitPositionalsAction,
-        metavar="[REPO] [FILE]",
-        help="Optional repository root followed by file path. "
-             "Omit FILE to diff all changed files; omit REPO to use current directory.",
+        "_git_pos", nargs="*", action=_GitPositionalsAction, metavar="[[REPO] FILE]",
+        help="FILE to review (one positional), or REPO FILE (two). With no positional every "
+             "changed file is reviewed; use --repo for a repository other than the current one.",
     )
     git_p.add_argument(
-        "--old", default=None, metavar="REF",
-        help=(
-            "Old git ref to compare from. "
-            "Defaults to HEAD when --new is the working tree (default mode) or a scope flag, "
-            "and to HEAD~1 when --new is an explicit commit ref."
-        ),
+        "--repo", dest="repo_option", default=None, metavar="REPO",
+        help="Repository to review (default: current directory); all changed files without FILE.",
     )
+    git_p.add_argument("--old", default=None, metavar="REF", help=(
+        "Old git ref to compare from. "
+        "Defaults to HEAD when --new is the working tree (default mode) or a scope flag, "
+        "and to HEAD~1 when --new is an explicit commit ref."))
     # One new side only: --staged/--unpushed/--new silently overrode each other (#319).
     git_scope = git_p.add_mutually_exclusive_group()
     git_scope.add_argument("--new", default="", metavar="REF", help=(

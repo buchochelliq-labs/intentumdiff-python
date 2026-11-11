@@ -111,3 +111,56 @@ def test_git_scope_selects_the_source(monkeypatch, argv, source, refs) -> None:
     assert name == source
     assert {key: kwargs[key] for key in refs} == refs
     assert kwargs["file_path"] == "f.py"
+
+
+# --- #317: explicit repository for commit-wide review -------------------------------------
+
+
+def _git(cwd, *argv: str) -> None:
+    import subprocess
+
+    subprocess.run(["git", *argv], cwd=cwd, check=True, capture_output=True)
+
+
+def test_git_repo_option_reviews_all_changed_files_from_outside_the_repo(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    import json
+
+    from intentumdiff.cli import main
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    _git(repo, "config", "user.email", "t@example.com")
+    _git(repo, "config", "user.name", "t")
+    (repo / "f.py").write_text("def f():\n    return 1\n", encoding="utf-8")
+    _git(repo, "add", "f.py")
+    _git(repo, "commit", "-q", "-m", "init")
+    (repo / "f.py").write_text("def f():\n    return 2\n", encoding="utf-8")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    monkeypatch.chdir(outside)
+
+    with pytest.raises(SystemExit) as exc_info:
+        main(["--no-banner", "git", "--repo", str(repo), "--json"])
+
+    assert exc_info.value.code in (0, None)
+    payload = json.loads(capsys.readouterr().out)
+    assert [diff["new_filename"] for diff in payload] == ["f.py"]
+    assert payload[0]["has_semantic_changes"] is True
+
+
+def test_git_repo_option_parses_with_and_without_file() -> None:
+    commit_wide = _parse("git", "--repo", "r")
+    assert (commit_wide.repo_option, commit_wide.file) == ("r", None)
+    args = _parse("git", "--repo", "r", "f.py")
+    assert (args.repo_option, args.repo, args.file) == ("r", ".", "f.py")
+
+
+def test_git_repo_given_twice_is_a_usage_error(capsys) -> None:
+    args = _parse("git", "--repo", "a", "b", "f.py")
+    with pytest.raises(SystemExit) as exc_info:
+        args.func(args)
+    assert exc_info.value.code == 2
+    assert "--repo or the REPO positional" in capsys.readouterr().err
