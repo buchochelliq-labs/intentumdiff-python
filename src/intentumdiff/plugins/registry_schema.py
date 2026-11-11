@@ -94,12 +94,12 @@ def _validate_entry(name: str, entry: Any, errors: list[str]) -> None:
     if unknown:
         errors.append(f"{where}: unknown field(s): {', '.join(sorted(unknown))}")
 
-    source = entry.get("source", "git")
-    if source not in _SOURCE_VALUES:
+    source = entry.get("source", "git")  # type-check first: a list/dict is unhashable (#329)
+    if not isinstance(source, str) or source not in _SOURCE_VALUES:
         errors.append(f"{where}.source: {source!r} not in {sorted(_SOURCE_VALUES)}")
 
     trust = entry.get("trust_tier", "official")
-    if trust not in _TRUST_TIERS:
+    if not isinstance(trust, str) or trust not in _TRUST_TIERS:
         errors.append(f"{where}.trust_tier: {trust!r} not in {sorted(_TRUST_TIERS)}")
 
     for str_field in ("ref", "repo", "description", "abi_target", "provenance_manifest_ref"):
@@ -111,9 +111,9 @@ def _validate_entry(name: str, entry: Any, errors: list[str]) -> None:
         errors.append(f"{where}.wasm_checksums: must be a mapping")
     else:
         for fname, digest in checksums.items():
-            if not _WASM_FILE_RE.match(str(fname)):
+            if not _WASM_FILE_RE.fullmatch(str(fname)):
                 errors.append(f"{where}.wasm_checksums: {fname!r} is not a .wasm filename")
-            if not (isinstance(digest, str) and _SHA256_RE.match(digest)):
+            if not (isinstance(digest, str) and _SHA256_RE.fullmatch(digest)):
                 errors.append(f"{where}.wasm_checksums[{fname!r}]: not a lowercase SHA-256 hex")
 
     dep_hashes = entry.get("dep_hashes", {})
@@ -121,9 +121,9 @@ def _validate_entry(name: str, entry: Any, errors: list[str]) -> None:
         errors.append(f"{where}.dep_hashes: must be a mapping")
     else:
         for key, value in dep_hashes.items():
-            if not _DEP_KEY_RE.match(str(key)):
+            if not _DEP_KEY_RE.fullmatch(str(key)):
                 errors.append(f"{where}.dep_hashes: {key!r} is not 'package==version'")
-            if not (isinstance(value, str) and _DEP_HASH_RE.match(value)):
+            if not (isinstance(value, str) and _DEP_HASH_RE.fullmatch(value)):
                 errors.append(f"{where}.dep_hashes[{key!r}]: not 'sha256:<hex>'")
 
     for list_field in ("allowed_dependencies", "capabilities"):
@@ -153,7 +153,7 @@ def validate_registry(data: Any) -> list[str]:
         return errors
 
     for name, entry in plugins.items():
-        if not _NAME_RE.match(str(name)):
+        if not _NAME_RE.fullmatch(str(name)):
             errors.append(f"plugins: {name!r} is not a package-safe plugin name")
         _validate_entry(str(name), entry, errors)
 
