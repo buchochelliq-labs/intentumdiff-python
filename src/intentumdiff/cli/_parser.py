@@ -694,7 +694,7 @@ def _build_parser() -> argparse.ArgumentParser:
         description=(
             "Re-diffs each changed file against its last committed state "
             "(WorkingTreeSource) whenever the file is modified on disk. "
-            "Uses OS-native file-system events (watchdog). "
+            "Uses OS-native file-system events (watchdog). A deleted file is reported, not reviewed. "
             "Press Ctrl+C to stop."
         ),
     )
