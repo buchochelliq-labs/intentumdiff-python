@@ -22,7 +22,7 @@ def build_guardrail_check_result(
     strict: bool,
     metadata: Mapping[str, Any] | None = None,
 ) -> GuardrailCheckResult:
-    """Build a counted, JSON-safe guardrail check result."""
+    """Build a guardrail check result. The gate is the last Python copy of the policy (#296)."""
 
     items = list(violations)
     immutable_count = sum(

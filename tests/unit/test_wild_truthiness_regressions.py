@@ -770,7 +770,7 @@ def test_yaml_block_to_flow_style_is_zero_change(
     Source: difftastic #417, #723.
 
     Root cause: the cataloged ``data.yaml.representation_equivalence`` rule
-    at ``invariances/rules.yaml`` is ``status: catalog, evaluator: null`` —
+    in core's invariance catalogue is ``status: catalog, evaluator: null`` —
     i.e. documented but unimplemented. The ``flow_node`` MODIFICATION
     surfaces on both matchers once the Phase A cascade guard stops hiding
     it. Phase C of the noise-suppression retune implements the evaluator.

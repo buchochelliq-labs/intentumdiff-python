@@ -66,7 +66,7 @@ def _empty_module(filename: str) -> SemanticNode:
 
 
 def _style_only_diff(old: str = "a.py", new: str = "a.py") -> SemanticDiff:
-    return SemanticDiff.style_only(old, new, "python")
+    return SemanticDiff(old_filename=old, new_filename=new, language="python", is_style_only=True)
 
 
 def _semantic_diff(

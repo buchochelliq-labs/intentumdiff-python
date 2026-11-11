@@ -260,9 +260,7 @@ _ALLOWED_OFFENDERS = {
     ("_differ_gate.py", "language_set", "RUST_CERTIFIED_LANGUAGES"),
     # S3: compile-database context is attached only for C/C++ language ids.
     ("analysis/compile_commands.py", "language_set", "compile_commands_metadata"),
-    # Core schema resolution (#297/#307): provider roots keyed by language vocabulary, and
-    # schema/descriptor load failures turned into decline values.
-    ("analysis/user_schemas.py", "language_set", "BUILTIN_PROVIDER_ROOTS"),
+    # Core schema resolution (#307): schema/descriptor load failures turned into decline values.
     ("analysis/user_schemas.py", "except_returns_value", "_load_descriptor_file"),
     ("analysis/user_schemas.py", "except_returns_value", "_validate_descriptor"),
     ("analysis/schema_resolver.py", "except_returns_value", "resolve_schema"),

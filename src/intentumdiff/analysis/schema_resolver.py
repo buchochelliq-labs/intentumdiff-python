@@ -32,66 +32,8 @@ logger = logging.getLogger(__name__)
 DEFAULT_SCHEMA_TTL_SECONDS = 86_400
 DEFAULT_TIMEOUT_SECONDS = 5.0
 DEFAULT_MAX_BYTES = 5 * 1024 * 1024
-IDENTITY_FIELD_CANDIDATES = frozenset(
-    {
-        "git",
-        "id",
-        "job_cluster_key",
-        "key",
-        "local",
-        "name",
-        "operationid",
-        "package",
-        "task",
-        "task_key",
-    }
-)
-
-DBT_SCHEMA_BASE = "https://raw.githubusercontent.com/dbt-labs/dbt-jsonschema/main/schemas/latest"
-DBT_SCHEMA_URLS = {
-    "dbt_cloud": f"{DBT_SCHEMA_BASE}/dbt_cloud-latest.json",
-    "dbt_project": f"{DBT_SCHEMA_BASE}/dbt_project-latest.json",
-    "dbt_yml_files": f"{DBT_SCHEMA_BASE}/dbt_yml_files-latest.json",
-    "dependencies": f"{DBT_SCHEMA_BASE}/dependencies-latest.json",
-    "packages": f"{DBT_SCHEMA_BASE}/packages-latest.json",
-    "selectors": f"{DBT_SCHEMA_BASE}/selectors-latest.json",
-}
-ADVISORY_ADF_NO_RAW_SCHEMA_URL = (
-    "https://learn.microsoft.com/en-sg/answers/questions/2125264/"
-    "are-there-json-schemas-for-adf-source-files"
-)
-DATABRICKS_BUNDLE_SCHEMA_URL = (
-    "https://raw.githubusercontent.com/databricks/cli/main/bundle/schema/jsonschema.json"
-)
-OPENAPI_31_SCHEMA_URL = "https://spec.openapis.org/oas/3.1/schema/2022-10-07"
-OPENAPI_30_SCHEMA_URL = "https://spec.openapis.org/oas/3.0/schema/2021-09-28"
-KUBERNETES_SCHEMA_URL = "https://json.schemastore.org/kubernetes.json"
-GITHUB_WORKFLOW_SCHEMA_URL = "https://json.schemastore.org/github-workflow.json"
-AZURE_PIPELINES_SCHEMA_URL = "https://json.schemastore.org/azure-pipelines.json"
-DBT_IDENTITY_FIELDS = frozenset(
-    {
-        "exposure",
-        "macro",
-        "metric",
-        "model",
-        "models",
-        "name",
-        "package_name",
-        "packages",
-        "project_name",
-        "resource_type",
-        "selector",
-        "selectors",
-        "seed",
-        "snapshot",
-        "snapshots",
-        "source",
-        "sources",
-        "test",
-        "tests",
-        "version",
-    }
-)
+# Schema identity, provider selection and the built-in provider URL catalogue are owned
+# by core (``schema_profiles``); this module only performs the host fetch/cache I/O.
 
 
 @dataclass(frozen=True)

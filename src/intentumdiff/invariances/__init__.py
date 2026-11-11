@@ -1,2 +1,0 @@
-"""Packaged declarative invariance rules."""
-

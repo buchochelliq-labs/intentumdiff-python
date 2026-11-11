@@ -87,6 +87,37 @@ Proof: no reference from `src`; tests that only exercised these are removed or r
   S3/S4 land; the static check's current offenders are an allowlist that can only shrink.
   Constraint test 4 for the env switch is `tests/unit/test_rust_core_required.py`, and for an
   unknown plugin language `tests/unit/test_plugin_language_routing.py`.
+- **#297 done**: `analysis/schema_resolver.py` no longer keeps `IDENTITY_FIELD_CANDIDATES`,
+  `DBT_IDENTITY_FIELDS` or the built-in schema URL tables (dbt, Databricks, ADF, OpenAPI,
+  Kubernetes, GitHub Actions, Azure Pipelines); provider selection and identity come from
+  core `schema_profiles`, and Python keeps only the fetch/cache I/O. Tests compare core's
+  selection to explicit expected URLs. `tests/unit/test_binding_ownership_ratchet.py` keeps
+  the retired definitions out of the package.
+- **#298 done**: `analysis/user_schemas.py` no longer keeps `BUILTIN_PROVIDER_ROOTS`; core
+  `schema_profiles` "validate" owns the built-in provider roots and the collision rule, and
+  Python only reads descriptor files. Tests check every core root against an explicit list
+  and that a canned core rejection surfaces verbatim.
+- **#301 done**: the evaluator module went with slice Q; the remaining Python copy of the
+  invariance catalogue (`invariances/rules.yaml`, `rules.schema.json`, package marker) is
+  deleted too. It had already drifted from core's (it still called
+  `core.number_literal.canonical_value.safe` implemented and enabled). Core
+  (`crates/rust-core-host/invariances`) is the only catalogue; tests check served groups
+  against explicit expected rule ids.
+- **#302 done**: `SemanticDiff.style_only(...)`, which manufactured
+  `has_semantic_changes=False, is_style_only=True` in Python, is deleted (no production
+  caller). Style-only verdicts come only from core results; the DTO keeps its consistency
+  check (style-only and semantic changes cannot both be true).
+- **#303 done**: `SemanticDiff.file_renamed` / `file_moved`, which classified the file
+  lifecycle from path names, are deleted (no caller, never serialised). Core's lifecycle
+  facts are `added`/`deleted`/`modified`; if rename/move display is wanted, core must emit
+  it in the DTO first (see the core spec in the #303 notes).
+- **#296 partly done**: `GuardrailCheckResult` no longer recomputes its counts or its gate
+  (`_derive_counts` overwrote a supplied `passed=False` with `True`). The DTO now carries
+  `strict`/`passed`/counts as given, rejects absent or non-bool gate fields and counts that
+  disagree with `violations`. The one remaining Python copy of the pass/fail rule is
+  `build_guardrail_check_result` (`analysis/guardrail_reports.py`), waiting on a core
+  `guardrail_check_result` op (risk 10 above; S7). Core's native CLI also disagrees today
+  (`--strict` exits 2 on any violation, Python only on an immutable one).
 - Still open: the core finalize `tree_too_large` decline is answered by a Python-requested
   `source_fallback_diff` (S3), and the certified-batch decline reroute (S4).
 
