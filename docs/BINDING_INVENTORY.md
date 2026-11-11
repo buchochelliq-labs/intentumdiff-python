@@ -6,9 +6,9 @@ ships today and names where the remaining behaviour goes. The machine-readable c
 `tests/unit/binding_inventory.json`, is enforced by `tests/unit/test_binding_surface.py`:
 no unclassified module, no new behaviour module, and no behaviour module may grow.
 
-**Behaviour still shipped:** 51 modules, 20,066 lines (was 52 modules, 21,358 lines at
+**Behaviour still shipped:** 51 modules, 20,065 lines (was 52 modules, 21,358 lines at
 the audit; slices Q, S1, S2, the core #298 binding, the 0.0.3 ownership fixes #297/#298 and
-the core guardrail verdict #296 and the 0.0.3 P2/P3 fixes removed 1,292). The budget only goes down.
+the core guardrail verdict #296 and the 0.0.3 P2/P3 fixes removed 1,293). The budget only goes down.
 
 ## Binding (allowed)
 
@@ -27,7 +27,7 @@ the core guardrail verdict #296 and the 0.0.3 P2/P3 fixes removed 1,292). The bu
 
 | Moves to | Modules | Lines |
 |---|---|---:|
-| core parser_registry.rs and registry validators | `plugins/adapter.py`, `plugins/builtins.py`, `plugins/hub.py`, `plugins/language_metadata.py`, `plugins/loader.py`, `plugins/registry.py`, `plugins/registry_schema.py` | 4,798 |
+| core parser_registry.rs and registry validators | `plugins/adapter.py`, `plugins/builtins.py`, `plugins/hub.py`, `plugins/language_metadata.py`, `plugins/loader.py`, `plugins/registry.py`, `plugins/registry_schema.py` | 4,797 |
 | native intentumdiff CLI (core crates/cli); Python console script to become a launcher | `cli/__init__.py`, `cli/_commands.py`, `cli/_parser.py`, `cli/_shared.py` | 4,185 |
 | core review API (api::review_sources / review_text); keep only DTO marshalling | `_differ_gate.py`, `_differ_presentation.py`, `_differ_runtime.py`, `differ.py` | 1,994 |
 | core lsp_enrich.rs, or a product shell outside this binding | `lsp/client.py`, `lsp/config.py`, `lsp/enricher.py`, `lsp/launcher.py`, `lsp/servers.py`, `lsp_server/_handlers.py`, `lsp_server/server.py` | 1,859 |
