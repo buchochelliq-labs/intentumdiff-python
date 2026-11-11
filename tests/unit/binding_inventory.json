@@ -1,7 +1,7 @@
 {
   "_comment": "Classification of every module shipped in the intentumdiff package (issue #338). tests/unit/test_binding_surface.py enforces it: no unclassified module, no new behavior module, and no behavior module may grow past max_lines. Lower max_lines when a module shrinks; delete the entry when the module is removed.",
   "behavior_module_budget": 51,
-  "behavior_line_budget": 20066,
+  "behavior_line_budget": 20065,
   "modules": {
     "__init__.py": {
       "category": "packaging",
@@ -265,7 +265,7 @@
     "plugins/registry_schema.py": {
       "category": "behavior",
       "target": "core parser_registry.rs and registry validators",
-      "max_lines": 280
+      "max_lines": 279
     },
     "rust_core.py": {
       "category": "binding",

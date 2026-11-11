@@ -4,7 +4,10 @@
   "title": "IntentumDiff plugin registry manifest",
   "description": "Schema for the official plugin registry (buchochelliq-labs/intentumdiff-registry/registry.yaml) that `intentumdiff.plugins.hub` fetches. The registry is the root of trust: adding a plugin is a PR whose CI vets it against this schema plus checksum/capability/provenance verification (#95). The known fields mirror the RegistryEntry the client already parses; `trust_tier`, `capabilities`, `abi_target` (#94), and `provenance_manifest_ref` (#89) formalise the trust/compat surface.",
   "type": "object",
-  "required": ["version", "plugins"],
+  "required": [
+    "version",
+    "plugins"
+  ],
   "additionalProperties": false,
   "properties": {
     "version": {
@@ -15,8 +18,59 @@
     "plugins": {
       "type": "object",
       "description": "Plugins keyed by their package-safe registry name (matches the RegistryEntry name).",
-      "propertyNames": { "$ref": "#/$defs/plugin_name" },
-      "additionalProperties": { "$ref": "#/$defs/entry" }
+      "propertyNames": {
+        "$ref": "#/$defs/plugin_name"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/entry"
+      }
+    },
+    "renderer_components": {
+      "type": "object",
+      "description": "Immutable reviewed rendering Wasm bundle (not an installable parser plugin). Pins exact core commit and exact four internal component hashes.",
+      "required": [
+        "repository",
+        "ref",
+        "artifact",
+        "wasm_checksums"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "repository": {
+          "const": "intentumdiff-core"
+        },
+        "ref": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{40}$"
+        },
+        "artifact": {
+          "const": "renderer-components"
+        },
+        "wasm_checksums": {
+          "type": "object",
+          "required": [
+            "html_renderer.wasm",
+            "llm_renderer.wasm",
+            "patch_renderer.wasm",
+            "terminal_renderer.wasm"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "html_renderer.wasm": {
+              "$ref": "#/$defs/sha256"
+            },
+            "llm_renderer.wasm": {
+              "$ref": "#/$defs/sha256"
+            },
+            "patch_renderer.wasm": {
+              "$ref": "#/$defs/sha256"
+            },
+            "terminal_renderer.wasm": {
+              "$ref": "#/$defs/sha256"
+            }
+          }
+        }
+      }
     }
   },
   "$defs": {
@@ -41,7 +95,10 @@
       "description": "One plugin's registry metadata. All fields are optional — the plugin name is the mapping key. Trust is asserted here: an entry with wasm_checksums (and trust_tier 'official') installs verified; an entry without warns as unverified.",
       "properties": {
         "source": {
-          "enum": ["git", "pypi"],
+          "enum": [
+            "git",
+            "pypi"
+          ],
           "default": "git",
           "description": "Install source. git: tag/branch/commit ref. pypi: version string."
         },
@@ -60,29 +117,44 @@
         "wasm_checksums": {
           "type": "object",
           "description": "Expected SHA-256 of each bundled .wasm, keyed by filename. Verified on every install. Absent = unverified (install warns).",
-          "propertyNames": { "pattern": "^[A-Za-z0-9._-]+\\.wasm$" },
-          "additionalProperties": { "$ref": "#/$defs/sha256" }
+          "propertyNames": {
+            "pattern": "^[A-Za-z0-9._-]+\\.wasm$"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/sha256"
+          }
         },
         "dep_hashes": {
           "type": "object",
           "description": "Approved dependency hashes for plugins that cannot be fully self-contained, keyed by 'package==version'. Passed to pip as --require-hashes; the main package wheel must be included.",
-          "propertyNames": { "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*==[^=\\s]+$" },
-          "additionalProperties": { "$ref": "#/$defs/dep_hash" }
+          "propertyNames": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*==[^=\\s]+$"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/dep_hash"
+          }
         },
         "allowed_dependencies": {
           "type": "array",
           "description": "Reviewed package names (no version) that may appear in dep_hashes besides the main plugin package.",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         },
         "trust_tier": {
-          "enum": ["official", "community"],
+          "enum": [
+            "official",
+            "community"
+          ],
           "default": "official",
           "description": "official = org-built/scanned, checksums present, installs verified. community = listed but unverified; install warns. Wired to hub.py's is_official / checksum-present-or-warn logic (#95)."
         },
         "capabilities": {
           "type": "array",
           "description": "Declared plugin capabilities (e.g. the WIT interfaces implemented), scanned at vetting time.",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "uniqueItems": true
         },
         "abi_target": {
