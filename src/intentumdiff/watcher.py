@@ -249,11 +249,11 @@ class FileWatcher:
         ts = datetime.datetime.now().strftime("%H:%M:%S")
         self._out.print(Rule(title=f"[cyan]{rel_path_str}[/cyan]  [dim]{ts}[/dim]"))
 
-        if not diff.changes:
-            self._out.print(f"[dim]{rel_path_str} — no changes[/dim]")
-            return
-        if diff.is_style_only:
+        if diff.is_style_only:  # core's flag first: a style-only record has no changes (#310)
             self._out.print(f"[dim]{rel_path_str} — style changes only[/dim]")
+            return
+        if not diff.changes and not diff.is_fallback:  # a fallback is rendered, never "none"
+            self._out.print(f"[dim]{rel_path_str} — no changes[/dim]")
             return
 
         self._render_fn(diff)
