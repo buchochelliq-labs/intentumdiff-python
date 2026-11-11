@@ -87,6 +87,12 @@ Proof: no reference from `src`; tests that only exercised these are removed or r
   S3/S4 land; the static check's current offenders are an allowlist that can only shrink.
   Constraint test 4 for the env switch is `tests/unit/test_rust_core_required.py`, and for an
   unknown plugin language `tests/unit/test_plugin_language_routing.py`.
+- **#297 done**: `analysis/schema_resolver.py` no longer keeps `IDENTITY_FIELD_CANDIDATES`,
+  `DBT_IDENTITY_FIELDS` or the built-in schema URL tables (dbt, Databricks, ADF, OpenAPI,
+  Kubernetes, GitHub Actions, Azure Pipelines); provider selection and identity come from
+  core `schema_profiles`, and Python keeps only the fetch/cache I/O. Tests compare core's
+  selection to explicit expected URLs. `tests/unit/test_binding_ownership_ratchet.py` keeps
+  the retired definitions out of the package.
 - Still open: the core finalize `tree_too_large` decline is answered by a Python-requested
   `source_fallback_diff` (S3), and the certified-batch decline reroute (S4).
 
