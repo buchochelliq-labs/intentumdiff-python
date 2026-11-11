@@ -1873,8 +1873,7 @@ def _cmd_serve(args: argparse.Namespace) -> None:
     port: int = args.port
 
     # Guard against accidentally exposing the playground to the network.
-    _loopback = {"127.0.0.1", "::1", "localhost"}
-    if host not in _loopback and not getattr(args, "allow_remote", False):
+    if host not in {"127.0.0.1", "::1", "localhost"} and not getattr(args, "allow_remote", False):
         _err.print(
             f"[bold red]Error:[/bold red] binding to '{host}' would expose the "
             "playground on the network.  "
@@ -1887,24 +1886,25 @@ def _cmd_serve(args: argparse.Namespace) -> None:
 
     # Try the requested port; fall back to a free OS-assigned port if taken.
     import socket
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as _s:
-        _s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        try:
-            _s.bind((host, port))
-            _s.close()
-        except OSError:
-            _s.bind((host, 0))
-            port = _s.getsockname()[1]
-            _console.print(
-                f"[yellow]Warning:[/yellow] requested port was unavailable; "
-                f"binding to free port [cyan]{port}[/cyan] instead."
-            )
-
-    _console.print(
-        f"[bold green]IntentumDiff serve[/bold green] listening on "
-        f"[cyan]http://{host}:{port}[/cyan]  "
-        f"([dim]Ctrl+C to stop[/dim])"
-    )
+    family = socket.AF_INET6 if ":" in host else socket.AF_INET  # an IPv6 literal (#323)
+    try:
+        with socket.socket(family, socket.SOCK_STREAM) as _s:
+            _s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                _s.bind((host, port))
+            except OSError:
+                _s.bind((host, 0))
+                port = _s.getsockname()[1]
+                _console.print(
+                    f"[yellow]Warning:[/yellow] requested port was unavailable; "
+                    f"binding to free port [cyan]{port}[/cyan] instead."
+                )
+    except OSError as exc:  # e.g. no IPv6 on this host: a diagnostic, not a traceback
+        _err.print(f"[red]Error:[/red] cannot bind {host!r}: {exc}")
+        sys.exit(1)
+    shown = f"[{host}]" if family == socket.AF_INET6 else host
+    _console.print(f"[bold green]IntentumDiff serve[/bold green] listening on "
+                   f"[cyan]http://{shown}:{port}[/cyan]  ([dim]Ctrl+C to stop[/dim])")
     uvicorn.run(app, host=host, port=port, log_level="warning")
 
 
