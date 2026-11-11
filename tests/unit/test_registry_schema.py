@@ -121,7 +121,7 @@ def test_invalid_plugin_name_is_rejected() -> None:
 
 
 def test_schema_ships_in_the_package() -> None:
-    # The schema is package data (like invariances/rules.schema.json), so downstream
+    # The schema is package data, so downstream
     # consumers and the vetting CI can load it from the installed wheel.
     plugins_dir = Path(__file__).resolve().parents[2] / "src" / "intentumdiff" / "plugins"
     pkg_schema = plugins_dir / "registry.schema.json"

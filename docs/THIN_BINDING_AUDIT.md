@@ -97,6 +97,12 @@ Proof: no reference from `src`; tests that only exercised these are removed or r
   `schema_profiles` "validate" owns the built-in provider roots and the collision rule, and
   Python only reads descriptor files. Tests check every core root against an explicit list
   and that a canned core rejection surfaces verbatim.
+- **#301 done**: the evaluator module went with slice Q; the remaining Python copy of the
+  invariance catalogue (`invariances/rules.yaml`, `rules.schema.json`, package marker) is
+  deleted too. It had already drifted from core's (it still called
+  `core.number_literal.canonical_value.safe` implemented and enabled). Core
+  (`crates/rust-core-host/invariances`) is the only catalogue; tests check served groups
+  against explicit expected rule ids.
 - Still open: the core finalize `tree_too_large` decline is answered by a Python-requested
   `source_fallback_diff` (S3), and the certified-batch decline reroute (S4).
 

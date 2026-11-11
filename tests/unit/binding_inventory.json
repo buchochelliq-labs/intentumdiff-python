@@ -164,10 +164,6 @@
       "category": "binding",
       "target": "C-ABI transport and error translation"
     },
-    "invariances/__init__.py": {
-      "category": "dto",
-      "target": "public data models and exceptions"
-    },
     "live_server.py": {
       "category": "behavior",
       "target": "core live_server.rs + native intentumdiff-live-server",

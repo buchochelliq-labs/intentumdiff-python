@@ -17,7 +17,7 @@ goes down.
 
 ## DTOs and exceptions (allowed)
 
-- public data models and exceptions: `core/models.py`, `invariances/__init__.py`, `lsp/exceptions.py`, `plugins/exceptions.py`
+- public data models and exceptions: `core/models.py`, `lsp/exceptions.py`, `plugins/exceptions.py`
 
 ## Packaging (allowed)
 

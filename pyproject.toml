@@ -212,8 +212,6 @@ bindings = "cffi"
 include = [
     { path = "src/intentumdiff/wasm/*.wasm", format = "wheel" },
     { path = "src/intentumdiff/wasm/wasm_provenance.json", format = "wheel" },
-    { path = "src/intentumdiff/invariances/*.yaml", format = "wheel" },
-    { path = "src/intentumdiff/invariances/*.json", format = "wheel" },
     # The published plugin-registry schema (#95) — loaded at runtime via resources.files.
     { path = "src/intentumdiff/plugins/*.json", format = "wheel" },
 ]

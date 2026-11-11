@@ -22,6 +22,12 @@ _RETIRED = {
     "DBT_SCHEMA_BASE": "schema_profiles provider",
     # #298: built-in provider-root catalogue (core schema_profiles validate).
     "BUILTIN_PROVIDER_ROOTS": "schema_profiles validate",
+    # #301: invariance evaluator / language / status admissibility (core invariance catalogue).
+    "_ALLOWED_EVALUATORS": "core invariances/rules.yaml",
+    "_KNOWN_LANGUAGE_IDS": "core invariances/rules.yaml",
+    "_known_evaluator": "core invariances/rules.yaml",
+    "_known_languages": "core invariances/rules.yaml",
+    "_status_consistency": "core invariances/rules.yaml",
 }
 
 _RETIRED_SUFFIXES = ("_SCHEMA_URL", "_SCHEMA_URLS")
