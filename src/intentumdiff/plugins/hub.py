@@ -87,6 +87,9 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
+from intentumdiff.plugins.exceptions import RegistryManifestError
+from intentumdiff.plugins.registry_schema import validate_registry
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -398,8 +401,7 @@ def fetch_official_registry(
     strict:
         When ``True``, *ref* must be a full 40-character commit SHA.  This
         enforces the production/CI policy: mutable refs (branch names, tags)
-        are rejected.  Pass ``strict=True`` via the ``--strict-registry`` CLI
-        flag.
+        are rejected (the ``--strict-registry`` CLI flag).
     timeout:
         HTTP timeout in seconds.
 
@@ -411,7 +413,7 @@ def fetch_official_registry(
     Raises
     ------
     RuntimeError
-        If the registry cannot be fetched or parsed.
+        If the registry cannot be fetched, or :class:`RegistryManifestError` if it is invalid.
     """
     _validate_registry_ref(ref, strict=strict)
     url = f"{OFFICIAL_REGISTRY_RAW_URL}/{ref}/registry.yaml"
@@ -423,11 +425,8 @@ def fetch_official_registry(
         with urllib.request.urlopen(url, timeout=timeout, context=ctx) as resp:  # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected -- scheme asserted https above; base is a fixed constant + validated ref. noqa: S310  # nosec B310 - https scheme asserted above
             content = resp.read().decode("utf-8")
     except urllib.error.URLError as exc:
-        raise RuntimeError(
-            f"Could not fetch the official plugin registry from {url}.\n"
-            f"Check your internet connection.  Detail: {exc}"
-        ) from exc
-
+        raise RuntimeError(f"Could not fetch the official plugin registry from {url}.\n"
+                           f"Check your internet connection.  Detail: {exc}") from exc
     return parse_registry_manifest(content)
 
 
@@ -438,12 +437,15 @@ def parse_registry_manifest(content: str) -> dict[str, RegistryEntry]:
     ``abi_target``) is testable without the network fetch.
     """
     yaml = _require_yaml()
-    data: dict[str, Any] = yaml.safe_load(content) or {}
-
+    try:
+        data = yaml.safe_load(content)
+    except yaml.YAMLError as exc:
+        raise RegistryManifestError(f"plugin registry manifest is not YAML: {exc}") from exc
+    errors = validate_registry(data)  # the CI vetting validator gates every entry (#309)
+    if errors:
+        raise RegistryManifestError("invalid plugin registry manifest: " + "; ".join(errors))
     entries: dict[str, RegistryEntry] = {}
-    for plugin_name, entry_data in data.get("plugins", {}).items():
-        if not isinstance(entry_data, dict):
-            continue
+    for plugin_name, entry_data in data["plugins"].items():
         entries[plugin_name] = RegistryEntry(
             name=plugin_name,
             source=entry_data.get("source", "git"),
@@ -470,10 +472,8 @@ def _require_yaml() -> Any:
         import yaml  # type: ignore[import-untyped]
         return yaml
     except ImportError as exc:
-        raise ImportError(
-            "pyyaml is required to read/write intentumdiff_plugins.yaml. "
-            "Install it with: pip install pyyaml"
-        ) from exc
+        raise ImportError("pyyaml is required to read/write intentumdiff_plugins.yaml. "
+                          "Install it with: pip install pyyaml") from exc
 
 
 def load_plugins_file(path: Path) -> list[PluginSpec]:
