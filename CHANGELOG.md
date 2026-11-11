@@ -22,6 +22,27 @@
   `immutable` one. Core's rule is `passed = not strict or no violations`. Non-strict checks are
   still advisory and always pass.
 
+### Fixed and changed in the binding and CLI shells
+
+- `SemanticDiffer.render("terminal")` uses core's terminal renderer, the same output as the
+  CLI; filenames and descriptions containing `[...]` are shown literally (#306).
+- `intentumdiff git --repo REPO` reviews every changed file of another repository (#317).
+  Extra positionals (#318) and conflicting `--staged` / `--unpushed` / `--new` (#319) are usage
+  errors instead of being ignored.
+- `plugins add/install --skip-verify` takes the `--yes` confirmation its message asks for;
+  `plugins install --strict-registry`, which had no effect, is rejected (#314).
+- A malformed plugin registry manifest raises `RegistryManifestError` with every violation
+  (#309); the validator accepts the published `renderer_components` bundle (#330), never raises
+  on wrong types and matches whole strings (#329).
+- `lsp_servers.json` with two entries for one language is rejected (#312).
+- `intentumdiff serve`: escaped lone surrogates get a 422 (#316), the language catalog loads off
+  the event loop (#320), and `--host ::1` binds IPv6 (#323).
+- Renderer fuel `-1` stays unlimited in the CLI (#308); non-finite image budgets are usage
+  errors (#315); webhook signatures and PR numbers are strictly validated (#321, #322).
+- Watcher: style-only saves say so (#310); a deleted file is reported, not reviewed (#326).
+- Corrupt schema-cache records are cache misses (#307); LSP start/send failures release every
+  resource (#313); named-pipe writes are completed or fail visibly (#327).
+
 ## v0.0.2b2 — pre-release candidate (not published)
 
 A pre-release (beta), following the release rule that a version is a pre-release until it
