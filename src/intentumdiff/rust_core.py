@@ -186,12 +186,23 @@ class _NativeCAbiInternalError(RuntimeError, _NativeCAbiOperationFailure):
     """Native internal/panic error with its existing RuntimeError contract."""
 
 
+class CoreSizeLimitError(_NativeCAbiValueError):
+    """Core refused an input, tree or parser output over a configured byte limit.
+
+    Core reports these as ``error_type: "size_limit"`` and its message names the diff-config
+    setting that raises the limit (``max_cst_bytes`` / ``max_plugin_output_bytes``). It
+    subclasses the ``ValueError`` these errors raised before core #308, so existing
+    ``except ValueError`` callers keep working.
+    """
+
+
 def _c_abi_call(name: str, *args: Any) -> Any:
     """Invoke a C-ABI handler by name; return its ``result`` or re-raise the classified error.
 
     `error_type` maps to the exception the PyO3 wrappers raised: ``not_found`` →
-    ``FileNotFoundError`` (the git readers' only non-``ValueError``), everything else →
-    ``ValueError``. Panics surface as ``RuntimeError``.
+    ``FileNotFoundError`` (the git readers' only non-``ValueError``), ``size_limit`` →
+    ``CoreSizeLimitError`` (a ``ValueError``), everything else → ``ValueError``. Panics
+    surface as ``RuntimeError``.
     """
     import ctypes  # noqa: PLC0415
 
@@ -234,7 +245,7 @@ def _c_abi_call(name: str, *args: Any) -> Any:
     message = envelope.get("error")
     kind = envelope.get("error_type")
     if not isinstance(message, str) or not isinstance(kind, str) or kind not in (
-        "not_found", "internal", "value_error", "bad_request"
+        "not_found", "internal", "value_error", "bad_request", "size_limit"
     ):
         raise _InvalidNativeCAbiEnvelope(
             f"invalid C ABI envelope for {name!r}: malformed error fields"
@@ -243,6 +254,8 @@ def _c_abi_call(name: str, *args: Any) -> Any:
         raise _NativeCAbiNotFoundError(message)
     if kind == "internal":
         raise _NativeCAbiInternalError(message)
+    if kind == "size_limit":
+        raise CoreSizeLimitError(message)
     raise _NativeCAbiValueError(message)
 
 

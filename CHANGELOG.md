@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.0.3 — unreleased
+
+### Core 0877c75 (core #308) adoption
+
+- `NodeFacts` carries core's new `visibility` (`public|internal|private|protected|special|unknown`)
+  and `stub_sentinel` (`pass|ellipsis|not_implemented|docstring_only|todo_macro|panic`) facts;
+  `SemanticDiff` carries `content_class` (`code|docs|config|data|text`). All three are closed
+  enums validated as given; Python never derives them.
+- Core size-limit failures (C-ABI `error_type: "size_limit"`) raise
+  `intentumdiff.CoreSizeLimitError`, a `ValueError` subclass, so existing `except ValueError`
+  handlers keep working. The message names the diff-config setting to raise.
+
 ## v0.0.2b2 — pre-release candidate (not published)
 
 A pre-release (beta), following the release rule that a version is a pre-release until it

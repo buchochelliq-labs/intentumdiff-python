@@ -232,6 +232,17 @@ class NodeFacts(BaseModel, frozen=True):
     nested_block_count: int | None = None
     has_nested_block: bool | None = None
 
+    # Declaration facts (Core #308, for vscode#132). Closed enums only, never source text.
+    #: Declared visibility, decided by core's per-language rules; ``"unknown"`` when the
+    #: rules cannot decide.
+    visibility: Literal[
+        "public", "internal", "private", "protected", "special", "unknown"
+    ] | None = None
+    #: What makes a ``body == "stub"`` body a placeholder; set only for stub bodies.
+    stub_sentinel: Literal[
+        "pass", "ellipsis", "not_implemented", "docstring_only", "todo_macro", "panic"
+    ] | None = None
+
 
 class SemanticNode(BaseModel, frozen=True):
     """
@@ -479,6 +490,9 @@ class SemanticDiff(BaseModel, frozen=True):
     # "unstaged" = saved but not staged, "staged" = git-add'd, "unpushed" = committed but not
     # yet pushed to the remote.  None for an ordinary commit-to-commit diff.
     staging_status: str | None = None
+    #: The coarse kind of content core reviewed (Core #308, for vscode#133), from core's
+    #: closed table keyed on the routed language. States what was reviewed, never a risk.
+    content_class: Literal["code", "docs", "config", "data", "text"] | None = None
     metadata: Mapping[str, Any] = Field(default_factory=dict)
 
     @field_validator("metadata", mode="before")
