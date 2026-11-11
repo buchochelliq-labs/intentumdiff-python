@@ -187,3 +187,15 @@ def test_valid_and_wrong_webhook_signature_controls() -> None:
     assert verify_webhook_signature("audit-secret", _SIGNED_BODY, _VALID_SIGNATURE) is True
     assert verify_webhook_signature("audit-secret", b"{ }", _VALID_SIGNATURE) is False
 
+
+@pytest.mark.parametrize("number", [True, False, 1.5, 1.0, "7", -3, 0, None, [7], {"n": 7}])
+def test_webhook_pull_request_number_must_be_an_exact_positive_integer(number) -> None:
+    # #322: int() used to coerce True and 1.5 to pull request 1.
+    payload = {"repository": {"full_name": "owner/repo"}, "pull_request": {"number": number}}
+    with pytest.raises(ValueError, match="positive integer"):
+        parse_pull_request_event(payload)
+
+
+def test_webhook_pull_request_number_keeps_exact_identity() -> None:
+    payload = {"repository": {"full_name": "owner/repo"}, "pull_request": {"number": 2**40}}
+    assert parse_pull_request_event(payload).number == 2**40
