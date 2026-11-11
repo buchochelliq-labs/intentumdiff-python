@@ -2055,15 +2055,15 @@ def _add_output_args(p: argparse.ArgumentParser) -> None:
 
 
 def _parse_megapixels(value: str) -> int:
-    try:
+    try:  # nan is not > 0; inf and exponent overflow raise OverflowError in int() (#315)
         megapixels = float(value)
-    except ValueError:
-        raise argparse.ArgumentTypeError(
-            f"invalid megapixel value {value!r}: use a positive number"
-        ) from None
-    if megapixels <= 0:
-        raise argparse.ArgumentTypeError("max decoded megapixels must be positive")
-    return max(1, int(megapixels * 1_000_000))
+        if megapixels > 0:
+            return max(1, int(megapixels * 1_000_000))
+    except (ValueError, OverflowError):
+        pass
+    raise argparse.ArgumentTypeError(
+        f"invalid megapixel value {value!r}: use a finite positive number"
+    )
 
 
 def _add_asset_diff_args(p: argparse.ArgumentParser) -> None:
