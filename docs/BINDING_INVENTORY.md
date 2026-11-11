@@ -6,9 +6,9 @@ ships today and names where the remaining behaviour goes. The machine-readable c
 `tests/unit/binding_inventory.json`, is enforced by `tests/unit/test_binding_surface.py`:
 no unclassified module, no new behaviour module, and no behaviour module may grow.
 
-**Behaviour still shipped:** 51 modules, 20,111 lines (was 52 modules, 21,358 lines at
-the audit; slices Q, S1, S2, the core #298 binding and the 0.0.3 ownership fixes #297/#298
-removed 1,247). The budget only goes down.
+**Behaviour still shipped:** 51 modules, 20,107 lines (was 52 modules, 21,358 lines at
+the audit; slices Q, S1, S2, the core #298 binding, the 0.0.3 ownership fixes #297/#298 and
+the core guardrail verdict #296 removed 1,251). The budget only goes down.
 
 ## Binding (allowed)
 
@@ -36,7 +36,7 @@ removed 1,247). The budget only goes down.
 | core git_source.rs / vcs_backend.rs | `sources/base.py`, `sources/file_source.py`, `sources/git_source.py`, `sources/live_buffer_source.py`, `sources/string_source.py`, `vcs/_safe_path.py`, `vcs/base.py`, `vcs/git_backend.py`, `vcs/git_cli.py`, `vcs/hg_backend.py`, `vcs/perforce_backend.py`, `vcs/svn_backend.py` | 1,247 |
 | product shell outside this binding (designer decision) | `github_app.py`, `serve/_app.py`, `testing.py`, `watcher.py` | 1,205 |
 | core schema resolution (#307) | `analysis/schema_resolver.py`, `analysis/user_schemas.py` | 761 |
-| core guardrail_policy.rs (evaluation already Rust; reporting/orchestration remain) | `analysis/guardrail_reports.py`, `analysis/guardrails.py` | 497 |
+| core guardrail_policy.rs (evaluation already Rust; reporting/orchestration remain) | `analysis/guardrail_reports.py`, `analysis/guardrails.py` | 493 |
 | core cache_store.rs | `cache/duckdb_store.py`, `cache/sqlite_store.py`, `cache/store.py` | 419 |
 | core diagnostics trace (#54) | `analysis/diagnostics.py` | 146 |
 

@@ -41,7 +41,7 @@ finer-grained ops, with Python-owned language allowlists and fallback choices be
 8. **Two indexer binary rules** (`index_repo` vs `index_directory`).
 9. **LSP builds its own source** (`LiveBufferSource`: basename filename, own git reads) instead of
    core `live_handle_diff` / `working_tree_source_content`.
-10. **Guardrail pass/fail decided in Python twice** (`models.py`, `guardrail_reports.py`) and turned
+10. **[Fixed in #296]** **Guardrail pass/fail decided in Python twice** (`models.py`, `guardrail_reports.py`) and turned
     into CLI exit code 2; core has no equivalent op.
 11. **Two terminal renderers and two fuel formulas** (`SemanticDiffer.render` vs the CLI's core
     `render_cli_review`; `_fuel_budget` vs the CLI's `max(fuel, 20M+len*100)`).
@@ -111,13 +111,16 @@ Proof: no reference from `src`; tests that only exercised these are removed or r
   lifecycle from path names, are deleted (no caller, never serialised). Core's lifecycle
   facts are `added`/`deleted`/`modified`; if rename/move display is wanted, core must emit
   it in the DTO first (see the core spec in the #303 notes).
-- **#296 partly done**: `GuardrailCheckResult` no longer recomputes its counts or its gate
+- **#296 done**: `GuardrailCheckResult` no longer recomputes its counts or its gate
   (`_derive_counts` overwrote a supplied `passed=False` with `True`). The DTO now carries
   `strict`/`passed`/counts as given, rejects absent or non-bool gate fields and counts that
-  disagree with `violations`. The one remaining Python copy of the pass/fail rule is
-  `build_guardrail_check_result` (`analysis/guardrail_reports.py`), waiting on a core
-  `guardrail_check_result` op (risk 10 above; S7). Core's native CLI also disagrees today
-  (`--strict` exits 2 on any violation, Python only on an immutable one).
+  disagree with `violations`. `build_guardrail_check_result` and
+  `guardrail_result_from_diffs` now transport core's `guardrail_check_result` op (core #308)
+  and validate its DTO; the CLI exit code reads `result.passed`. Core's rule is
+  `passed = !strict || no violations`, so a strict check now fails on any violation, as the
+  native CLI already did (previously Python failed only on an immutable one). Proof:
+  `tests/unit/test_guardrail_check_result_core.py` (canned verdict passes through unchanged
+  in one op; real-core strict/advisory matrix).
 - Still open: the core finalize `tree_too_large` decline is answered by a Python-requested
   `source_fallback_diff` (S3), and the certified-batch decline reroute (S4).
 

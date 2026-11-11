@@ -2190,8 +2190,8 @@ def _add_guardrail_args(p: argparse.ArgumentParser) -> None:
         action="store_true",
         default=False,
         help=(
-            "Exit non-zero when an immutable protected config guardrail "
-            "violation is detected."
+            "Exit 2 when any protected config guardrail violation "
+            "(important or immutable) is detected."
         ),
     )
     p.add_argument(

@@ -322,7 +322,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--strict",
         action="store_true",
         default=False,
-        help="Exit 2 when immutable guardrail violations are found.",
+        help="Exit 2 when any guardrail violation (important or immutable) is found.",
     )
     _add_fuel_arg(check_p)
     check_p.add_argument(

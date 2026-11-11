@@ -12,6 +12,16 @@
   `intentumdiff.CoreSizeLimitError`, a `ValueError` subclass, so existing `except ValueError`
   handlers keep working. The message names the diff-config setting to raise.
 
+### Changed: `--strict` guardrail checks fail on any violation
+
+- The guardrail check verdict (counts and pass/fail) now comes from core's
+  `guardrail_check_result` operation, the same function the native CLI uses; the Python
+  package no longer has its own copy of the rule (#296).
+- **Behaviour change:** under `intentumdiff guardrails check --strict` and
+  `--guardrails-strict`, an `important` violation now fails the check (exit 2), not only an
+  `immutable` one. Core's rule is `passed = not strict or no violations`. Non-strict checks are
+  still advisory and always pass.
+
 ## v0.0.2b2 — pre-release candidate (not published)
 
 A pre-release (beta), following the release rule that a version is a pre-release until it

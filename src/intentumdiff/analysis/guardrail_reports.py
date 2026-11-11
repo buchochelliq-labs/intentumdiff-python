@@ -22,25 +22,10 @@ def build_guardrail_check_result(
     strict: bool,
     metadata: Mapping[str, Any] | None = None,
 ) -> GuardrailCheckResult:
-    """Build a guardrail check result. The gate is the last Python copy of the policy (#296)."""
+    """Core's guardrail check verdict for a list of violations (``guardrail_check_result``)."""
 
-    items = list(violations)
-    immutable_count = sum(
-        violation.severity == GuardrailSeverity.IMMUTABLE for violation in items
-    )
-    important_count = sum(
-        violation.severity == GuardrailSeverity.IMPORTANT for violation in items
-    )
-    return GuardrailCheckResult(
-        violations=items,
-        violation_count=len(items),
-        immutable_count=immutable_count,
-        important_count=important_count,
-        checked_files=checked_files,
-        strict=strict,
-        passed=not (strict and immutable_count),
-        metadata=metadata or {},
-    )
+    items = [violation.model_dump(mode="json") for violation in violations]
+    return _core_check_result({"violations": items}, strict, checked_files, metadata)
 
 
 def guardrail_result_from_diffs(
@@ -50,20 +35,31 @@ def guardrail_result_from_diffs(
     checked_files: int | None = None,
     metadata: Mapping[str, Any] | None = None,
 ) -> GuardrailCheckResult:
-    """Collect guardrail evidence from one or more semantic diffs."""
+    """Core's verdict over the diffs' violations; core counts the diffs as checked files."""
 
     items = [diffs] if isinstance(diffs, SemanticDiff) else list(diffs)
-    violations = [
-        violation
+    # Core reads only each diff's ``guardrail_violations``, so only that field is marshalled.
+    evidence = [
+        {"guardrail_violations": [v.model_dump(mode="json") for v in diff.guardrail_violations]}
         for diff in items
-        for violation in diff.guardrail_violations
     ]
-    return build_guardrail_check_result(
-        violations,
-        checked_files=len(items) if checked_files is None else checked_files,
-        strict=strict,
-        metadata=metadata,
-    )
+    return _core_check_result({"diffs": evidence}, strict, checked_files, metadata)
+
+
+def _core_check_result(
+    evidence: dict[str, Any],
+    strict: bool,
+    checked_files: int | None,
+    metadata: Mapping[str, Any] | None,
+) -> GuardrailCheckResult:
+    # Core owns the counts and the gate (``passed = !strict || no violations``, #296); the DTO
+    # only validates the result and rejects counts that disagree with the violations.
+    from intentumdiff.rust_core import _c_abi_call  # noqa: PLC0415
+
+    request = {**evidence, "strict": strict, "checked_files": checked_files,
+               "metadata": None if metadata is None else dict(metadata)}
+    result = _c_abi_call("guardrail_check_result", json.dumps(request))
+    return GuardrailCheckResult.model_validate(result)
 
 
 def render_guardrail_json(result: GuardrailCheckResult, *, indent: int = 2) -> str:

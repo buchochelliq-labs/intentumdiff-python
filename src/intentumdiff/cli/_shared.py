@@ -526,7 +526,7 @@ def _emit_guardrail_reports(
 def _exit_if_guardrail_result_fails(result: GuardrailCheckResult) -> None:
     if result.passed:
         return
-    _err.print("[bold red]Immutable semantic guardrail violation detected.[/bold red]")
+    _err.print("[bold red]Guardrail check failed: protected semantic change detected.[/bold red]")
     sys.exit(2)
 
 

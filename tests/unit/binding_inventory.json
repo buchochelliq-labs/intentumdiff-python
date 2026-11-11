@@ -1,7 +1,7 @@
 {
   "_comment": "Classification of every module shipped in the intentumdiff package (issue #338). tests/unit/test_binding_surface.py enforces it: no unclassified module, no new behavior module, and no behavior module may grow past max_lines. Lower max_lines when a module shrinks; delete the entry when the module is removed.",
   "behavior_module_budget": 51,
-  "behavior_line_budget": 20111,
+  "behavior_line_budget": 20107,
   "modules": {
     "__init__.py": {
       "category": "packaging",
@@ -46,7 +46,7 @@
     "analysis/guardrail_reports.py": {
       "category": "behavior",
       "target": "core guardrail_policy.rs (evaluation already Rust; reporting/orchestration remain)",
-      "max_lines": 256
+      "max_lines": 252
     },
     "analysis/guardrails.py": {
       "category": "behavior",
