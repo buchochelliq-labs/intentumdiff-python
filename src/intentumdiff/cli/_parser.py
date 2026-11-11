@@ -394,20 +394,14 @@ def _build_parser() -> argparse.ArgumentParser:
         "--allow-source-plugin", dest="allow_source_plugin", action="store_true",
         help="Allow installing from VCS/local/direct-URL sources (disables binary-only check).",
     )
-    pl_add.add_argument(
-        "--strict-registry", dest="strict_registry", action="store_true",
-        help=(
-            "Require the official registry ref to be a full 40-character commit SHA. "
-            "Rejects mutable refs (branch names, tags) for reproducible, tamper-evident installs. "
-            "Recommended for CI and production environments."
-        ),
-    )
+    pl_add.add_argument("--yes", action="store_true", help="Confirm --skip-verify (#314).")
+    pl_add.add_argument("--strict-registry", dest="strict_registry", action="store_true", help=(
+        "Require the official registry ref to be a full 40-character commit SHA. "
+        "Rejects mutable refs (branch names, tags) for reproducible, tamper-evident installs. "
+        "Recommended for CI and production environments."))
     pl_add.set_defaults(
-        save=True,
-        skip_verify=False,
-        allow_source_plugin=False,
-        strict_registry=False,
-        func=_cmd_plugins_add,
+        save=True, skip_verify=False, allow_source_plugin=False, strict_registry=False,
+        yes=False, func=_cmd_plugins_add,
     )
 
     # plugins install
@@ -431,19 +425,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--allow-source-plugin", dest="allow_source_plugin", action="store_true",
         help="Allow installing from VCS/local/direct-URL sources (disables binary-only check).",
     )
-    pl_install.add_argument(
-        "--strict-registry", dest="strict_registry", action="store_true",
-        help=(
-            "Require the official registry ref to be a full 40-character commit SHA. "
-            "Rejects mutable refs for reproducible, tamper-evident installs. "
-            "Recommended for CI and production environments."
-        ),
-    )
+    # No --strict-registry here: install reads manifest pins and never consults the registry,
+    # so the flag had no effect (#314). Pins are checked by `plugins add --strict-registry`.
+    pl_install.add_argument("--yes", action="store_true", help="Confirm --skip-verify.")
     pl_install.set_defaults(
-        skip_verify=False,
-        allow_source_plugin=False,
-        strict_registry=False,
-        func=_cmd_plugins_install,
+        skip_verify=False, allow_source_plugin=False, yes=False, func=_cmd_plugins_install,
     )
 
     # plugins remove

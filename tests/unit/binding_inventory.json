@@ -1,7 +1,7 @@
 {
   "_comment": "Classification of every module shipped in the intentumdiff package (issue #338). tests/unit/test_binding_surface.py enforces it: no unclassified module, no new behavior module, and no behavior module may grow past max_lines. Lower max_lines when a module shrinks; delete the entry when the module is removed.",
   "behavior_module_budget": 51,
-  "behavior_line_budget": 20082,
+  "behavior_line_budget": 20068,
   "modules": {
     "__init__.py": {
       "category": "packaging",
@@ -103,7 +103,7 @@
     "cli/_parser.py": {
       "category": "behavior",
       "target": "native intentumdiff CLI (core crates/cli); Python console script to become a launcher",
-      "max_lines": 1070
+      "max_lines": 1056
     },
     "cli/_shared.py": {
       "category": "behavior",
