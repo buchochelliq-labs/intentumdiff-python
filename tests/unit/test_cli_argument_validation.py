@@ -39,3 +39,22 @@ def test_nonfinite_or_invalid_megapixels_are_usage_errors(capsys, value) -> None
 def test_valid_megapixels_keep_exact_units(value, pixels) -> None:
     args = _parse(*_ASSET_DIFF, "--max-decoded-megapixels", value)
     assert args.max_decoded_pixels == pixels
+
+
+# --- #318: git positionals ----------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("positionals", "repo", "file"),
+    [((), ".", None), (("f.py",), ".", "f.py"), (("repo", "f.py"), "repo", "f.py")],
+)
+def test_git_documented_positionals(positionals, repo, file) -> None:
+    args = _parse("git", *positionals)
+    assert (args.repo, args.file) == (repo, file)
+
+
+@pytest.mark.parametrize("extra", [("ignored.py",), ("a.py", "b.py")])
+def test_git_rejects_extra_positionals_instead_of_dropping_them(capsys, extra) -> None:
+    err = _usage_error(capsys, "git", "repo", "f.py", *extra, "--json")
+    assert "at most two positionals" in err
+    assert f"got extra {list(extra)}" in err

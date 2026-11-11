@@ -128,13 +128,6 @@ def _cmd_git(args: argparse.Namespace) -> None:
     elif getattr(args, "unpushed", False):
         new_ref = _REF_UNPUSHED
 
-    # Resolve the effective new_ref from mutually-exclusive scope flags.
-    new_ref: str = args.new  # may be "", ":staged", ":unpushed", or an explicit ref
-    if getattr(args, "staged", False):
-        new_ref = _REF_STAGED
-    elif getattr(args, "unpushed", False):
-        new_ref = _REF_UNPUSHED
-
     # Smart --old default: HEAD for working-tree / scoped modes; HEAD~1 when an
     # explicit commit ref is given for --new so that `intentumdiff git --new HEAD`
     # means "show the last commit" rather than HEAD vs HEAD = no diff.
@@ -2229,6 +2222,7 @@ class _GitPositionalsAction(argparse.Action):
     With one positional:  ``git FILE``        → repo=".", file=FILE
     With two positionals: ``git REPO FILE``   → repo=REPO, file=FILE
     With zero positionals:                    → repo=".", file=None (commit-wide)
+    More than two is a usage error: dropping the rest silently shrank the review (#318).
     """
 
     def __call__(
@@ -2238,7 +2232,9 @@ class _GitPositionalsAction(argparse.Action):
         values: list[str],
         option_string: str | None = None,
     ) -> None:
-        if len(values) >= 2:
+        if len(values) > 2:
+            parser.error(f"git takes at most two positionals ([REPO] FILE); got extra {values[2:]}")
+        if len(values) == 2:
             namespace.repo = values[0]
             namespace.file = values[1]
         elif len(values) == 1:
