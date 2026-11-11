@@ -1,5 +1,5 @@
 {
-  "_doc": "The skip ratchet (pre-release skip audit): every skip reason in the test tree must match a pattern here, and every entry must still be in use. A new skip with a new reason FAILS the gate until it is classified and justified below (or fixed). Classes: platform (OS/tool-gated), env (opt-in creds/services), scenario-matrix (sparse corpus cells — the pre-release burn-down backlog), staging (parser/wasm staging state).",
+  "_doc": "The skip ratchet (pre-release skip audit): every skip reason in the test tree must match a pattern here, and every entry must still be in use. A new skip with a new reason FAILS the gate until it is classified and justified below (or fixed). Classes: platform (OS/tool-gated), env (opt-in creds/services), scenario-matrix (sparse corpus cells — the pre-release burn-down backlog), staging (parser/wasm staging state), binding-migration (a thin-binding constraint that holds only after a named THIN_BINDING_AUDIT slice lands; strict xfail).",
   "allowed": [
     {
       "pattern": "^native migration probe is required by the cross-language CI gate$",
@@ -160,6 +160,11 @@
       "pattern": "^symlink creation unavailable on this host: \\{exc\\}$",
       "class": "platform",
       "justification": "The fail-closed dangling-policy regression requires permission to create a symlink. On hosts or filesystems that disallow creation, the behavior cannot be exercised; where permitted, policy loading is still required to fail closed. The skip is environment-specific and not a successful semantic result."
+    },
+    {
+      "pattern": "^THIN_BINDING_AUDIT S[0-9]+: ",
+      "class": "binding-migration",
+      "justification": "Constraint tests in test_binding_passthrough.py that assert the public DTO equals the core result exactly. Python still rewrites core output on these paths until the named audit slice (S3 per-file orchestration, S4 batch metadata stamping) moves it to core; xfail(strict=True) keeps the gap visible and forces the marker off when it closes."
     }
   ]
 }
