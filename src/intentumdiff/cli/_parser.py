@@ -240,7 +240,7 @@ def _build_parser() -> argparse.ArgumentParser:
     file_p.add_argument(
         "--stream",
         action="store_true",
-        help="Yield changes as they are computed rather than waiting for the full diff.",
+        help="Print changes one by one (the full diff is computed first; not incremental).",
     )
     file_p.set_defaults(func=_cmd_file)
 
@@ -480,15 +480,15 @@ def _build_parser() -> argparse.ArgumentParser:
     # ── index ─────────────────────────────────────────────────────────────
     index_p = sub.add_parser(
         "index",
-        help="Pre-index a git repository to warm the parse and symbol-index cache.",
+        help="Pre-index a git repository to warm the parse cache.",
         description=(
             "Walk every text file in the repository at the given ref, "
             "parse each one, and store the results in the local cache "
             "directory.  Subsequent diff calls will be faster because the "
             "Wasm parse step is skipped for already-cached files.\n\n"
-            "The symbol index is also persisted so that a second call for "
-            "the same commit returns immediately from cache (use --force to "
-            "rebuild)."
+            "Only the parse cache is reused: the symbol index is rebuilt on every "
+            "run (a cached index is never trusted without proof that it is "
+            "complete for the commit), so a repeated call re-indexes."
         ),
     )
     index_p.add_argument(
@@ -515,7 +515,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--force",
         action="store_true",
         default=False,
-        help="Re-index even if a cached symbol index already exists for this commit.",
+        help="Accepted for compatibility; the symbol index is always rebuilt.",
     )
     index_p.add_argument(
         "--fuel",
@@ -694,7 +694,7 @@ def _build_parser() -> argparse.ArgumentParser:
         description=(
             "Re-diffs each changed file against its last committed state "
             "(WorkingTreeSource) whenever the file is modified on disk. "
-            "Uses OS-native file-system events (watchdog). A deleted file is reported, not reviewed. "
+            "Uses watchdog file-system events; a deleted file is reported, not reviewed. "
             "Press Ctrl+C to stop."
         ),
     )
@@ -762,8 +762,8 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         default=False,
         help=(
-            "Send progressive ChangeStreamEvent responses instead of a single "
-            "SemanticDiff per request."
+            "Send ChangeStreamEvent responses instead of a single SemanticDiff "
+            "per request (events follow the completed diff; not incremental)."
         ),
     )
     watch_p.set_defaults(func=_cmd_watch)
@@ -816,7 +816,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--stream",
         action="store_true",
         default=False,
-        help="Stream progressive semantic events by default for diff requests.",
+        help="Send ChangeStreamEvents (after the completed diff) by default for diff requests.",
     )
     _add_fuel_arg(live_p)
     live_p.set_defaults(func=_cmd_live_server)
@@ -997,7 +997,7 @@ if _CLICK_RUNTIME_AVAILABLE:
         ("guardrails", "Check protected config guardrail policy."),
         ("plugins", "Manage parser and renderer plugins."),
         ("security-check", "Check installed packages against OSV advisories."),
-        ("index", "Pre-index a git repository to warm caches."),
+        ("index", "Pre-index a git repository to warm the parse cache."),
         ("cache", "Inspect or manage the local cache database."),
         ("diagnostics", "Query local DuckDB fuel diagnostics."),
         ("watch", "Watch files/directories and show semantic diffs on save."),
