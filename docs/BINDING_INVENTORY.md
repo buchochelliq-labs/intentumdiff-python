@@ -6,12 +6,14 @@ ships today and names where the remaining behaviour goes. The machine-readable c
 `tests/unit/binding_inventory.json`, is enforced by `tests/unit/test_binding_surface.py`:
 no unclassified module, no new behaviour module, and no behaviour module may grow.
 
-**Behaviour still shipped:** 52 modules, 21,358 lines. The budget only goes down.
+**Behaviour still shipped:** 51 modules, 20,184 lines (was 52 modules, 21,358 lines at
+the audit; slices Q, S1, S2 and the core #298 binding removed 1,174). The budget only
+goes down.
 
 ## Binding (allowed)
 
 - C-ABI transport and error translation: `intentumdiff_rust_core/__init__.py`, `intentumdiff_rust_core/ffi.py`, `rust_core.py`
-- thin adapter over one core operation: `analysis/compile_commands.py`, `analysis/cross_file.py`, `analysis/text_review.py`, `api.py`, `assets.py`, `content_type.py`, `core/config.py`, `lsp_server/_codelens.py`, `lsp_server/_diagnostics.py`, `sources/patch_source.py`
+- thin adapter over one core operation: `analysis/compile_commands.py`, `analysis/cross_file.py`, `api.py`, `assets.py`, `content_type.py`, `core/config.py`, `lsp_server/_codelens.py`, `lsp_server/_diagnostics.py`, `sources/patch_source.py`
 
 ## DTOs and exceptions (allowed)
 
@@ -25,19 +27,18 @@ no unclassified module, no new behaviour module, and no behaviour module may gro
 
 | Moves to | Modules | Lines |
 |---|---|---:|
-| core parser_registry.rs and registry validators | `plugins/adapter.py`, `plugins/builtins.py`, `plugins/hub.py`, `plugins/language_metadata.py`, `plugins/loader.py`, `plugins/registry.py`, `plugins/registry_schema.py` | 4,799 |
-| native intentumdiff CLI (core crates/cli); Python console script to become a launcher | `cli/__init__.py`, `cli/_commands.py`, `cli/_parser.py`, `cli/_shared.py` | 4,205 |
-| core review API (api::review_sources / review_text); keep only DTO marshalling | `_differ_gate.py`, `_differ_presentation.py`, `_differ_runtime.py`, `differ.py` | 2,473 |
-| core lsp_enrich.rs, or a product shell outside this binding | `lsp/client.py`, `lsp/config.py`, `lsp/enricher.py`, `lsp/launcher.py`, `lsp/servers.py`, `lsp_server/_handlers.py`, `lsp_server/server.py` | 1,861 |
-| core commit_plumbing.rs / index-engine | `core/commit_differ.py`, `core/diffignore.py`, `core/index.py`, `core/indexer.py` | 1,524 |
+| core parser_registry.rs and registry validators | `plugins/adapter.py`, `plugins/builtins.py`, `plugins/hub.py`, `plugins/language_metadata.py`, `plugins/loader.py`, `plugins/registry.py`, `plugins/registry_schema.py` | 4,798 |
+| native intentumdiff CLI (core crates/cli); Python console script to become a launcher | `cli/__init__.py`, `cli/_commands.py`, `cli/_parser.py`, `cli/_shared.py` | 4,204 |
+| core review API (api::review_sources / review_text); keep only DTO marshalling | `_differ_gate.py`, `_differ_presentation.py`, `_differ_runtime.py`, `differ.py` | 2,008 |
+| core lsp_enrich.rs, or a product shell outside this binding | `lsp/client.py`, `lsp/config.py`, `lsp/enricher.py`, `lsp/launcher.py`, `lsp/servers.py`, `lsp_server/_handlers.py`, `lsp_server/server.py` | 1,860 |
+| core commit_plumbing.rs / index-engine | `core/commit_differ.py`, `core/diffignore.py`, `core/index.py`, `core/indexer.py` | 1,489 |
 | core live_server.rs + native intentumdiff-live-server | `live_server.py` | 1,477 |
-| core git_source.rs / vcs_backend.rs | `sources/base.py`, `sources/file_source.py`, `sources/git_source.py`, `sources/live_buffer_source.py`, `sources/string_source.py`, `vcs/_safe_path.py`, `vcs/base.py`, `vcs/git_backend.py`, `vcs/git_cli.py`, `vcs/hg_backend.py`, `vcs/perforce_backend.py`, `vcs/svn_backend.py` | 1,477 |
+| core git_source.rs / vcs_backend.rs | `sources/base.py`, `sources/file_source.py`, `sources/git_source.py`, `sources/live_buffer_source.py`, `sources/string_source.py`, `vcs/_safe_path.py`, `vcs/base.py`, `vcs/git_backend.py`, `vcs/git_cli.py`, `vcs/hg_backend.py`, `vcs/perforce_backend.py`, `vcs/svn_backend.py` | 1,247 |
 | product shell outside this binding (designer decision) | `github_app.py`, `serve/_app.py`, `testing.py`, `watcher.py` | 1,205 |
-| core schema resolution (#297/#307) | `analysis/schema_resolver.py`, `analysis/user_schemas.py` | 840 |
-| core guardrail_policy.rs (evaluation already Rust; reporting/orchestration remain) | `analysis/guardrail_reports.py`, `analysis/guardrails.py` | 561 |
+| core schema resolution (#297/#307) | `analysis/schema_resolver.py`, `analysis/user_schemas.py` | 834 |
+| core guardrail_policy.rs (evaluation already Rust; reporting/orchestration remain) | `analysis/guardrail_reports.py`, `analysis/guardrails.py` | 497 |
 | core cache_store.rs | `cache/duckdb_store.py`, `cache/sqlite_store.py`, `cache/store.py` | 419 |
-| core diagnostics trace (#54) | `analysis/diagnostics.py` | 309 |
-| core invariance evaluator (#301) | `analysis/invariances.py` | 208 |
+| core diagnostics trace (#54) | `analysis/diagnostics.py` | 146 |
 
 ## Core counterparts
 

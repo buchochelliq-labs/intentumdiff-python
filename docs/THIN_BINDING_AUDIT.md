@@ -21,10 +21,10 @@ finer-grained ops, with Python-owned language allowlists and fallback choices be
 
 ## Correctness risks (Python can answer differently from core)
 
-1. **Language allowlist forces a fallback.** `_differ_gate.py` `RUST_FINALIZE_LANGUAGES`, used in
+1. **[Fixed in S1]** **Language allowlist forces a fallback.** `_differ_gate.py` `RUST_FINALIZE_LANGUAGES`, used in
    `differ.py`: any parser language not listed (dbt-sql, dbt-yaml, third-party plugins) returns a
    fallback labelled `rust_core_disabled`, although core's `finalize_review` accepts any language.
-2. **Unrecognised `INTENTUMDIFF_RUST_CORE` value disables the engine.** `core/models.py`: any value
+2. **[Fixed in S2]** **Unrecognised `INTENTUMDIFF_RUST_CORE` value disables the engine.** `core/models.py`: any value
    outside a fixed set sets `experimental_rust_core=False`, and every file gets the fallback.
 3. **Python reroutes declined batch items** (`status` candidate/fallback) through its own pipeline,
    and converts some non-OS exceptions into a decline instead of raising (`rust_core.py`).
@@ -48,7 +48,7 @@ finer-grained ops, with Python-owned language allowlists and fallback choices be
 
 ## Fix plan, in dependency order
 
-**Q. Dead-code deletion (S, no core work).** Commit-JSON path and helpers in `rust_core.py`,
+**Q. Dead-code deletion (S, no core work). Done** (commit 5e12125). Commit-JSON path and helpers in `rust_core.py`,
 `_diff_commit_certified_json` in `differ.py`, the fast collector in `git_source.py`,
 `analysis/text_review.py`, `analysis/invariances.py`, dead parts of `guardrails.py`,
 `diagnostics.py` and `_differ_presentation.py`, re-exports in `differ.py`, the dead TypeError retry.
@@ -56,8 +56,8 @@ Proof: no reference from `src`; tests that only exercised these are removed or r
 
 | # | Remove from Python | Replaced by core | Parity proof | Size |
 |---|---|---|---|---|
-| S1 | Language gates (`_differ_gate.py`, profile gating in `differ.py`) | Existing `finalize_review`, `enrich_profile_labels`, called for every language | All-language corpus plus an unknown plugin language: same output, never a fallback | S |
-| S2 | Env kill-switch route (`models.py`, fallback branch in `differ.py`) | Core required by policy; "core disabled" raises | Corpus under each env value: identical output or an explicit error | S |
+| S1 **done** (ab7b60a) | Language gates (`_differ_gate.py` finalize allowlist, profile gating in `differ.py`) | Existing `finalize_review`, `enrich_profile_labels`, called for every language | All-language corpus plus an unknown plugin language: same output, never a fallback | S |
+| S2 **done** (1cdbe08) | Env kill-switch route (`models.py`, fallback branch in `differ.py`) | Core required by policy; "core disabled" raises | Corpus under each env value: identical output or an explicit error | S |
 | S3 | `differ.py` per-file orchestration, content-type/lifecycle helpers, compile-commands walk, finalize→complete round trip | Existing `live_diff_contents` (`api::review_sources`), extended for host-loaded third-party parsers, enricher/analyzer hooks, diagnostics trace and fuel policy (new core work) | `check_migration_parity.py`: `diff_strings` byte-identical to `review_sources` | L |
 | S4 | Batch reroute and metadata stamping | Core emits final metadata and owns declined items | Fake backend: a canned decline surfaces unchanged, no second op | M |
 | S5 | `CommitDiffer` / `diff_commit` orchestration and streaming review | `live_handle_review` for all languages plus streaming events (new core work) | Stream, non-stream and `diff_commit` give identical `CommitDiff` | L |
@@ -66,6 +66,29 @@ Proof: no reference from `src`; tests that only exercised these are removed or r
 | S8 | `language_metadata.py` tables, registry alias tables | New `parser_catalog_metadata` op over `parser_manifest.json` | Detection over the manifest equals the native live server | M |
 | S9 | Indexer blob listing, binary rules, Python cache key | New `list_text_blobs(repo, ref)`; existing `cache_make_key` | `index_repo` = `index_directory` = core on a mixed-binary fixture | M |
 | S10 | Python terminal renderer and fuel formulas | Existing `render_cli_review`; new `fuel_budget` | `render()` output equals CLI output | S |
+
+## Progress
+
+- **Q done** (5e12125): the listed dead code is deleted, plus what became dead with it
+  (fast collector helpers, unused adapters, re-exports); the two dead modules
+  `analysis/text_review.py` and `analysis/invariances.py` are gone.
+- **S1 done** (ab7b60a): `RUST_FINALIZE_LANGUAGES` is deleted; every parser language goes to
+  core `finalize_review`, every tree to core `enrich_profile_labels`.
+  `RUST_CERTIFIED_LANGUAGES` (the single-file certified-batch shortcut) remains, with S3.
+- **S2 done** (1cdbe08): an "off" or unrecognised `INTENTUMDIFF_RUST_CORE` /
+  `INTENTUMDIFF_EXPERIMENTAL_RUST_CORE` value, or `experimental_rust_core=False`, raises
+  `RustCoreRequiredError`; the "rust core disabled" fallback branch is gone.
+- **Core #298 binding** (184e44d): `CommitDiffer` transports core
+  `commit_cross_file_index` instead of raising "semantic index incomplete" itself;
+  `CommitDiff` exposes `cross_file_index_status`, `cross_file_index_complete`,
+  `indexed_file_count` and `index_errors`.
+- **Constraint tests 1, 2 and 5** (61e5b4e) are in `tests/unit/test_binding_passthrough.py`.
+  The exact-equality passthrough assertions for `diff_strings` are `xfail(strict=True)` until
+  S3/S4 land; the static check's current offenders are an allowlist that can only shrink.
+  Constraint test 4 for the env switch is `tests/unit/test_rust_core_required.py`, and for an
+  unknown plugin language `tests/unit/test_plugin_language_routing.py`.
+- Still open: the core finalize `tree_too_large` decline is answered by a Python-requested
+  `source_fallback_diff` (S3), and the certified-batch decline reroute (S4).
 
 ## Constraint tests (prove Python adds no decisions)
 
