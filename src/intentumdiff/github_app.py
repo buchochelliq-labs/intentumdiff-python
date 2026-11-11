@@ -50,7 +50,7 @@ def verify_webhook_signature(secret: str, body: bytes, signature_header: str | N
     if not secret or not signature_header or not signature_header.startswith("sha256="):
         return False
     expected = "sha256=" + hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
-    return hmac.compare_digest(expected, signature_header)
+    return hmac.compare_digest(expected.encode("ascii"), signature_header.encode("utf-8"))
 
 
 def parse_pull_request_url(url: str) -> PullRequestRef:
