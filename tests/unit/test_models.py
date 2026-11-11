@@ -267,6 +267,7 @@ class TestSemanticDiff:
             violations=[violation],
             violation_count=1,
             immutable_count=1,
+            important_count=0,
             checked_files=1,
             strict=True,
             passed=False,
@@ -278,7 +279,43 @@ class TestSemanticDiff:
         assert result.metadata["policy"] == "intentumdiff.yaml"
         assert result.model_dump(mode="json")["metadata"] == {"policy": "intentumdiff.yaml"}
 
-    def test_guardrail_check_result_derives_counts_from_violations(self):
+    def test_guardrail_check_result_preserves_the_supplied_gate(self):
+        # #296: the DTO carries the producer's gate; it never recomputes "passed".
+        violation = GuardrailViolation(
+            rule_id="prod-host",
+            severity=GuardrailSeverity.IMMUTABLE,
+            file="config.yaml",
+            language="yaml",
+            semantic_path="server.host",
+        )
+        evidence = dict(violation_count=1, immutable_count=1, important_count=0, checked_files=1)
+
+        advisory = GuardrailCheckResult(violations=[violation], strict=False, passed=False, **evidence)
+        gated = GuardrailCheckResult(violations=[violation], strict=True, passed=True, **evidence)
+
+        assert advisory.model_dump(mode="json")["passed"] is False
+        assert gated.model_dump(mode="json")["passed"] is True
+        restored = GuardrailCheckResult.model_validate_json(advisory.model_dump_json())
+        assert restored == advisory
+
+    @pytest.mark.parametrize("missing", ["passed", "strict", "violation_count", "checked_files"])
+    def test_guardrail_check_result_rejects_absent_evidence(self, missing):
+        payload = {
+            "violations": [], "violation_count": 0, "immutable_count": 0,
+            "important_count": 0, "checked_files": 0, "strict": False, "passed": True,
+        }
+        del payload[missing]
+        with pytest.raises(ValidationError):
+            GuardrailCheckResult.model_validate(payload)
+
+    def test_guardrail_check_result_rejects_non_bool_gate(self):
+        with pytest.raises(ValidationError):
+            GuardrailCheckResult.model_validate({
+                "violations": [], "violation_count": 0, "immutable_count": 0,
+                "important_count": 0, "checked_files": 0, "strict": False, "passed": "yes",
+            })
+
+    def test_guardrail_check_result_rejects_inconsistent_counts(self):
         immutable = GuardrailViolation(
             rule_id="prod-host",
             severity=GuardrailSeverity.IMMUTABLE,
@@ -294,16 +331,16 @@ class TestSemanticDiff:
             }
         )
 
-        result = GuardrailCheckResult(
-            violations=[immutable, important],
-            checked_files=1,
-            strict=True,
-        )
-
-        assert result.violation_count == 2
-        assert result.immutable_count == 1
-        assert result.important_count == 1
-        assert result.passed is False
+        with pytest.raises(ValidationError, match="disagree"):
+            GuardrailCheckResult(
+                violations=[immutable, important],
+                violation_count=2,
+                immutable_count=2,
+                important_count=0,
+                checked_files=1,
+                strict=True,
+                passed=False,
+            )
 
 
 class TestDiffConfig:

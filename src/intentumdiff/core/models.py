@@ -818,17 +818,22 @@ class GuardrailViolation(BaseModel, frozen=True):
 
 
 class GuardrailCheckResult(BaseModel, frozen=True):
-    """CI-friendly summary of protected semantic guardrail evaluation."""
+    """CI-friendly summary of protected semantic guardrail evaluation.
+
+    The gate (``strict``/``passed``) and the counts are evidence supplied by the producer and
+    carried as given (#296): the DTO never recomputes or overrides them. Absent gate fields,
+    or counts that disagree with ``violations``, are rejected.
+    """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     violations: list[GuardrailViolation] = Field(default_factory=list)
-    violation_count: int = 0
-    immutable_count: int = 0
-    important_count: int = 0
-    checked_files: int = 0
-    strict: bool = False
-    passed: bool = True
+    violation_count: int = Field(ge=0, strict=True)
+    immutable_count: int = Field(ge=0, strict=True)
+    important_count: int = Field(ge=0, strict=True)
+    checked_files: int = Field(ge=0, strict=True)
+    strict: bool = Field(strict=True)
+    passed: bool = Field(strict=True)
     metadata: Mapping[str, Any] = Field(default_factory=dict)
 
     @field_validator("metadata", mode="before")
@@ -848,19 +853,19 @@ class GuardrailCheckResult(BaseModel, frozen=True):
         return dict(v)
 
     @model_validator(mode="after")
-    def _derive_counts(self) -> GuardrailCheckResult:
-        immutable_count = sum(
-            violation.severity == GuardrailSeverity.IMMUTABLE
-            for violation in self.violations
+    def _reject_inconsistent_counts(self) -> GuardrailCheckResult:
+        # Structural evidence check only: reject, never repair. The gate is not checked here.
+        supplied = (self.violation_count, self.immutable_count, self.important_count)
+        carried = (
+            len(self.violations),
+            sum(v.severity == GuardrailSeverity.IMMUTABLE for v in self.violations),
+            sum(v.severity == GuardrailSeverity.IMPORTANT for v in self.violations),
         )
-        important_count = sum(
-            violation.severity == GuardrailSeverity.IMPORTANT
-            for violation in self.violations
-        )
-        object.__setattr__(self, "violation_count", len(self.violations))
-        object.__setattr__(self, "immutable_count", immutable_count)
-        object.__setattr__(self, "important_count", important_count)
-        object.__setattr__(self, "passed", not (self.strict and immutable_count))
+        if supplied != carried:
+            raise ValueError(
+                "guardrail check counts (violation, immutable, important) "
+                f"{supplied} disagree with the carried violations {carried}"
+            )
         return self
 
 

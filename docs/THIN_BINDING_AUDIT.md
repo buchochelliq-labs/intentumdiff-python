@@ -111,6 +111,13 @@ Proof: no reference from `src`; tests that only exercised these are removed or r
   lifecycle from path names, are deleted (no caller, never serialised). Core's lifecycle
   facts are `added`/`deleted`/`modified`; if rename/move display is wanted, core must emit
   it in the DTO first (see the core spec in the #303 notes).
+- **#296 partly done**: `GuardrailCheckResult` no longer recomputes its counts or its gate
+  (`_derive_counts` overwrote a supplied `passed=False` with `True`). The DTO now carries
+  `strict`/`passed`/counts as given, rejects absent or non-bool gate fields and counts that
+  disagree with `violations`. The one remaining Python copy of the pass/fail rule is
+  `build_guardrail_check_result` (`analysis/guardrail_reports.py`), waiting on a core
+  `guardrail_check_result` op (risk 10 above; S7). Core's native CLI also disagrees today
+  (`--strict` exits 2 on any violation, Python only on an immutable one).
 - Still open: the core finalize `tree_too_large` decline is answered by a Python-requested
   `source_fallback_diff` (S3), and the certified-batch decline reroute (S4).
 
