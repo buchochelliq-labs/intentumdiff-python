@@ -1,7 +1,7 @@
 {
   "_comment": "Classification of every module shipped in the intentumdiff package (issue #338). tests/unit/test_binding_surface.py enforces it: no unclassified module, no new behavior module, and no behavior module may grow past max_lines. Lower max_lines when a module shrinks; delete the entry when the module is removed.",
   "behavior_module_budget": 51,
-  "behavior_line_budget": 20126,
+  "behavior_line_budget": 20111,
   "modules": {
     "__init__.py": {
       "category": "packaging",
@@ -61,7 +61,7 @@
     "analysis/user_schemas.py": {
       "category": "behavior",
       "target": "core schema resolution (#297/#307)",
-      "max_lines": 248
+      "max_lines": 233
     },
     "api.py": {
       "category": "binding",

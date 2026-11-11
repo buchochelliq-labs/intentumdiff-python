@@ -212,12 +212,21 @@ def test_malformed_descriptor_fails_closed(tmp_path: Path) -> None:
     assert "language_id" in errors[0]
 
 
-def test_builtin_collision_is_rejected(tmp_path: Path) -> None:
+# Explicit expected result: the built-in provider roots core's schema_profiles "validate"
+# reserves (#298). Python keeps no copy of this catalogue.
+_CORE_BUILTIN_PROVIDER_ROOTS = (
+    "adf", "azure-pipelines", "databricks", "dbt", "embedded", "github-actions",
+    "kubernetes", "none", "openapi", "user",
+)
+
+
+@pytest.mark.parametrize("root", _CORE_BUILTIN_PROVIDER_ROOTS)
+def test_builtin_collision_is_rejected(tmp_path: Path, root: str) -> None:
     registry = tmp_path / "schemas"
     registry.mkdir()
     (registry / "collide.yml").write_text(
-        """
-language_id: dbt:custom
+        f"""
+language_id: {root}:custom
 match:
   filename_patterns: ["*.yml"]
 identity_fields: [name]
@@ -229,7 +238,53 @@ identity_fields: [name]
     profiles, errors = load_user_schema_profiles(env)
 
     assert profiles == ()
-    assert any("collides with the built-in provider root 'dbt'" in error for error in errors)
+    assert any(f"collides with the built-in provider root '{root}'" in error for error in errors)
+
+
+def test_non_builtin_root_is_accepted(tmp_path: Path) -> None:
+    registry = tmp_path / "schemas"
+    registry.mkdir()
+    (registry / "ok.yml").write_text(
+        """
+language_id: dbtx:custom
+match:
+  filename_patterns: ["*.yml"]
+identity_fields: [name]
+""",
+        encoding="utf-8",
+    )
+    profiles, errors = load_user_schema_profiles({"INTENTUMDIFF_USER_SCHEMA_DIR": str(registry)})
+
+    assert errors == ()
+    assert [p.language_id for p in profiles] == ["dbtx:custom"]
+
+
+def test_descriptor_rejection_is_transported_from_core(tmp_path: Path, monkeypatch) -> None:
+    """#298: the collision decision is core's; Python surfaces core's errors verbatim."""
+    from intentumdiff.analysis import user_schemas
+
+    registry = tmp_path / "schemas"
+    registry.mkdir()
+    (registry / "any.yml").write_text("language_id: acme\n", encoding="utf-8")
+    ops: list[str] = []
+
+    def fake_call(op: str, payload: str):
+        request = json.loads(payload)
+        ops.append(request["operation"])
+        if request["operation"] == "parse_documents":
+            return {"error": None, "documents": [{"language_id": "acme"}]}
+        if request["operation"] == "validate":
+            return {"errors": ["core says: canned rejection"], "profile": None}
+        if request["operation"] == "select_unique":
+            return list(range(len(request["profiles"])))
+        raise AssertionError(request)
+
+    monkeypatch.setattr(user_schemas, "_c_abi_call", fake_call)
+    profiles, errors = load_user_schema_profiles({"INTENTUMDIFF_USER_SCHEMA_DIR": str(registry)})
+
+    assert profiles == ()
+    assert errors == ("core says: canned rejection",)
+    assert ops == ["parse_documents", "validate", "select_unique"]
 
 
 def test_invalid_document_rejects_the_whole_file(tmp_path: Path) -> None:

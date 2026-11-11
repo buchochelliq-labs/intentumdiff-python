@@ -93,6 +93,10 @@ Proof: no reference from `src`; tests that only exercised these are removed or r
   core `schema_profiles`, and Python keeps only the fetch/cache I/O. Tests compare core's
   selection to explicit expected URLs. `tests/unit/test_binding_ownership_ratchet.py` keeps
   the retired definitions out of the package.
+- **#298 done**: `analysis/user_schemas.py` no longer keeps `BUILTIN_PROVIDER_ROOTS`; core
+  `schema_profiles` "validate" owns the built-in provider roots and the collision rule, and
+  Python only reads descriptor files. Tests check every core root against an explicit list
+  and that a canned core rejection surfaces verbatim.
 - Still open: the core finalize `tree_too_large` decline is answered by a Python-requested
   `source_fallback_diff` (S3), and the certified-batch decline reroute (S4).
 

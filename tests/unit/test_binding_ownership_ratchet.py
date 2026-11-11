@@ -20,6 +20,8 @@ _RETIRED = {
     "IDENTITY_FIELD_CANDIDATES": "schema_profiles derive/provider",
     "DBT_IDENTITY_FIELDS": "schema_profiles provider",
     "DBT_SCHEMA_BASE": "schema_profiles provider",
+    # #298: built-in provider-root catalogue (core schema_profiles validate).
+    "BUILTIN_PROVIDER_ROOTS": "schema_profiles validate",
 }
 
 _RETIRED_SUFFIXES = ("_SCHEMA_URL", "_SCHEMA_URLS")
