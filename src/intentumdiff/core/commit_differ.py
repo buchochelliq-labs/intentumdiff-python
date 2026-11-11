@@ -10,11 +10,12 @@ level:
 1. Runs ``SemanticDiffer.diff_commit()`` to get per-file ``SemanticDiff``
    objects for every changed file.
 2. Parses all changed files (old and new versions) into ``SemanticNode``
-   trees to build two ``SemanticIndex`` objects.
-3. Calls ``detect_cross_file_changes()`` (Rust core) to detect
-   ``MOVE_TO_MODULE`` / ``SPLIT_MODULE`` / ``CROSS_FILE_RENAME`` changes.
-4. Returns a ``CommitDiff`` with both the per-file diffs and the cross-file
-   changes.
+   trees (or records the parse-failure text for a side).
+3. Hands them to core's ``commit_cross_file_index`` (core #298), which builds
+   the symbol tables, detects ``MOVE_TO_MODULE`` / ``SPLIT_MODULE`` /
+   ``CROSS_FILE_RENAME`` changes and reports unindexed files.
+4. Returns a ``CommitDiff`` with the per-file diffs, the cross-file changes and
+   core's index completeness fields.
 
 Usage::
 
@@ -32,17 +33,16 @@ Usage::
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable, Iterator
 
-from intentumdiff.core.models import CommitDiff, CrossFileChange, DiffConfig, SemanticDiff
+from intentumdiff.core.models import CommitDiff, DiffConfig, SemanticDiff
 from intentumdiff.differ import SemanticDiffer
-from intentumdiff.analysis.cross_file import detect_cross_file_changes
-from intentumdiff.core.index import SemanticIndex
+from intentumdiff.analysis.cross_file import cross_file_change_from_core
 from intentumdiff.plugins.exceptions import PluginError, PluginNotFoundError
+from intentumdiff.rust_core import commit_cross_file_index
 from intentumdiff.sources.git_source import iter_changed_sources
 from intentumdiff.vcs.base import VcsBackend
 from intentumdiff.vcs.git_cli import resolve_repo_root
@@ -323,28 +323,10 @@ class CommitDiffer:
                 f"Commit diff incomplete ({len(errors)} of {changed_file_count} text files failed): "
                 f"{details}"
             )
-        # Build semantic indexes for changed files only.
-        old_file_contents = [
-            (result.old_path, result.file_diff.language, result.old_content)
-            for result in results
-        ]
-        new_file_contents = [
-            (result.new_path, result.file_diff.language, result.new_content)
-            for result in results
-        ]
-        cross_file_changes: list[CrossFileChange] = []
-        if old_file_contents:
-            old_index = self._build_index(old_file_contents)
-            new_index = self._build_index(new_file_contents)
-            # Both source sets are nonempty. An absent index means incomplete
-            # cross-file semantics, not an honest "no cross-file changes" result.
-            if old_index is None or new_index is None:
-                raise RuntimeError(
-                    "Commit semantic index incomplete: missing old or new index "
-                    "for changed text files"
-                )
-            cross_file_changes = self._detect_cross_file(old_index, new_index)
-
+        # Core owns commit-wide cross-file indexing and its completeness policy (#298):
+        # the host only parses each changed file (plugin dispatch) and hands core the
+        # trees, or the parse-failure text for a side it could not parse.
+        index = commit_cross_file_index([self._index_input(result) for result in results])
         return CommitDiff(
             old_ref=old_ref,
             new_ref=new_ref,
@@ -354,8 +336,14 @@ class CommitDiffer:
                 for violation in file_diff.guardrail_violations
             ],
             file_diffs=file_diffs,
-            cross_file_changes=cross_file_changes,
+            cross_file_changes=[
+                cross_file_change_from_core(item) for item in index["cross_file_changes"]
+            ],
             parse_errors=parse_errors,
+            cross_file_index_status=index["cross_file_index_status"],
+            cross_file_index_complete=index["cross_file_index_complete"],
+            indexed_file_count=index["indexed_file_count"],
+            index_errors=index["index_errors"],
         )
 
     # ------------------------------------------------------------------
@@ -422,60 +410,38 @@ class CommitDiffer:
             "Commit diff incomplete: no parser succeeded for changed text files" + details
         )
 
-    def _build_index(
-        self, file_contents: list[tuple[str, str, str]]
-    ) -> SemanticIndex | None:
-        """
-        Build a ``SemanticIndex`` from a list of (filename, language, content)
-        triples.
+    def _index_input(self, result: FileDiffResult) -> dict[str, object]:
+        """Marshal one changed file for core's ``commit_cross_file_index``."""
+        language = result.file_diff.language
+        entry: dict[str, object] = {
+            "old_filename": result.old_path,
+            "new_filename": result.new_path,
+            "language": language,
+        }
+        for side, filename, content in (
+            ("old", result.old_path, result.old_content),
+            ("new", result.new_path, result.new_content),
+        ):
+            tree, error = None, None
+            if content:
+                try:
+                    tree = self._parse_to_tree(filename, language, content).model_dump(
+                        mode="json"
+                    )
+                except PluginNotFoundError as exc:
+                    # A missing parser component is not a per-file index failure (core #298).
+                    raise RuntimeError(
+                        f"Commit semantic index unavailable for {filename!r}: {exc}"
+                    ) from exc
+                except (PluginError, ValueError, RuntimeError) as exc:
+                    # Transport the parse failure; core decides how it affects the index.
+                    error = str(exc) or type(exc).__name__
+            entry[f"{side}_tree"] = tree
+            entry[f"{side}_error"] = error
+        return entry
 
-        The symbol/reference tables are built by the Rust core
-        (index-engine-lib) inside ``SemanticIndex.build()``. Every changed text
-        file must contribute a tree; skipping one would silently remove its
-        cross-file evidence. Only an intentionally empty input list has no index.
-        """
-        if not file_contents:
-            return None
-
-        index = SemanticIndex()
-        for filename, language, content in file_contents:
-            try:
-                tree = self._parse_to_tree(filename, language, content)
-            except (PluginNotFoundError, PluginError, ValueError, RuntimeError) as exc:
-                raise RuntimeError(
-                    f"Commit semantic index incomplete for {filename!r}: {exc}"
-                ) from exc
-            if tree is None:
-                raise RuntimeError(
-                    f"Commit semantic index incomplete for {filename!r}: "
-                    "parser returned no semantic tree"
-                )
-            index.add_tree(filename, language, tree)
-
-        index.build()
-        return index
-
-    def _detect_cross_file(
-        self, old_index: SemanticIndex, new_index: SemanticIndex
-    ) -> list[CrossFileChange]:
-        """Detect cross-file changes between two indexes via the Rust core."""
-        return detect_cross_file_changes(old_index, new_index)
-
-    def _parse_to_tree(
-        self, filename: str, language: str, content: str
-    ) -> "SemanticNode | None":
-        """
-        Parse *content* to a SemanticNode tree.
-
-        Re-uses the ``SemanticDiffer`` FullParse parser pipeline for
-        commit-wide symbol indexing. Missing parsers must propagate to the
-        caller so a complete commit review cannot silently omit a text file.
-        """
-        # Match the existing source-diff and native Rust empty-side contract. Some
-        # parsers reject empty input; that is not a missing symbol-table failure.
-        if not content:
-            from intentumdiff._differ_presentation import _empty_semantic_tree
-            return _empty_semantic_tree(language)
+    def _parse_to_tree(self, filename: str, language: str, content: str) -> "SemanticNode":
+        """Parse *content* with the ``SemanticDiffer`` FullParse parser pipeline."""
         tree, _language = self._differ.parse(
             content,
             filename,

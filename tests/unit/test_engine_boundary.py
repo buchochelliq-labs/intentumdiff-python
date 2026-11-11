@@ -32,15 +32,12 @@ _KNOWN_PYTHON_ENGINE_DEBT_PATHS = {
     # logic — identity fields are marshaled into the Rust core's keyed matching.
     "src/intentumdiff/analysis/schema_resolver.py",
     "src/intentumdiff/analysis/user_schemas.py",
-    # differ.py's DTO/presentation + telemetry helper families (issue #81 split):
-    # _differ_presentation imports analysis.text_review (line-review presentation assembly;
-    # the review compute itself is Rust — text_review_generic.rs); _differ_runtime imports
+    # differ.py's telemetry helper family (issue #81 split): _differ_runtime imports
     # analysis.diagnostics (the DiagnosticsRecorder telemetry sink).
-    "src/intentumdiff/_differ_presentation.py",
     "src/intentumdiff/_differ_runtime.py",
     # Guardrail orchestration/reporting: the RULE EVALUATION is Rust (A1.3,
-    # evaluate_guardrail_rules); this marshals trees + reads the keyed_profiles /
-    # resource_profiles language-set CONSTANTS and builds the report DTOs.
+    # evaluate_guardrail_rules; rule-language validation is parse_guardrail_policy);
+    # this marshals trees and builds the report DTOs.
     "src/intentumdiff/analysis/guardrails.py",
     # CLI package (issue #80 split): imports analysis.guardrail_reports (report formatting).
     "src/intentumdiff/cli/_commands.py",
@@ -158,34 +155,6 @@ def test_strict_rust_gate_allows_batch_decline_to_native_finalize(monkeypatch) -
         "rust_finalize_review_v1",
     }
     assert diff.has_semantic_changes is True
-
-
-def test_strict_rust_gate_blocks_commit_token_fallback(monkeypatch) -> None:
-    # The commit fan-out re-runs every source through the native single-file path. With the
-    # Rust core disabled (kill switch) that path reaches the token-level fallback, which the
-    # RUST_ONLY gate blocks — and the fan-out re-raises the RustOnlyGateError instead of
-    # swallowing it as an ordinary per-file error (a swallow would silently drop the file).
-    import intentumdiff.differ as differ_module
-
-    monkeypatch.setenv(STRICT_GATE_ENV, "1")
-    changed_files = [
-        ("def f():\n    return 1\n", "def f():\n    return 2\n", "a.py", "a.py", None),
-    ]
-
-    with (
-        patch("git.Repo", return_value=MagicMock()),
-        patch(
-            "intentumdiff.sources.git_source.iter_changed_sources",
-            return_value=iter(changed_files),
-        ),
-        pytest.raises(
-            RuntimeError,
-            match=r"Rust-only engine gate prevented fallback: rust core disabled",
-        ),
-    ):
-        differ_module.SemanticDiffer(
-            DiffConfig(experimental_rust_core=False)
-        ).diff_commit(".")
 
 
 def test_strict_rust_gate_allows_commit_batch_decline_to_native(monkeypatch) -> None:

@@ -11,7 +11,6 @@ OPERATIONS = [
     ('try_rust_build_symbol_table', 'build_symbol_table_json', ('[]',), '{}'),
     ('try_rust_build_reference_table', 'build_reference_table_json', ('[]',), '{}'),
     ('try_rust_diff_symbol_tables', 'diff_symbol_tables_json', ('{}', '{}'), '[]'),
-    ('try_rust_evaluate_guardrail_rules', 'evaluate_guardrail_rules_json', ({},), '[]'),
 ]
 
 
@@ -81,23 +80,41 @@ def test_guardrail_application_cannot_pass_on_engine_failure(tmp_path, monkeypat
                                 config=DiffConfig(guardrails_enabled=True, guardrail_policy_path=policy))
 
 
+def _file_result(path, language, old, new):
+    from intentumdiff.core.commit_differ import FileDiffResult
+    from intentumdiff.core.models import SemanticDiff
+
+    return FileDiffResult(
+        file_diff=SemanticDiff(old_filename=path, new_filename=path, language=language),
+        old_path=path, new_path=path, old_content=old, new_content=new,
+    )
+
+
 def test_commit_index_does_not_omit_engine_failure(monkeypatch):
+    # core #298: the parse failure is transported to core, which reports it; it is never
+    # silently dropped and never turns the index into a clean "complete" answer.
     from intentumdiff.core.commit_differ import CommitDiffer
     differ = CommitDiffer()
     def fail(*args, **kwargs):
         raise RuntimeError('engine parse failed')
     monkeypatch.setattr(differ._differ, 'parse', fail)
-    with pytest.raises(RuntimeError, match='engine parse failed'):
-        differ._build_index([('changed.py', 'python', 'x = 2')])
+    result = differ.finalize_commit_diff(
+        [_file_result('changed.py', 'python', 'x = 1', 'x = 2')], [],
+        old_ref='HEAD~1', new_ref='HEAD',
+    )
+    assert result.cross_file_index_status == 'partial'
+    assert result.cross_file_index_complete is False
+    assert [(e.path, e.side) for e in result.index_errors] == [('changed.py', 'old')]
+    assert 'engine parse failed' in result.index_errors[0].reason
 
 
-def test_empty_sql_index_side_uses_canonical_tree(monkeypatch):
+def test_empty_sql_index_side_is_sent_as_absent(monkeypatch):
     from intentumdiff.core.commit_differ import CommitDiffer
-    from intentumdiff._differ_presentation import _empty_semantic_tree
 
     differ = CommitDiffer()
     def reject_empty(*args, **kwargs):
         raise AssertionError("absent source must not reach SQL parser")
     monkeypatch.setattr(differ._differ, "parse", reject_empty)
-    tree = differ._parse_to_tree("new.sql", "sql", "")
-    assert tree == _empty_semantic_tree("sql")
+    entry = differ._index_input(_file_result("new.sql", "sql", "", ""))
+    assert entry["old_tree"] is None and entry["new_tree"] is None
+    assert entry["old_error"] is None and entry["new_error"] is None

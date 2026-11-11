@@ -51,7 +51,6 @@ from intentumdiff.rust_core import attach_lsp_type_map
 
 if TYPE_CHECKING:
     from intentumdiff.core.index import SemanticIndex
-    from intentumdiff.core.models import SemanticNode
     from intentumdiff.differ import SemanticDiffer
 
 logger = logging.getLogger(__name__)

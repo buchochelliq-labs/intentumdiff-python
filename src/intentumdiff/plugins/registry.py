@@ -49,7 +49,7 @@ from intentumdiff.plugins.adapter import (
 )
 from intentumdiff.plugins.exceptions import PluginFuelExhausted, PluginNotFoundError, PluginLoadError, PluginSandboxViolation, PluginSecurityError
 from intentumdiff.plugins.language_metadata import fallback_language_info
-from intentumdiff.plugins.loader import LoadedPlugin, load_plugin
+from intentumdiff.plugins.loader import load_plugin
 
 logger = logging.getLogger(__name__)
 

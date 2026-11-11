@@ -1,0 +1,370 @@
+{
+  "_comment": "Classification of every module shipped in the intentumdiff package (issue #338). tests/unit/test_binding_surface.py enforces it: no unclassified module, no new behavior module, and no behavior module may grow past max_lines. Lower max_lines when a module shrinks; delete the entry when the module is removed.",
+  "behavior_module_budget": 51,
+  "behavior_line_budget": 20184,
+  "modules": {
+    "__init__.py": {
+      "category": "packaging",
+      "target": "package markers and re-exports"
+    },
+    "__main__.py": {
+      "category": "packaging",
+      "target": "package markers and re-exports"
+    },
+    "_differ_gate.py": {
+      "category": "behavior",
+      "target": "core review API (api::review_sources / review_text); keep only DTO marshalling",
+      "max_lines": 74
+    },
+    "_differ_presentation.py": {
+      "category": "behavior",
+      "target": "core review API (api::review_sources / review_text); keep only DTO marshalling",
+      "max_lines": 68
+    },
+    "_differ_runtime.py": {
+      "category": "behavior",
+      "target": "core review API (api::review_sources / review_text); keep only DTO marshalling",
+      "max_lines": 285
+    },
+    "analysis/__init__.py": {
+      "category": "packaging",
+      "target": "package markers and re-exports"
+    },
+    "analysis/compile_commands.py": {
+      "category": "binding",
+      "target": "thin adapter over one core operation"
+    },
+    "analysis/cross_file.py": {
+      "category": "binding",
+      "target": "thin adapter over one core operation"
+    },
+    "analysis/diagnostics.py": {
+      "category": "behavior",
+      "target": "core diagnostics trace (#54)",
+      "max_lines": 146
+    },
+    "analysis/guardrail_reports.py": {
+      "category": "behavior",
+      "target": "core guardrail_policy.rs (evaluation already Rust; reporting/orchestration remain)",
+      "max_lines": 256
+    },
+    "analysis/guardrails.py": {
+      "category": "behavior",
+      "target": "core guardrail_policy.rs (evaluation already Rust; reporting/orchestration remain)",
+      "max_lines": 241
+    },
+    "analysis/schema_resolver.py": {
+      "category": "behavior",
+      "target": "core schema resolution (#297/#307)",
+      "max_lines": 586
+    },
+    "analysis/user_schemas.py": {
+      "category": "behavior",
+      "target": "core schema resolution (#297/#307)",
+      "max_lines": 248
+    },
+    "api.py": {
+      "category": "binding",
+      "target": "thin adapter over one core operation"
+    },
+    "assets.py": {
+      "category": "binding",
+      "target": "thin adapter over one core operation"
+    },
+    "cache/__init__.py": {
+      "category": "packaging",
+      "target": "package markers and re-exports"
+    },
+    "cache/duckdb_store.py": {
+      "category": "behavior",
+      "target": "core cache_store.rs",
+      "max_lines": 98
+    },
+    "cache/sqlite_store.py": {
+      "category": "behavior",
+      "target": "core cache_store.rs",
+      "max_lines": 131
+    },
+    "cache/store.py": {
+      "category": "behavior",
+      "target": "core cache_store.rs",
+      "max_lines": 190
+    },
+    "cli/__init__.py": {
+      "category": "behavior",
+      "target": "native intentumdiff CLI (core crates/cli); Python console script to become a launcher",
+      "max_lines": 258
+    },
+    "cli/_commands.py": {
+      "category": "behavior",
+      "target": "native intentumdiff CLI (core crates/cli); Python console script to become a launcher",
+      "max_lines": 2248
+    },
+    "cli/_parser.py": {
+      "category": "behavior",
+      "target": "native intentumdiff CLI (core crates/cli); Python console script to become a launcher",
+      "max_lines": 1071
+    },
+    "cli/_shared.py": {
+      "category": "behavior",
+      "target": "native intentumdiff CLI (core crates/cli); Python console script to become a launcher",
+      "max_lines": 627
+    },
+    "content_type.py": {
+      "category": "binding",
+      "target": "thin adapter over one core operation"
+    },
+    "core/__init__.py": {
+      "category": "packaging",
+      "target": "package markers and re-exports"
+    },
+    "core/commit_differ.py": {
+      "category": "behavior",
+      "target": "core commit_plumbing.rs / index-engine",
+      "max_lines": 450
+    },
+    "core/config.py": {
+      "category": "binding",
+      "target": "thin adapter over one core operation"
+    },
+    "core/diffignore.py": {
+      "category": "behavior",
+      "target": "core commit_plumbing.rs / index-engine",
+      "max_lines": 81
+    },
+    "core/index.py": {
+      "category": "behavior",
+      "target": "core commit_plumbing.rs / index-engine",
+      "max_lines": 187
+    },
+    "core/indexer.py": {
+      "category": "behavior",
+      "target": "core commit_plumbing.rs / index-engine",
+      "max_lines": 771
+    },
+    "core/models.py": {
+      "category": "dto",
+      "target": "public data models and exceptions"
+    },
+    "differ.py": {
+      "category": "behavior",
+      "target": "core review API (api::review_sources / review_text); keep only DTO marshalling",
+      "max_lines": 1581
+    },
+    "github_app.py": {
+      "category": "behavior",
+      "target": "product shell outside this binding (designer decision)",
+      "max_lines": 303
+    },
+    "intentumdiff_rust_core/__init__.py": {
+      "category": "binding",
+      "target": "C-ABI transport and error translation"
+    },
+    "intentumdiff_rust_core/ffi.py": {
+      "category": "binding",
+      "target": "C-ABI transport and error translation"
+    },
+    "invariances/__init__.py": {
+      "category": "dto",
+      "target": "public data models and exceptions"
+    },
+    "live_server.py": {
+      "category": "behavior",
+      "target": "core live_server.rs + native intentumdiff-live-server",
+      "max_lines": 1477
+    },
+    "lsp/__init__.py": {
+      "category": "packaging",
+      "target": "package markers and re-exports"
+    },
+    "lsp/client.py": {
+      "category": "behavior",
+      "target": "core lsp_enrich.rs, or a product shell outside this binding",
+      "max_lines": 550
+    },
+    "lsp/config.py": {
+      "category": "behavior",
+      "target": "core lsp_enrich.rs, or a product shell outside this binding",
+      "max_lines": 96
+    },
+    "lsp/enricher.py": {
+      "category": "behavior",
+      "target": "core lsp_enrich.rs, or a product shell outside this binding",
+      "max_lines": 127
+    },
+    "lsp/exceptions.py": {
+      "category": "dto",
+      "target": "public data models and exceptions"
+    },
+    "lsp/launcher.py": {
+      "category": "behavior",
+      "target": "core lsp_enrich.rs, or a product shell outside this binding",
+      "max_lines": 273
+    },
+    "lsp/servers.py": {
+      "category": "behavior",
+      "target": "core lsp_enrich.rs, or a product shell outside this binding",
+      "max_lines": 356
+    },
+    "lsp_server/__init__.py": {
+      "category": "packaging",
+      "target": "package markers and re-exports"
+    },
+    "lsp_server/_codelens.py": {
+      "category": "binding",
+      "target": "thin adapter over one core operation"
+    },
+    "lsp_server/_diagnostics.py": {
+      "category": "binding",
+      "target": "thin adapter over one core operation"
+    },
+    "lsp_server/_handlers.py": {
+      "category": "behavior",
+      "target": "core lsp_enrich.rs, or a product shell outside this binding",
+      "max_lines": 233
+    },
+    "lsp_server/server.py": {
+      "category": "behavior",
+      "target": "core lsp_enrich.rs, or a product shell outside this binding",
+      "max_lines": 225
+    },
+    "plugins/__init__.py": {
+      "category": "packaging",
+      "target": "package markers and re-exports"
+    },
+    "plugins/adapter.py": {
+      "category": "behavior",
+      "target": "core parser_registry.rs and registry validators",
+      "max_lines": 402
+    },
+    "plugins/builtins.py": {
+      "category": "behavior",
+      "target": "core parser_registry.rs and registry validators",
+      "max_lines": 316
+    },
+    "plugins/exceptions.py": {
+      "category": "dto",
+      "target": "public data models and exceptions"
+    },
+    "plugins/hub.py": {
+      "category": "behavior",
+      "target": "core parser_registry.rs and registry validators",
+      "max_lines": 1153
+    },
+    "plugins/language_metadata.py": {
+      "category": "behavior",
+      "target": "core parser_registry.rs and registry validators",
+      "max_lines": 250
+    },
+    "plugins/loader.py": {
+      "category": "behavior",
+      "target": "core parser_registry.rs and registry validators",
+      "max_lines": 1266
+    },
+    "plugins/registry.py": {
+      "category": "behavior",
+      "target": "core parser_registry.rs and registry validators",
+      "max_lines": 1131
+    },
+    "plugins/registry_schema.py": {
+      "category": "behavior",
+      "target": "core parser_registry.rs and registry validators",
+      "max_lines": 280
+    },
+    "rust_core.py": {
+      "category": "binding",
+      "target": "C-ABI transport and error translation"
+    },
+    "serve/__init__.py": {
+      "category": "packaging",
+      "target": "package markers and re-exports"
+    },
+    "serve/_app.py": {
+      "category": "behavior",
+      "target": "product shell outside this binding (designer decision)",
+      "max_lines": 478
+    },
+    "sources/__init__.py": {
+      "category": "packaging",
+      "target": "package markers and re-exports"
+    },
+    "sources/base.py": {
+      "category": "behavior",
+      "target": "core git_source.rs / vcs_backend.rs",
+      "max_lines": 52
+    },
+    "sources/file_source.py": {
+      "category": "behavior",
+      "target": "core git_source.rs / vcs_backend.rs",
+      "max_lines": 61
+    },
+    "sources/git_source.py": {
+      "category": "behavior",
+      "target": "core git_source.rs / vcs_backend.rs",
+      "max_lines": 254
+    },
+    "sources/live_buffer_source.py": {
+      "category": "behavior",
+      "target": "core git_source.rs / vcs_backend.rs",
+      "max_lines": 153
+    },
+    "sources/patch_source.py": {
+      "category": "binding",
+      "target": "thin adapter over one core operation"
+    },
+    "sources/string_source.py": {
+      "category": "behavior",
+      "target": "core git_source.rs / vcs_backend.rs",
+      "max_lines": 44
+    },
+    "testing.py": {
+      "category": "behavior",
+      "target": "product shell outside this binding (designer decision)",
+      "max_lines": 165
+    },
+    "vcs/__init__.py": {
+      "category": "packaging",
+      "target": "package markers and re-exports"
+    },
+    "vcs/_safe_path.py": {
+      "category": "behavior",
+      "target": "core git_source.rs / vcs_backend.rs",
+      "max_lines": 57
+    },
+    "vcs/base.py": {
+      "category": "behavior",
+      "target": "core git_source.rs / vcs_backend.rs",
+      "max_lines": 142
+    },
+    "vcs/git_backend.py": {
+      "category": "behavior",
+      "target": "core git_source.rs / vcs_backend.rs",
+      "max_lines": 97
+    },
+    "vcs/git_cli.py": {
+      "category": "behavior",
+      "target": "core git_source.rs / vcs_backend.rs",
+      "max_lines": 73
+    },
+    "vcs/hg_backend.py": {
+      "category": "behavior",
+      "target": "core git_source.rs / vcs_backend.rs",
+      "max_lines": 94
+    },
+    "vcs/perforce_backend.py": {
+      "category": "behavior",
+      "target": "core git_source.rs / vcs_backend.rs",
+      "max_lines": 115
+    },
+    "vcs/svn_backend.py": {
+      "category": "behavior",
+      "target": "core git_source.rs / vcs_backend.rs",
+      "max_lines": 105
+    },
+    "watcher.py": {
+      "category": "behavior",
+      "target": "product shell outside this binding (designer decision)",
+      "max_lines": 259
+    }
+  }
+}

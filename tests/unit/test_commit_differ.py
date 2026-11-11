@@ -10,9 +10,7 @@ mocked so the tests run without a real repository.
 
 from __future__ import annotations
 
-import json
 import os
-import subprocess
 import threading
 import time
 from contextlib import contextmanager
@@ -35,7 +33,7 @@ from intentumdiff.core.models import (
 )
 from intentumdiff.differ import SemanticDiffer
 from intentumdiff.plugins.exceptions import PluginFuelExhausted
-from intentumdiff.rust_core import RustCoreBatchDiffsAttempt, RustCoreCommitJsonAttempt
+from intentumdiff.rust_core import RustCoreBatchDiffsAttempt
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -115,20 +113,19 @@ class TestConstruction:
 # ---------------------------------------------------------------------------
 
 
+def _fanout_differ(config: DiffConfig) -> SemanticDiffer:
+    """A differ whose commit batch shortcut is skipped, so every file takes the per-file
+    fan-out the test patches (``_run_pipeline``)."""
+    differ = SemanticDiffer(config)
+    differ._rust_core_python_batch_skip_reason = lambda: "test drives the per-file fan-out"
+    return differ
+
+
 class TestSemanticDifferParallelCommit:
     @contextmanager
     def _patch_sources(self, changed_files: list[tuple]):
-        # Neutralise BOTH source collectors. The certified working-tree path tries
-        # collect_working_tree_python_sources_fast first; since #98/A2.4.3 that shells
-        # git directly (no longer via the mocked git.Repo), so it must be patched to
-        # None to fall back to the mocked iter_changed_sources — otherwise it runs real
-        # git against the test's cwd.
         with (
             patch("intentumdiff.vcs.git_cli.resolve_repo_root", return_value=str(Path.cwd())),
-            patch(
-                "intentumdiff.sources.git_source.collect_working_tree_python_sources_fast",
-                return_value=None,
-            ),
             patch(
                 "intentumdiff.sources.git_source.iter_changed_sources",
                 return_value=iter(changed_files),
@@ -143,7 +140,7 @@ class TestSemanticDifferParallelCommit:
         )
 
     def test_parallel_commit_uses_worker_local_registries(self):
-        differ = SemanticDiffer(DiffConfig(parallel=2, experimental_rust_core=False))
+        differ = _fanout_differ(DiffConfig(parallel=2))
         barrier = threading.Barrier(2)
         registry_ids: list[int] = []
         seen_lock = threading.Lock()
@@ -175,7 +172,7 @@ class TestSemanticDifferParallelCommit:
         assert id(differ._registry) not in registry_ids
 
     def test_parallel_commit_preserves_source_order(self):
-        differ = SemanticDiffer(DiffConfig(parallel=2, experimental_rust_core=False))
+        differ = _fanout_differ(DiffConfig(parallel=2))
 
         def fake_pipeline(self, old, new, filename, language_hint, **kwargs):
             if filename == "a.py":
@@ -206,7 +203,7 @@ class TestSemanticDifferParallelCommit:
         """Missing parsers cannot silently omit changed text, even alongside a success."""
         from intentumdiff.plugins.exceptions import PluginNotFoundError
 
-        differ = SemanticDiffer(DiffConfig(parallel=parallel, experimental_rust_core=False))
+        differ = _fanout_differ(DiffConfig(parallel=parallel))
 
         def fake_pipeline(self, old, new, filename, language_hint, **kwargs):
             if filename == "unknown.xyz":
@@ -246,8 +243,8 @@ class TestSemanticDifferParallelCommit:
     )
     def test_commit_file_failure_is_not_silent_partial_success(self, parallel, error):
         """A failed changed file must not disappear behind a successful sibling."""
-        differ = SemanticDiffer(
-            DiffConfig(parallel=parallel, experimental_rust_core=False)
+        differ = _fanout_differ(
+            DiffConfig(parallel=parallel)
         )
 
         def fake_pipeline(self, old, new, filename, language_hint, **kwargs):
@@ -273,8 +270,8 @@ class TestSemanticDifferParallelCommit:
         assert caught.value.__cause__ is error
 
     def test_phase_profile_records_source_collection_once(self):
-        differ = SemanticDiffer(
-            DiffConfig(parallel=2, profile_phases=True, experimental_rust_core=False)
+        differ = _fanout_differ(
+            DiffConfig(parallel=2, profile_phases=True)
         )
 
         def fake_pipeline(self, old, new, filename, language_hint, **kwargs):
@@ -559,198 +556,6 @@ class TestSemanticDifferParallelCommit:
 
         assert [result.staging_status for result in results] == ["staged", None]
 
-    def test_certified_commit_json_collects_python_batch_without_model_conversion(self):
-        differ = SemanticDiffer(DiffConfig(experimental_rust_core=True))
-        changed_files = [
-            ("old a", "new a", "a.py", "a.py", "staged"),
-            ("old b", "new b", "b.py", "b.py", None),
-        ]
-        commit_bytes = json.dumps(
-            {
-                "old_ref": "HEAD",
-                "new_ref": "",
-                "guardrail_violations": [],
-                "file_diffs": [
-                    _semantic_diff("a.py", "a.py").model_dump(mode="json"),
-                    _semantic_diff("b.py", "b.py").model_dump(mode="json"),
-                ],
-                "cross_file_changes": [],
-                "parse_errors": [],
-            }
-        ).encode("utf-8")
-        calls: list[dict[str, Any]] = []
-
-        def fake_commit_json(**kwargs):
-            calls.append(kwargs)
-            return RustCoreCommitJsonAttempt(
-                control={"status": "complete", "certification": "python_native_v4kb"},
-                commit_diff_json=commit_bytes,
-                adapter_phase_timings=[
-                    {
-                        "name": "rust_core_commit_pyo3_call",
-                        "duration_ms": 3.0,
-                        "shared": True,
-                        "summary_exclude": True,
-                    }
-                ],
-                backend_version="0.4.0",
-            )
-
-        repo_patch, sources_patch = self._patch_git_inputs(changed_files)
-        with (
-            repo_patch,
-            sources_patch,
-            patch(
-                "intentumdiff.plugins.builtins.python_parser_entry",
-                return_value="python_parser.wasm",
-            ),
-            patch(
-                "intentumdiff.differ.try_rust_core_working_tree_commit_json",
-                return_value=RustCoreCommitJsonAttempt(fallback_reason="unavailable: test"),
-            ),
-            patch(
-                "intentumdiff.differ.try_rust_core_commit_json",
-                side_effect=fake_commit_json,
-            ),
-        ):
-            attempt = differ._diff_commit_certified_json(".")
-
-        assert attempt.used is True
-        assert attempt.commit_diff_json == commit_bytes
-        assert calls[0]["old_ref"] == "HEAD"
-        assert calls[0]["new_ref"] == ""
-        assert calls[0]["parallel"] is True
-        assert calls[0]["max_workers"] == min(os.cpu_count() or 1, 2)
-        assert [file["staging_status"] for file in calls[0]["files"][:1]] == ["staged"]
-        assert calls[0]["files"][0]["parser_plugin_id"] == "python"
-        phase_names = [phase["name"] for phase in attempt.adapter_phase_timings]
-        assert phase_names[0] == "source_collection"
-        assert "rust_core_commit_source_filtering" in phase_names
-        assert "rust_core_commit_pyo3_call" in phase_names
-        assert attempt.control["source_collection_ms"] >= 0
-        assert attempt.control["source_filter_ms"] >= 0
-
-    def test_certified_commit_json_falls_back_for_mixed_languages_without_backend_call(
-        self, monkeypatch
-    ):
-        # This asserts the NON-strict decline-return contract (the certified-JSON fast
-        # path returns a fallback attempt for a mixed-language batch so the caller can
-        # re-run natively). Under the RUST_ONLY gate the same decline instead RAISES —
-        # that strict behaviour is covered by
-        # test_certified_commit_json_strict_rust_gate_blocks_unavailable_backend_fallback —
-        # so pin this test to the non-strict mode regardless of the ambient suite env.
-        from intentumdiff.differ import STRICT_RUST_GATE_ENV
-
-        monkeypatch.delenv(STRICT_RUST_GATE_ENV, raising=False)
-        differ = SemanticDiffer(DiffConfig(experimental_rust_core=True))
-        changed_files = [
-            ("old a", "new a", "a.py", "a.py", None),
-            ("old go", "new go", "main.go", "main.go", None),
-        ]
-
-        def fail_commit_json(**kwargs):
-            raise AssertionError("mixed-language commit should not reach Rust JSON fast path")
-
-        repo_patch, sources_patch = self._patch_git_inputs(changed_files)
-        with (
-            repo_patch,
-            sources_patch,
-            patch(
-                "intentumdiff.plugins.builtins.python_parser_entry",
-                return_value="python_parser.wasm",
-            ),
-            patch(
-                "intentumdiff.differ.try_rust_core_working_tree_commit_json",
-                return_value=RustCoreCommitJsonAttempt(fallback_reason="unavailable: test"),
-            ),
-            patch(
-                "intentumdiff.differ.try_rust_core_commit_json",
-                side_effect=fail_commit_json,
-            ),
-        ):
-            attempt = differ._diff_commit_certified_json(".")
-
-        assert attempt.used is False
-        assert attempt.fallback_reason == (
-            "certified commit JSON requires all changed files to be Python"
-        )
-
-    def test_certified_commit_json_strict_rust_gate_blocks_python_batch_skip(self, monkeypatch):
-        from intentumdiff.differ import STRICT_RUST_GATE_ENV
-
-        monkeypatch.setenv(STRICT_RUST_GATE_ENV, "1")
-        differ = SemanticDiffer(
-            DiffConfig(experimental_rust_core=True, extra_grammars={"python": "custom.py"})
-        )
-
-        with pytest.raises(
-            RuntimeError,
-            match=(
-                r"Rust-only engine gate prevented fallback: "
-                "custom Python grammar requires Python pipeline"
-            ),
-        ):
-            differ._diff_commit_certified_json(".")
-
-    def test_certified_commit_json_strict_rust_gate_blocks_working_tree_fallback(self, monkeypatch):
-        from intentumdiff.differ import STRICT_RUST_GATE_ENV
-
-        monkeypatch.setenv(STRICT_RUST_GATE_ENV, "1")
-        differ = SemanticDiffer(DiffConfig(experimental_rust_core=True))
-
-        with (
-            patch(
-                "intentumdiff.differ.try_rust_core_working_tree_commit_json",
-                return_value=RustCoreCommitJsonAttempt(fallback_reason="backend unavailable"),
-            ),
-            pytest.raises(
-                RuntimeError,
-                match=r"Rust-only engine gate prevented fallback: backend unavailable",
-            ),
-        ):
-            differ._diff_commit_certified_json(".")
-
-    def test_certified_commit_json_strict_rust_gate_blocks_unavailable_backend_fallback(
-        self, monkeypatch
-    ):
-        from intentumdiff.differ import STRICT_RUST_GATE_ENV
-
-        monkeypatch.setenv(STRICT_RUST_GATE_ENV, "1")
-        differ = SemanticDiffer(DiffConfig(experimental_rust_core=True))
-
-        with (
-            patch(
-                "intentumdiff.differ.try_rust_core_working_tree_commit_json",
-                return_value=RustCoreCommitJsonAttempt(fallback_reason="unavailable: test"),
-            ),
-            patch(
-                "intentumdiff.plugins.builtins.python_parser_entry",
-                return_value="python_parser.wasm",
-            ),
-            patch(
-                "intentumdiff.sources.git_source.iter_changed_sources",
-                return_value=iter(
-                    [
-                        ("old a", "new a", "a.py", "a.py", None),
-                        ("old b", "new b", "main.go", "main.go", None),
-                    ]
-                ),
-            ),
-            patch(
-                "intentumdiff.sources.git_source.collect_working_tree_python_sources_fast",
-                return_value=None,
-            ),
-            pytest.raises(
-                RuntimeError,
-                match=(
-                    r"Rust-only engine gate prevented fallback: "
-                    "certified commit JSON requires all changed files to be Python"
-                ),
-            ),
-        ):
-            differ._diff_commit_certified_json(".")
-
-
 class TestDiffCommit:
     def _make_differ(self) -> CommitDiffer:
         cd = CommitDiffer()
@@ -855,11 +660,10 @@ class TestDiffCommit:
                 cd.diff_commit(".")
         assert isinstance(exc.value.__cause__, PluginNotFoundError)
 
-    def test_missing_required_index_rejects_successful_commit(self):
+    def test_finalized_commit_carries_core_index_completeness(self):
         from intentumdiff.core.commit_differ import FileDiffResult
 
         cd = self._make_differ()
-        cd._build_index = MagicMock(return_value=None)
         record = FileDiffResult(
             file_diff=_semantic_diff("good.py", "good.py"),
             old_path="good.py",
@@ -867,10 +671,11 @@ class TestDiffCommit:
             old_content="before",
             new_content="after",
         )
-        with pytest.raises(RuntimeError, match="missing old or new index"):
-            cd.finalize_commit_diff(
-                [record], [], old_ref="HEAD~1", new_ref="HEAD"
-            )
+        result = cd.finalize_commit_diff([record], [], old_ref="HEAD~1", new_ref="HEAD")
+        assert result.cross_file_index_status == "complete"
+        assert result.cross_file_index_complete is True
+        assert result.indexed_file_count == 1
+        assert result.index_errors == []
 
     def test_plugin_not_found_fails_closed(self):
         cd = self._make_differ()
@@ -1015,7 +820,9 @@ class TestDiffCommit:
         old_idx = _built_index_for_commit(("utils.py", "python", _fn("old-helper", "helper")))
         new_idx = _built_index_for_commit(("helpers.py", "python", _fn("new-helper", "helper")))
 
-        changes = cd._detect_cross_file(old_idx, new_idx)
+        from intentumdiff.analysis.cross_file import detect_cross_file_changes
+
+        changes = detect_cross_file_changes(old_idx, new_idx)
 
         move = [c for c in changes if c.change_type == ChangeType.MOVE_TO_MODULE]
         assert len(move) == 1
@@ -1143,16 +950,6 @@ class TestParseToTree:
         cd._differ._registry.detect_parser = MagicMock(side_effect=PluginNotFoundError("no parser"))
         with pytest.raises(PluginNotFoundError, match="no parser"):
             cd._parse_to_tree("file.unknown", "unknown", "content")
-
-    def test_missing_index_tree_fails_with_filename(self):
-        cd = CommitDiffer()
-        cd._parse_to_tree = MagicMock(return_value=None)
-        with pytest.raises(RuntimeError, match="missing.py.*parser returned no semantic tree"):
-            cd._build_index([("missing.py", "python", "def f(): pass")])
-
-    def test_empty_file_list_is_the_only_absent_index(self):
-        cd = CommitDiffer()
-        assert cd._build_index([]) is None
 
     def test_propagates_engine_parse_exception(self):
         cd = CommitDiffer()

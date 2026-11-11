@@ -300,12 +300,6 @@ def _identity_fields_for(
     return frozenset({*candidate.identity_fields, *derive_identity_fields(schema)})
 
 
-def schema_cache_fingerprint(resolution: SchemaResolution | None) -> str:
-    if resolution is None:
-        return "schema:none"
-    return resolution.cache_fingerprint
-
-
 def schema_resolution_metadata(
     resolution: SchemaResolution | None,
 ) -> dict[str, Any] | None:

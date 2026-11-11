@@ -986,7 +986,6 @@ def inspect_wasm_in_wheel(
 
     The wheel is not installed — no Python code from the plugin is executed.
     """
-    import io
     import zipfile
 
     checksums: dict[str, str] = {}

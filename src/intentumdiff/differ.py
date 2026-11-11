@@ -41,9 +41,6 @@ from intentumdiff._differ_gate import (
     RUST_CERTIFIED_LANGUAGES as RUST_CERTIFIED_LANGUAGES,
 )
 from intentumdiff._differ_gate import (
-    RUST_FINALIZE_LANGUAGES as RUST_FINALIZE_LANGUAGES,
-)
-from intentumdiff._differ_gate import (
     STRICT_RUST_GATE_ENV as STRICT_RUST_GATE_ENV,
 )
 from intentumdiff._differ_gate import (
@@ -56,16 +53,7 @@ from intentumdiff._differ_gate import (
     _rust_certified_languages as _rust_certified_languages,
 )
 from intentumdiff._differ_gate import (
-    _rust_finalize_languages as _rust_finalize_languages,
-)
-from intentumdiff._differ_gate import (
-    _strict_rust_only_enabled as _strict_rust_only_enabled,
-)
-from intentumdiff._differ_gate import (
     _validate_git_ref as _validate_git_ref,
-)
-from intentumdiff._differ_presentation import (
-    _count_cst_nodes as _count_cst_nodes,
 )
 from intentumdiff._differ_presentation import (
     _count_semantic_nodes as _count_semantic_nodes,
@@ -80,37 +68,13 @@ from intentumdiff._differ_presentation import (
     _has_error_node as _has_error_node,
 )
 from intentumdiff._differ_presentation import (
-    _markdown_section_heading_rename_presentation as _markdown_section_heading_rename_presentation,
-)
-from intentumdiff._differ_presentation import (
-    _markdown_section_move_presentation as _markdown_section_move_presentation,
-)
-from intentumdiff._differ_presentation import (
-    _node_to_dict as _node_to_dict,
-)
-from intentumdiff._differ_presentation import (
-    _root_structural_hash as _root_structural_hash,
-)
-from intentumdiff._differ_presentation import (
     _token_fallback_diff as _token_fallback_diff,
 )
 from intentumdiff._differ_presentation import (
     _validate_tree_ids as _validate_tree_ids,
 )
 from intentumdiff._differ_runtime import (
-    _DEFAULT_PLUGIN_FUEL as _DEFAULT_PLUGIN_FUEL,
-)
-from intentumdiff._differ_runtime import (
-    _EXPLICIT_FUEL_EXHAUSTION_TEST_CAP as _EXPLICIT_FUEL_EXHAUSTION_TEST_CAP,
-)
-from intentumdiff._differ_runtime import (
     _FUEL_HOTSPOT_ABSOLUTE as _FUEL_HOTSPOT_ABSOLUTE,
-)
-from intentumdiff._differ_runtime import (
-    _FUEL_HOTSPOT_PER_KB as _FUEL_HOTSPOT_PER_KB,
-)
-from intentumdiff._differ_runtime import (
-    _FUEL_HOTSPOT_PER_LINE as _FUEL_HOTSPOT_PER_LINE,
 )
 from intentumdiff._differ_runtime import (
     _apply_file_lifecycle_to_diff as _apply_file_lifecycle_to_diff,
@@ -126,9 +90,6 @@ from intentumdiff._differ_runtime import (
 )
 from intentumdiff._differ_runtime import (
     _fuel_budget as _fuel_budget,
-)
-from intentumdiff._differ_runtime import (
-    _fuel_hotspot_for_call as _fuel_hotspot_for_call,
 )
 from intentumdiff._differ_runtime import (
     _infer_file_lifecycle as _infer_file_lifecycle,
@@ -155,7 +116,6 @@ from intentumdiff.analysis.guardrails import (
 # resource) are now Rust-authoritative — no Python enricher on the diff path (#90).
 from intentumdiff.analysis.schema_resolver import (
     resolve_schema,
-    schema_cache_fingerprint,
     schema_resolution_metadata,
 )
 from intentumdiff.analysis.user_schemas import (
@@ -165,7 +125,6 @@ from intentumdiff.analysis.user_schemas import (
 from intentumdiff.cache.store import CacheStore
 from intentumdiff.core.models import (
     Change,
-    ChangeGroupKind,
     ChangeStreamEvent,
     ChangeStreamPhase,
     ChangeType,
@@ -181,16 +140,12 @@ from intentumdiff.plugins.exceptions import (
     PluginNotFoundError,
     PluginOutputError,
 )
-from intentumdiff.plugins.loader import _strip_trivia_impl
 from intentumdiff.plugins.registry import PluginRegistry
 from intentumdiff.rust_core import (
-    RustCoreCommitJsonAttempt,
     enrich_node_facts,
     try_register_user_xml_dialects,
     try_rust_core_batch_diff,
     try_rust_core_batch_diffs,
-    try_rust_core_commit_json,
-    try_rust_core_working_tree_commit_json,
     try_rust_profile_label_enrichment,
 )
 from intentumdiff.sources.base import Source
@@ -374,8 +329,6 @@ class SemanticDiffer:
         return diff.model_copy(update={"metadata": metadata})
 
     def _rust_core_python_batch_skip_reason(self) -> str | None:
-        if not self._config.experimental_rust_core:
-            return "disabled"
         if self._config.diagnostics:
             return "diagnostics require Python pipeline"
         if self._config.extra_trivia_types:
@@ -397,14 +350,6 @@ class SemanticDiffer:
             return "enrichers require Python pipeline"
         if self._registry.get_diff_analyzers("python"):
             return "diff analyzers require Python pipeline"
-        return None
-
-    @staticmethod
-    def _rust_core_parallel_workers(parallel: int | bool) -> int | None:
-        if parallel is True:
-            return os.cpu_count() or 1
-        if isinstance(parallel, int) and parallel > 0:
-            return parallel
         return None
 
     @staticmethod
@@ -643,137 +588,6 @@ class SemanticDiffer:
         adaptive_fuel = _fuel_budget(self._config.plugin_fuel, 20_000_000 + len(diff_json) * 100)
         return renderer.render(diff_json, fuel=adaptive_fuel)
 
-    def _diff_commit_certified_json(
-        self,
-        repo_path: str | os.PathLike[str] = ".",
-        old_ref: str = "HEAD",
-        new_ref: str = "",
-    ) -> RustCoreCommitJsonAttempt:
-        """Return Rust-certified CommitDiff JSON bytes for narrow Python batches."""
-        _validate_git_ref(old_ref)
-        _validate_git_ref(new_ref)
-        rust_batch_skip_reason = self._rust_core_python_batch_skip_reason()
-        if rust_batch_skip_reason is not None:
-            _raise_rust_only_gate_error(rust_batch_skip_reason)
-            return RustCoreCommitJsonAttempt(fallback_reason=rust_batch_skip_reason)
-
-        if not new_ref:
-            rust_batch_parallel, rust_batch_workers, _rust_batch_parallel_auto = (
-                True,
-                self._rust_core_parallel_workers(self._config.parallel),
-                True,
-            )
-            working_tree_attempt = try_rust_core_working_tree_commit_json(
-                repo_path=repo_path,
-                old_ref=old_ref,
-                config=self._config,
-                parallel=rust_batch_parallel,
-                max_workers=rust_batch_workers,
-            )
-            if working_tree_attempt.used:
-                return working_tree_attempt
-            if working_tree_attempt.fallback_reason and not (
-                "does not expose diff_working_tree_python_commit_json"
-                in working_tree_attempt.fallback_reason
-                or working_tree_attempt.fallback_reason.startswith("unavailable:")
-            ):
-                _raise_rust_only_gate_error(working_tree_attempt.fallback_reason)
-                return working_tree_attempt
-
-        from intentumdiff.plugins.builtins import python_parser_entry
-        from intentumdiff.sources.git_source import (
-            collect_working_tree_python_sources_fast,
-            iter_changed_sources,
-        )
-
-        source_started = time.perf_counter()
-        fast_collection = (
-            collect_working_tree_python_sources_fast(repo_path, old_ref) if not new_ref else None
-        )
-        if fast_collection is None:
-            sources = list(iter_changed_sources(repo_path, old_ref, new_ref))
-            fast_fallback_reason = None
-        else:
-            sources, fast_fallback_reason = fast_collection
-        source_collection_ms = (time.perf_counter() - source_started) * 1000
-        if fast_fallback_reason is not None:
-            _raise_rust_only_gate_error(fast_fallback_reason)
-            return RustCoreCommitJsonAttempt(fallback_reason=fast_fallback_reason)
-        if not sources:
-            return RustCoreCommitJsonAttempt()
-
-        parser_wasm_path = python_parser_entry()
-        request_files: list[dict[str, Any]] = []
-        source_filter_started = time.perf_counter()
-        for old_content, new_content, old_path, new_path, staging_status in sources:
-            effective_new_path = new_path if new_path is not None else old_path
-            file_lifecycle = _infer_file_lifecycle(old_content, new_content, staging_status)
-            old_path_lower = old_path.lower()
-            effective_new_path_lower = effective_new_path.lower()
-            if not (
-                old_path_lower.endswith((".py", ".pyi"))
-                or effective_new_path_lower.endswith((".py", ".pyi"))
-            ):
-                fallback_attempt = RustCoreCommitJsonAttempt(
-                    fallback_reason="certified commit JSON requires all changed files to be Python"
-                )
-                _raise_rust_only_gate_error(fallback_attempt.fallback_reason)
-                return fallback_attempt
-            # Protected guardrail rules currently apply only to config/profile
-            # languages, not Python.  Avoid a per-file policy search here; any
-            # actual policy-file change is excluded by the Python-only gate.
-            request_file: dict[str, Any] = {
-                "old_source": old_content,
-                "new_source": new_content,
-                "old_filename": old_path,
-                "new_filename": effective_new_path,
-                "language": "python",
-                "parser_plugin_id": "python",
-                "parser_wasm_path": parser_wasm_path,
-                "file_lifecycle": file_lifecycle,
-            }
-            if staging_status is not None:
-                request_file["staging_status"] = staging_status
-            request_files.append(request_file)
-        source_filter_ms = (time.perf_counter() - source_filter_started) * 1000
-
-        rust_batch_parallel, rust_batch_workers, _rust_batch_parallel_auto = (
-            self._rust_core_batch_parallel_plan(len(request_files), self._config.parallel)
-        )
-        attempt = try_rust_core_commit_json(
-            files=request_files,
-            old_ref=old_ref,
-            new_ref=new_ref,
-            config=self._config,
-            parallel=rust_batch_parallel,
-            max_workers=rust_batch_workers,
-        )
-        if not attempt.used:
-            _raise_rust_only_gate_error(attempt.fallback_reason)
-            return attempt
-        adapter_phase_timings = [
-            {
-                "name": "source_collection",
-                "duration_ms": round(source_collection_ms, 3),
-                "shared": True,
-            },
-            {
-                "name": "rust_core_commit_source_filtering",
-                "duration_ms": round(source_filter_ms, 3),
-                "shared": True,
-            },
-            *attempt.adapter_phase_timings,
-        ]
-        control = dict(attempt.control)
-        control["source_collection_ms"] = round(source_collection_ms, 3)
-        control["source_filter_ms"] = round(source_filter_ms, 3)
-        return RustCoreCommitJsonAttempt(
-            control=control,
-            commit_diff_json=attempt.commit_diff_json,
-            adapter_phase_timings=adapter_phase_timings,
-            backend_version=attempt.backend_version,
-        )
-
     def diff_commit(
         self,
         repo_path: str | os.PathLike[str] = ".",
@@ -814,7 +628,6 @@ class SemanticDiffer:
         sources = list(iter_changed_sources(policy_root, old_ref, new_ref))
         source_collection_ms = (time.perf_counter() - source_started) * 1000
         rust_batch_results: dict[int, SemanticDiff] = {}
-        rust_batch_attempted: set[int] = set()
         rust_batch_skip_reason = self._rust_core_python_batch_skip_reason()
         if rust_batch_skip_reason is None and sources:
             from intentumdiff.plugins.builtins import python_parser_entry
@@ -860,7 +673,6 @@ class SemanticDiffer:
                 time.perf_counter() - rust_batch_source_filter_started
             ) * 1000
             if request_files:
-                rust_batch_attempted = set(request_to_source_index)
                 (
                     rust_batch_parallel,
                     rust_batch_workers,
@@ -986,10 +798,7 @@ class SemanticDiffer:
                     continue
                 # Files the commit BATCH attempted but declined re-run through the normal
                 # differ with the Rust core ON: the batch re-attempt is one cheap native
-                # call and the per-stage finalize routing then serves. (The old
-                # experimental_rust_core=False fallback differ meant "python pipeline";
-                # post-retirement it means the token-fallback kill switch — a comment-only
-                # commit came back as a token ADDITION instead of style-only.)
+                # call and the per-stage finalize routing then serves.
                 run_differ = self
                 try:
                     results.append(
@@ -1223,10 +1032,6 @@ class SemanticDiffer:
             _dialects = user_xml_dialects_payload(_user_profiles)
             # Empty configuration must clear previously registered native dialects.
             try_register_user_xml_dialects(_dialects)
-        schema_fingerprint = schema_cache_fingerprint(schema_resolution)
-        cache_schema_suffix = (
-            "" if schema_fingerprint == "schema:none" else f"|{schema_fingerprint}"
-        )
         schema_metadata = schema_resolution_metadata(schema_resolution)
         if schema_metadata is not None:
             diagnostics.summary["schema"] = schema_metadata
@@ -1251,9 +1056,6 @@ class SemanticDiffer:
                 reason="C/C++ compile database context resolved",
                 metadata=compile_metadata,
             )
-        compile_cache_suffix = (
-            "" if compile_metadata is None else f"|compile:{compile_metadata['fingerprint']}"
-        )
 
         # Both physical sides may carry protection. Display aliases must not
         # hide the source policy on moves out of protected directories (#262).
@@ -1265,8 +1067,7 @@ class SemanticDiffer:
         cache_grammar_id = parser.grammar_id
 
         if (
-            self._config.experimental_rust_core
-            and language in _rust_certified_languages()
+            language in _rust_certified_languages()
             and not diagnostics.enabled
             # ``test_matching_engine`` is the dual-run truthiness override.
             # When set, it forces the matching stage to either Rust or
@@ -1437,27 +1238,15 @@ class SemanticDiffer:
             # Rust owns profile enrichment. Missing ABI handlers are fatal:
             # accepting un-enriched trees silently changes identity matching
             # and can suppress a meaningful diff. Never substitute Python logic.
-            # Gated by language so non-profile diffs pay no tree-JSON roundtrip.
-            if language.lower() in {"json", "yaml"}:
-                _identity_fields = tuple(schema_resolution.identity_fields)
-                old_tree = try_rust_profile_label_enrichment(
-                    old_tree, old_raw, language, identity_fields=_identity_fields
-                )
-                new_tree = try_rust_profile_label_enrichment(
-                    new_tree, new_raw, language, identity_fields=_identity_fields
-                )
-            if language.lower() in {"css", "scss", "html", "xml", "mdx"}:
-                old_tree = try_rust_profile_label_enrichment(old_tree, old_raw, language)
-                new_tree = try_rust_profile_label_enrichment(new_tree, new_raw, language)
-            if language.lower() in {"hcl", "puppet"}:
-                old_tree = try_rust_profile_label_enrichment(old_tree, old_raw, language)
-                new_tree = try_rust_profile_label_enrichment(new_tree, new_raw, language)
-            if language.lower() == "sql":
-                old_tree = try_rust_profile_label_enrichment(old_tree, old_raw, language)
-                new_tree = try_rust_profile_label_enrichment(new_tree, new_raw, language)
-            if language.lower() in {"asm", "bash", "delphi"}:
-                old_tree = try_rust_profile_label_enrichment(old_tree, old_raw, language)
-                new_tree = try_rust_profile_label_enrichment(new_tree, new_raw, language)
+            # Every language is sent: core decides which profile family (if any)
+            # applies and returns other trees unchanged.
+            _identity_fields = tuple(sorted(schema_resolution.identity_fields))
+            old_tree = try_rust_profile_label_enrichment(
+                old_tree, old_raw, language, identity_fields=_identity_fields
+            )
+            new_tree = try_rust_profile_label_enrichment(
+                new_tree, new_raw, language, identity_fields=_identity_fields
+            )
             _validate_tree_ids(old_tree, filename)
             _validate_tree_ids(new_tree, filename)
         diagnostics.record(
@@ -1512,216 +1301,140 @@ class SemanticDiffer:
                 policy_old_filename=policy_old_filename,
                 diagnostics=diagnostics,
             )
-        # ── 9. GumTree matching ────────────────────────────────────────────────
-        # The matching engine is selected by (in priority order):
-        # 1. ``DiffConfig.test_matching_engine`` — test-only hard override used
-        #    by the dual-run truthiness matrix to certify both contracts.
-        # 2. The production default: Rust's language-agnostic matcher
-        #    (``intentumdiff_rust_core.diff_semantic_tree_json``) when the Rust
-        #    core is available and diagnostics are off. This is migration
-        #    step 2 of ``docs/ENGINE_BOUNDARY_AUDIT.md``. The four engine
-        #    gaps that previously blocked this swap (Python dedent, JS
-        #    calc_hash MOVE, YAML block↔flow, C# var↔explicit) are closed —
-        #    see ``the retired NOISE_SUPPRESSION_RETUNE doc (git history)`` Phases A–D.
-        # 3. (retired) The python GumTree oracle was deleted with the transitional
-        #    layer (issue #57 payoff, stage 4b) — no python matching fallback exists.
+        # ── 9. Matching + finalize routing ─────────────────────────────────────
+        # Rust owns matching and finalization; there is no Python matching path.
+        # ``DiffConfig.test_matching_engine`` is a test-only override of the routing
+        # decision below ("python" is retired and raises).
         test_engine = self._config.test_matching_engine
-        rust_attempt: Any = None
-        # Skip Rust matching when either tree is empty (file add/delete
-        # lifecycle). The Rust language-agnostic matcher treats empty-root
-        # ↔ content-root as a structural match, which produces a single
-        # MODIFICATION instead of the correct ADDITION (or DELETION) for
-        # the file-lifecycle case. Letting the Python oracle handle these
-        # edge cases preserves the ADDITION/DELETION shape that downstream
-        # tests and review UIs depend on.
-        either_tree_empty = (
-            not old_tree.children or not new_tree.children
-        )
-        use_rust_matching = (
-            test_engine == "rust"
-            or (
-                test_engine is None
-                and self._config.experimental_rust_core
-                and not diagnostics.enabled
-                and not either_tree_empty
-            )
-        )
         # ── 9-fin. Rust finalize routing (issue #57) ──────────────────────────
-        # Certified languages skip the python edit-script/refinement/presentation stages
-        # entirely: the Rust core runs the certified batch's refine+finalize from the
-        # semantic trees and returns the finished review. Eligibility is independent of
-        # the matching-engine choice (issue #57 payoff, fallback-tier closure):
+        # Every parser language (first-party, dbt, third-party plugins) is finalized
+        # by core: there is no Python language allowlist in front of it. The Rust
+        # core runs the certified batch's refine+finalize from the semantic trees and
+        # returns the finished review:
         # - empty-tree lifecycle is handled INSIDE Rust finalize (DELETION+ADDITION
-        #   root pair, python parity), so either_tree_empty no longer excludes;
+        #   root pair);
         # - enriched trees flow through routing (enrichment ran at stage 7b);
         # - registered diff analyzers run on the ROUTED diff below, mirroring 13.5.
         # Diagnostics mode routes too (issue #57 payoff, stage 4a): the shell-side
         # records (parse, trees, guardrails, finalize summary below) still fire; the
         # per-pass refinement trace is Rust-internal (INTENTUMDIFF_FINALIZE_DEBUG probe)
         # until #54 formalizes it into the recorder.
-        rust_finalize_eligible = test_engine == "rust" or (
-            test_engine is None and self._config.experimental_rust_core
-        )
-        if rust_finalize_eligible and language in _rust_finalize_languages():
-            from intentumdiff.rust_core import try_rust_finalize_review
-
-            with profiler.phase("rust_finalize_review"):
-                finalize_result = try_rust_finalize_review(
-                    old_tree=old_tree,
-                    new_tree=new_tree,
-                    old_source=old_content,
-                    new_source=new_content,
-                    language=language,
-                    config=self._config,
-                    collect_trace=diagnostics.enabled,
-                )
-            if finalize_result is not None:
-                if finalize_result.get("fallback_diff") is not None:
-                    fallback_diff = finalize_result["fallback_diff"].model_copy(update={
-                        "old_filename": filename,
-                        "new_filename": new_filename if new_filename is not None else filename})
-                    fallback_diff = _apply_file_lifecycle_to_diff(fallback_diff, file_lifecycle)
-                    return apply_guardrails_to_diff(fallback_diff, old_tree=None, new_tree=None,
-                        old_source=old_raw, new_source=new_raw, config=self._config,
-                        policy_filename=policy_source_filename,
-                        policy_old_filename=policy_old_filename, diagnostics=diagnostics)
-                diagnostics.record(
-                    stage="finalize",
-                    action="rust_finalize_review",
-                    rule_id="rust_core.finalize_review_v1",
-                    reason="routed per-stage finalize served the review",
-                    metadata={
-                        "engine_owner": "rust",
-                        "change_count": len(finalize_result["changes"]),
-                        "is_style_only": finalize_result["is_style_only"],
-                    },
-                )
-                # Per-pass trace (issue #54): every probed refine/finalize pass reports
-                # its surviving change count; the recorder mirrors the python pipeline's
-                # per-stage observability on the Rust path.
-                for entry in finalize_result.get("trace") or []:
-                    diagnostics.record_count(
-                        stage="finalize",
-                        action=str(entry.get("pass", "")),
-                        rule_id="rust_core.finalize_pass",
-                        reason="rust finalize pass completed",
-                        count=int(entry.get("changes_after", 0)),
-                    )
-                from intentumdiff.rust_core import complete_routed_review
-
-                routed = complete_routed_review(
-                    finalized=finalize_result, old_tree=old_tree, new_tree=new_tree,
-                    old_source=old_content, new_source=new_content,
-                    old_filename=filename,
-                    new_filename=new_filename if new_filename is not None else filename,
-                    language=language, schema_metadata=schema_metadata,
-                    compile_metadata=compile_metadata,
-                )
-                for group in routed.change_groups:
-                    diagnostics.record_group(stage="invariance", group=group)
-                routed = _apply_file_lifecycle_to_diff(routed, file_lifecycle)
-                routed = apply_guardrails_to_diff(
-                    routed,
-                    old_tree=old_tree,
-                    new_tree=new_tree,
-                    old_source=old_content,
-                    new_source=new_content,
-                    config=self._config,
-                    policy_filename=policy_source_filename,
-                    policy_old_filename=policy_old_filename,
-                    diagnostics=diagnostics,
-                )
-                # Diff-analyzer pass on the routed diff (stage 13.5 mirror; issue #57
-                # payoff): analyzers are diff->diff Wasm transforms over the final
-                # SemanticDiff JSON, so the routed review feeds them identically.
-                with profiler.phase("diff_analyzers"):
-                    routed = self._run_diff_analyzers_on_routed(
-                        routed, language, filename, adaptive_fuel
-                    )
-                return _attach_run_telemetry(routed, engine_telemetry, diagnostics)
-            # The Rust finalize declined (tree_too_large / backend unavailable). The
-            # transitional python pipeline is retired (issue #57 payoff, stage 4b) —
-            # degrade honestly to the coarse token-level diff, same as parse errors.
-            logger.warning(
-                "Rust finalize declined for %r (%s) — Rust source fallback",
-                filename,
-                language,
-            )
-            _raise_rust_only_gate_error("rust finalize declined")
-            diagnostics.record(
-                stage="fallback",
-                action="token_fallback",
-                rule_id="pipeline.finalize_declined",
-                reason="rust finalize declined; python pipeline retired (#57)",
-            )
-            fallback_metadata: dict[str, Any] = {
-                "fallback_reason": "rust_finalize_declined",
-            }
-            if diagnostics.enabled:
-                diagnostics.summary.update(
-                    {"early_exit": "token_fallback", "final_change_count": None}
-                )
-                fallback_metadata["diagnostics"] = diagnostics.snapshot()
-            fallback_diff = _token_fallback_diff(
-                old_raw,
-                new_raw,
-                filename,
-                new_filename if new_filename is not None else filename,
-                language,
-                metadata=fallback_metadata,
-            )
-            fallback_diff = _apply_file_lifecycle_to_diff(fallback_diff, file_lifecycle)
-            return apply_guardrails_to_diff(
-                fallback_diff,
-                old_tree=None,
-                new_tree=None,
-                old_source=old_raw,
-                new_source=new_raw,
-                config=self._config,
-                policy_filename=policy_source_filename,
-                policy_old_filename=policy_old_filename,
-                diagnostics=diagnostics,
-            )
         if test_engine == "python":
             raise NotImplementedError(
                 "test_matching_engine='python' was retired with the transitional "
                 "python pipeline (issue #57); the Rust finalize routing serves every "
                 "certified language."
             )
+        from intentumdiff.rust_core import try_rust_finalize_review
 
-        # Rust core disabled (DiffConfig kill switch / INTENTUMDIFF_RUST_CORE=0): the
-        # transitional python pipeline is retired (issue #57 payoff) — semantic
-        # diffing REQUIRES the Rust core; degrade honestly to the token-level diff.
+        with profiler.phase("rust_finalize_review"):
+            finalize_result = try_rust_finalize_review(
+                old_tree=old_tree,
+                new_tree=new_tree,
+                old_source=old_content,
+                new_source=new_content,
+                language=language,
+                config=self._config,
+                collect_trace=diagnostics.enabled,
+            )
+        if finalize_result is not None:
+            if finalize_result.get("fallback_diff") is not None:
+                fallback_diff = finalize_result["fallback_diff"].model_copy(update={
+                    "old_filename": filename,
+                    "new_filename": new_filename if new_filename is not None else filename})
+                fallback_diff = _apply_file_lifecycle_to_diff(fallback_diff, file_lifecycle)
+                return apply_guardrails_to_diff(fallback_diff, old_tree=None, new_tree=None,
+                    old_source=old_raw, new_source=new_raw, config=self._config,
+                    policy_filename=policy_source_filename,
+                    policy_old_filename=policy_old_filename, diagnostics=diagnostics)
+            diagnostics.record(
+                stage="finalize",
+                action="rust_finalize_review",
+                rule_id="rust_core.finalize_review_v1",
+                reason="routed per-stage finalize served the review",
+                metadata={
+                    "engine_owner": "rust",
+                    "change_count": len(finalize_result["changes"]),
+                    "is_style_only": finalize_result["is_style_only"],
+                },
+            )
+            # Per-pass trace (issue #54): every probed refine/finalize pass reports
+            # its surviving change count; the recorder mirrors the python pipeline's
+            # per-stage observability on the Rust path.
+            for entry in finalize_result.get("trace") or []:
+                diagnostics.record_count(
+                    stage="finalize",
+                    action=str(entry.get("pass", "")),
+                    rule_id="rust_core.finalize_pass",
+                    reason="rust finalize pass completed",
+                    count=int(entry.get("changes_after", 0)),
+                )
+            from intentumdiff.rust_core import complete_routed_review
+
+            routed = complete_routed_review(
+                finalized=finalize_result, old_tree=old_tree, new_tree=new_tree,
+                old_source=old_content, new_source=new_content,
+                old_filename=filename,
+                new_filename=new_filename if new_filename is not None else filename,
+                language=language, schema_metadata=schema_metadata,
+                compile_metadata=compile_metadata,
+            )
+            for group in routed.change_groups:
+                diagnostics.record_group(stage="invariance", group=group)
+            routed = _apply_file_lifecycle_to_diff(routed, file_lifecycle)
+            routed = apply_guardrails_to_diff(
+                routed,
+                old_tree=old_tree,
+                new_tree=new_tree,
+                old_source=old_content,
+                new_source=new_content,
+                config=self._config,
+                policy_filename=policy_source_filename,
+                policy_old_filename=policy_old_filename,
+                diagnostics=diagnostics,
+            )
+            # Diff-analyzer pass on the routed diff (stage 13.5 mirror; issue #57
+            # payoff): analyzers are diff->diff Wasm transforms over the final
+            # SemanticDiff JSON, so the routed review feeds them identically.
+            with profiler.phase("diff_analyzers"):
+                routed = self._run_diff_analyzers_on_routed(
+                    routed, language, filename, adaptive_fuel
+                )
+            return _attach_run_telemetry(routed, engine_telemetry, diagnostics)
+        # The Rust finalize declined (tree_too_large / backend unavailable). The
+        # transitional python pipeline is retired (issue #57 payoff, stage 4b) —
+        # degrade honestly to the coarse token-level diff, same as parse errors.
         logger.warning(
-            "Rust core disabled for %r — Rust source fallback (python pipeline retired)",
+            "Rust finalize declined for %r (%s) — Rust source fallback",
             filename,
+            language,
         )
-        _raise_rust_only_gate_error("rust core disabled")
+        _raise_rust_only_gate_error("rust finalize declined")
         diagnostics.record(
             stage="fallback",
             action="token_fallback",
-            rule_id="pipeline.rust_core_disabled",
-            reason="rust core disabled; python pipeline retired (#57)",
+            rule_id="pipeline.finalize_declined",
+            reason="rust finalize declined; python pipeline retired (#57)",
         )
-        disabled_metadata: dict[str, Any] = {
-            "fallback_reason": "rust_core_disabled",
+        fallback_metadata: dict[str, Any] = {
+            "fallback_reason": "rust_finalize_declined",
         }
         if diagnostics.enabled:
             diagnostics.summary.update(
                 {"early_exit": "token_fallback", "final_change_count": None}
             )
-            disabled_metadata["diagnostics"] = diagnostics.snapshot()
-        disabled_diff = _token_fallback_diff(
+            fallback_metadata["diagnostics"] = diagnostics.snapshot()
+        fallback_diff = _token_fallback_diff(
             old_raw,
             new_raw,
             filename,
             new_filename if new_filename is not None else filename,
             language,
-            metadata=disabled_metadata,
+            metadata=fallback_metadata,
         )
-        disabled_diff = _apply_file_lifecycle_to_diff(disabled_diff, file_lifecycle)
+        fallback_diff = _apply_file_lifecycle_to_diff(fallback_diff, file_lifecycle)
         return apply_guardrails_to_diff(
-            disabled_diff,
+            fallback_diff,
             old_tree=None,
             new_tree=None,
             old_source=old_raw,

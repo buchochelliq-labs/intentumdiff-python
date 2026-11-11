@@ -13,15 +13,12 @@ path-traversal attacks before any I/O is performed.
 from __future__ import annotations
 
 import os
-import subprocess
 from collections.abc import Iterator
-from pathlib import Path
 
 from intentumdiff import content_type as _content_type
 from intentumdiff.sources.base import Source
 from intentumdiff.vcs._safe_path import safe_policy_path, safe_relative_path, safe_working_tree_path
 from intentumdiff.vcs.git_cli import (
-    parse_name_status_z as _parse_name_status_z,
     resolve_repo_root,
     run_git_bytes,
 )
@@ -49,189 +46,9 @@ def _safe_file_path(file_path: str) -> str:
     return safe_relative_path(file_path)
 
 
-# Change-type codes that produce binary-safe text blobs on both sides.
-_TEXT_CHANGE_TYPES = frozenset({"A", "D", "M", "R", "C"})
-
-
 # Sentinel new_ref values recognised by iter_changed_sources.
 _REF_STAGED = ":staged"     # compare HEAD to the git index (staged files only)
 _REF_UNPUSHED = ":unpushed" # compare remote tracking branch to HEAD (unpushed commits)
-
-
-_ChangedSource = tuple[str, str, str, str, str | None]
-
-
-def _is_python_path(path: str) -> bool:
-    return path.lower().endswith((".py", ".pyi"))
-
-
-def _decode_git_path(path: bytes) -> str:
-    # A Git pathname need not be UTF-8 on every filesystem. Without a
-    # lossless byte transport to Rust, reject rather than invent a new name.
-    try:
-        return path.decode("utf-8", errors="strict")
-    except UnicodeDecodeError as exc:
-        raise UnicodeError("Invalid UTF-8 in Git pathname") from exc
-
-
-def _decode_nul_paths(data: bytes, *, source: str) -> list[str]:
-    """Require a complete, nonempty Git -z path inventory (#239)."""
-    if not data:
-        return []
-    if not data.endswith(b"\0"):
-        raise RuntimeError(f"Incomplete {source} output: missing NUL terminator")
-    raw_paths = data[:-1].split(b"\0")
-    if any(not path for path in raw_paths):
-        raise RuntimeError(f"Empty path in {source} output")
-    return [_decode_git_path(path) for path in raw_paths]
-
-
-def _untracked_paths(repo_path: str) -> list[str]:
-    data = run_git_bytes(repo_path, ["ls-files", "--others", "--exclude-standard", "-z"])
-    return sorted(_decode_nul_paths(data, source="git ls-files -z"))
-
-
-def _read_working_tree_text(path: Path) -> str | None:
-    try:
-        data = path.read_bytes()
-    except OSError as exc:
-        # A failed read of an enumerated untracked file is not evidence that
-        # the file is binary; skipping it would certify an incomplete diff (#242).
-        raise RuntimeError(
-            f"Failed to read untracked working-tree source {path}: {exc}"
-        ) from exc
-    # Content-based routing: binary/image assets are skipped (reviewed via the
-    # perceptual asset diff), never decoded and sent to the text engine.
-    return _decode_text_or_none(data)
-
-
-def _read_commit_paths_batch(
-    repo_path: str,
-    rev: str,
-    paths: list[str],
-) -> dict[str, str]:
-    unique_paths = list(dict.fromkeys(paths))
-    if not unique_paths:
-        return {}
-    if any("\n" in path or "\r" in path for path in unique_paths):
-        raise ValueError("git cat-file batch path contains a newline")
-
-    request = "".join(f"{rev}:{path}\n" for path in unique_paths).encode("utf-8")
-    output = run_git_bytes(repo_path, ["cat-file", "--batch"], input_bytes=request)
-    result: dict[str, str] = {}
-    pos = 0
-    for path in unique_paths:
-        header_end = output.find(b"\n", pos)
-        if header_end < 0:
-            raise RuntimeError("malformed git cat-file batch output")
-        header = output[pos:header_end]
-        pos = header_end + 1
-        if header.endswith(b" missing"):
-            # Every requested non-addition path must exist in the base tree.
-            # An empty fallback would manufacture semantic change evidence (#241).
-            raise RuntimeError(f"Missing tracked Git baseline {rev}:{path}")
-        parts = header.split()
-        if len(parts) != 3 or parts[1] != b"blob":
-            raise RuntimeError("malformed git cat-file batch blob header")
-        try:
-            size = int(parts[2])
-        except ValueError as exc:
-            raise RuntimeError("malformed git cat-file batch size") from exc
-        if size < 0 or pos + size >= len(output) or output[pos + size] != 0x0A:
-            raise RuntimeError("incomplete git cat-file batch blob payload")
-        content = output[pos : pos + size]
-        pos += size + 1  # consume mandatory delimiter
-        try:
-            result[path] = content.decode("utf-8", errors="strict")
-        except UnicodeDecodeError as exc:
-            raise UnicodeError(
-                f"Invalid UTF-8 in tracked Git baseline {rev}:{path}"
-            ) from exc
-    if pos != len(output):
-        raise RuntimeError("Unexpected extra git cat-file batch output")
-    return result
-
-
-def collect_working_tree_python_sources_fast(
-    repo_path: "str | os.PathLike[str]",
-    old_ref: str,
-) -> "tuple[list[_ChangedSource], str | None] | None":
-    """
-    Fast working-tree collector for the certified Rust Python batch path.
-
-    Returns ``None`` when the conservative Git CLI path cannot be used and the
-    caller should fall back to ``iter_changed_sources``.  A non-empty fallback
-    reason means the diff contains a non-Python changed file, so the certified
-    Python-only path must not run.
-    """
-    try:
-        working_dir = resolve_repo_root(repo_path)
-        # git resolves the ref on each call; using it directly (vs a pre-resolved
-        # sha) is equivalent here and avoids an extra round-trip.
-        old_rev = old_ref
-        diff_output = run_git_bytes(working_dir, ["diff", "--name-status", "-z", old_rev])
-        entries = _parse_name_status_z(diff_output)
-        if any(code not in _TEXT_CHANGE_TYPES for code, _, _ in entries):
-            return ([], "Unsupported Git change status requires Rust review")
-        untracked_paths = _untracked_paths(working_dir)
-        if not entries and not untracked_paths:
-            return [], None
-        for _code, old_path, new_path in entries:
-            if not (_is_python_path(old_path) or _is_python_path(new_path)):
-                return (
-                    [],
-                    "certified commit JSON requires all changed files to be Python",
-                )
-        for untracked_path in untracked_paths:
-            if not _is_python_path(untracked_path):
-                return (
-                    [],
-                    "certified commit JSON requires all changed files to be Python",
-                )
-
-        staged_output = run_git_bytes(
-            working_dir,
-            ["diff", "--cached", "--name-only", "-z", old_rev],
-        )
-        staged_paths = set(
-            _decode_nul_paths(staged_output, source="git diff --cached --name-only -z")
-        )
-        old_paths = [old_path for code, old_path, _new_path in entries if code != "A"]
-        old_contents = _read_commit_paths_batch(working_dir, old_rev, old_paths)
-        sources: list[_ChangedSource] = []
-        root = Path(working_dir)
-        for code, old_path, new_path in entries:
-            _safe_file_path(old_path)
-            _safe_file_path(new_path)
-            old_content = "" if code == "A" else old_contents[old_path]
-            if code == "D":
-                new_content = ""
-            else:
-                disk_path = safe_working_tree_path(root, new_path)
-                if not disk_path.exists():
-                    new_content = ""
-                else:
-                    new_content = disk_path.read_text(encoding="utf-8")
-            staging_status = (
-                "staged"
-                if old_path in staged_paths or new_path in staged_paths
-                else "unstaged"
-            )
-            sources.append((old_content, new_content, old_path, new_path, staging_status))
-        for untracked_path in untracked_paths:
-            _safe_file_path(untracked_path)
-            disk_path = safe_working_tree_path(root, untracked_path)
-            new_content = _read_working_tree_text(disk_path)
-            if new_content is None:
-                continue
-            sources.append(("", new_content, untracked_path, untracked_path, "untracked"))
-        return sources, None
-    except UnicodeError:
-        # The optimizer must not turn a bad source encoding into an altered,
-        # successful semantic review or silently reroute it as a normal decline.
-        raise
-    except (OSError, subprocess.SubprocessError, ValueError):
-        return None
 
 
 def iter_changed_sources(

@@ -572,21 +572,33 @@ class EditDelta(BaseModel, frozen=True):
 # ---------------------------------------------------------------------------
 
 
-def _native_rust_core_default() -> bool:
-    """Return the default certified Rust-core policy.
+_RUST_CORE_ENV_VARS = ("INTENTUMDIFF_RUST_CORE", "INTENTUMDIFF_EXPERIMENTAL_RUST_CORE")
+_RUST_CORE_ON_VALUES = frozenset({"1", "true", "yes", "on", "auto", "native"})
 
-    IntentumDiff ships the first-party Rust core in release wheels, so supported
-    native paths should use it automatically.  The legacy
-    ``INTENTUMDIFF_EXPERIMENTAL_RUST_CORE`` env var is still accepted for compatibility,
-    while ``INTENTUMDIFF_RUST_CORE=0`` is the explicit fallback escape hatch.
+
+class RustCoreRequiredError(ValueError):
+    """The configuration asked to run without the Rust core, which is mandatory."""
+
+
+def _native_rust_core_default() -> bool:
+    """Validate the legacy Rust-core environment switches; the core is mandatory.
+
+    ``INTENTUMDIFF_RUST_CORE`` (and the legacy ``INTENTUMDIFF_EXPERIMENTAL_RUST_CORE``)
+    may be unset, empty or an "on" value. There is no Python engine to fall back to, so
+    a disable value (``0``/``false``/``off``/...) or any unrecognised value raises
+    instead of silently routing every file to a fallback review.
     """
 
-    raw = os.getenv("INTENTUMDIFF_RUST_CORE")
-    if raw is None:
-        raw = os.getenv("INTENTUMDIFF_EXPERIMENTAL_RUST_CORE")
-    if raw is None or raw.strip() == "":
-        return True
-    return raw.strip().lower() in {"1", "true", "yes", "on", "auto", "native"}
+    for name in _RUST_CORE_ENV_VARS:
+        raw = os.getenv(name)
+        if raw is None or raw.strip() == "" or raw.strip().lower() in _RUST_CORE_ON_VALUES:
+            continue
+        raise RustCoreRequiredError(
+            f"{name}={raw.strip()!r} is not supported: the Rust core is mandatory and cannot "
+            f"be disabled (there is no Python engine). Unset {name} or set it to one of "
+            f"{sorted(_RUST_CORE_ON_VALUES)}."
+        )
+    return True
 
 
 class Match(NamedTuple):
@@ -629,7 +641,17 @@ class DiffConfig(BaseModel):
     experimental_rust_core: bool = Field(
         default_factory=_native_rust_core_default,
     )
-    """Use the certified Rust core for supported first-party native paths."""
+    """Compatibility field: the Rust core is mandatory, so only ``True`` is accepted."""
+
+    @field_validator("experimental_rust_core")
+    @classmethod
+    def _rust_core_is_mandatory(cls, value: bool) -> bool:
+        if value is not True:
+            raise RustCoreRequiredError(
+                "experimental_rust_core=False is not supported: the Rust core is mandatory "
+                "(there is no Python engine)."
+            )
+        return value
     diagnostics_max_events: int = Field(default=500, ge=0)
     guardrails_enabled: bool = True
     guardrails_strict: bool = False
@@ -798,6 +820,22 @@ class CrossFileChange(BaseModel, frozen=True):
     description: str = ""
 
 
+class CommitIndexError(BaseModel, frozen=True):
+    """One changed file core could not index for cross-file analysis (#298).
+
+    ``code`` is core's stable machine code (``fuel_exceeded``, ``output_limit_exceeded``,
+    ``malformed_tree``, ``parser_error``); ``reason`` is the human-readable text.
+    """
+
+    path: str
+    old_filename: str = ""
+    new_filename: str = ""
+    language: str = ""
+    side: Literal["old", "new", "both"]
+    code: str
+    reason: str = ""
+
+
 class GuardrailViolation(BaseModel, frozen=True):
     """A project policy rule matched a protected semantic change."""
 
@@ -874,3 +912,10 @@ class CommitDiff(BaseModel, frozen=True):
     file_diffs: list[SemanticDiff] = Field(default_factory=list)
     cross_file_changes: list[CrossFileChange] = Field(default_factory=list)
     parse_errors: list[str] = Field(default_factory=list)
+    # Commit cross-file index completeness, as reported by core (#298). ``None`` when the
+    # producer did not run core's commit index (the fields are core's, never inferred here).
+    # ``cross_file_changes`` proves "no cross-file change" only when the status is "complete".
+    cross_file_index_status: Literal["complete", "partial"] | None = None
+    cross_file_index_complete: bool | None = None
+    indexed_file_count: int | None = None
+    index_errors: list[CommitIndexError] = Field(default_factory=list)
