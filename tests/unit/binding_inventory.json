@@ -1,7 +1,7 @@
 {
   "_comment": "Classification of every module shipped in the intentumdiff package (issue #338). tests/unit/test_binding_surface.py enforces it: no unclassified module, no new behavior module, and no behavior module may grow past max_lines. Lower max_lines when a module shrinks; delete the entry when the module is removed.",
   "behavior_module_budget": 51,
-  "behavior_line_budget": 20099,
+  "behavior_line_budget": 20098,
   "modules": {
     "__init__.py": {
       "category": "packaging",
@@ -200,7 +200,7 @@
     "lsp/servers.py": {
       "category": "behavior",
       "target": "core lsp_enrich.rs, or a product shell outside this binding",
-      "max_lines": 356
+      "max_lines": 355
     },
     "lsp_server/__init__.py": {
       "category": "packaging",
