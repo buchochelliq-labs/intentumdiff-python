@@ -20,7 +20,10 @@ class TestText(LineScenarioSuite):
         "modify_line": Case(_TXT, "line one\nline TWO edited\nline three\nline four\n", modifications=(("line two", "line TWO edited"),), exact_total=1, forbid_node_types=("text_span",)),
         "modify_two_lines": Case(_TXT, "line ONE\nline two\nline THREE\nline four\n", modifications=(("line one", "line ONE"), ("line three", "line THREE")), exact_total=2, forbid_node_types=("text_span",)),
         # Fixed 2026-07-06 (issue #14): identical lines relocated within a prose file net out.
-        "reorder_lines": Case(_TXT, "line two\nline one\nline three\nline four\n", exact_total=0),
+        # core#248: reordering lines is a real change: one MOVE of the relocated line,
+        # never a style-only "no changes".
+        "reorder_lines": Case(_TXT, "line two\nline one\nline three\nline four\n",
+                              not_style_only=True, moves=("line one",), exact_total=1),
         "whitespace_only": Case(_TXT, "line one\nline two\n   \nline three\nline four\n", exact_total=0),
         "identical": Case(_TXT, _TXT, style_only=True),
     }
