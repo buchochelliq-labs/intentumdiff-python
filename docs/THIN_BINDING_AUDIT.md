@@ -121,6 +121,10 @@ Proof: no reference from `src`; tests that only exercised these are removed or r
   native CLI already did (previously Python failed only on an immutable one). Proof:
   `tests/unit/test_guardrail_check_result_core.py` (canned verdict passes through unchanged
   in one op; real-core strict/advisory matrix).
+- **#306 (part of S10)**: `SemanticDiffer.render("terminal")` transports core
+  `render_cli_review` (width 80, no colour), the CLI's renderer, instead of its own Rich
+  markup renderer; source text such as `[/].py` stays literal and API/CLI output is equal.
+  The fuel formulas are one Python helper (`_fuel_budget`, #308) until core has `fuel_budget`.
 - Still open: the core finalize `tree_too_large` decline is answered by a Python-requested
   `source_fallback_diff` (S3), and the certified-batch decline reroute (S4).
 

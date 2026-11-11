@@ -1,7 +1,7 @@
 {
   "_comment": "Classification of every module shipped in the intentumdiff package (issue #338). tests/unit/test_binding_surface.py enforces it: no unclassified module, no new behavior module, and no behavior module may grow past max_lines. Lower max_lines when a module shrinks; delete the entry when the module is removed.",
   "behavior_module_budget": 51,
-  "behavior_line_budget": 20096,
+  "behavior_line_budget": 20082,
   "modules": {
     "__init__.py": {
       "category": "packaging",
@@ -149,7 +149,7 @@
     "differ.py": {
       "category": "behavior",
       "target": "core review API (api::review_sources / review_text); keep only DTO marshalling",
-      "max_lines": 1581
+      "max_lines": 1567
     },
     "github_app.py": {
       "category": "behavior",

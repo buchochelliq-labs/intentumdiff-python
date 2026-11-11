@@ -127,7 +127,6 @@ from intentumdiff.core.models import (
     Change,
     ChangeStreamEvent,
     ChangeStreamPhase,
-    ChangeType,
     DetectionResult,
     DiffConfig,
     LanguageInfoGroup,
@@ -561,24 +560,11 @@ class SemanticDiffer:
             return diff.model_dump_json(indent=2)
 
         if output_format == "terminal":
-            # Inline Python renderer — always available, no ANSI codes.
-            from io import StringIO
+            # Core's terminal presentation, exactly as the CLI renders it: source text such as
+            # `[/].py` or `[red]` stays literal instead of becoming Rich markup (#306).
+            from intentumdiff.rust_core import render_cli_review
 
-            from rich.console import Console as _Console
-
-            buf = StringIO()
-            console = _Console(file=buf, highlight=False, no_color=True)
-            console.print(
-                f"Semantic diff: {diff.old_filename} -> {diff.new_filename} ({diff.language})"
-            )
-            for change in diff.changes:
-                ct_str = (
-                    change.change_type.value
-                    if isinstance(change.change_type, ChangeType)
-                    else str(change.change_type)
-                )
-                console.print(f"  {ct_str:14} {change.description}")
-            return buf.getvalue()
+            return render_cli_review(diff, width=80, color=False)
 
         try:
             renderer = self._registry.get_renderer(output_format)
