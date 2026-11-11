@@ -107,6 +107,10 @@ Proof: no reference from `src`; tests that only exercised these are removed or r
   `has_semantic_changes=False, is_style_only=True` in Python, is deleted (no production
   caller). Style-only verdicts come only from core results; the DTO keeps its consistency
   check (style-only and semantic changes cannot both be true).
+- **#303 done**: `SemanticDiff.file_renamed` / `file_moved`, which classified the file
+  lifecycle from path names, are deleted (no caller, never serialised). Core's lifecycle
+  facts are `added`/`deleted`/`modified`; if rename/move display is wanted, core must emit
+  it in the DTO first (see the core spec in the #303 notes).
 - Still open: the core finalize `tree_too_large` decline is answered by a Python-requested
   `source_fallback_diff` (S3), and the certified-batch decline reroute (S4).
 

@@ -30,6 +30,9 @@ _RETIRED = {
     "_status_consistency": "core invariances/rules.yaml",
     # #302: Python-manufactured style-only verdict (core finalize_review / review_text).
     "SemanticDiff.style_only": "core-certified SemanticDiff",
+    # #303: file rename/move lifecycle classified from path names (core lifecycle facts).
+    "SemanticDiff.file_renamed": "core lifecycle facts",
+    "SemanticDiff.file_moved": "core lifecycle facts",
 }
 
 _RETIRED_SUFFIXES = ("_SCHEMA_URL", "_SCHEMA_URLS")

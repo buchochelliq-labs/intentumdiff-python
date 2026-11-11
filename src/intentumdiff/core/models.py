@@ -11,7 +11,7 @@ from __future__ import annotations
 import os
 from collections.abc import Mapping
 from enum import Enum, IntEnum
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from types import MappingProxyType
 from typing import NamedTuple, Any, Literal
 
@@ -504,21 +504,6 @@ class SemanticDiff(BaseModel, frozen=True):
                 "is_style_only and has_semantic_changes cannot both be True"
             )
         return self
-
-    @property
-    def file_renamed(self) -> bool:
-        """True when the file was renamed in-place (same directory, different basename)."""
-        old = PurePosixPath(self.old_filename)
-        new = PurePosixPath(self.new_filename)
-        return old.name != new.name and old.parent == new.parent
-
-    @property
-    def file_moved(self) -> bool:
-        """True when the file was moved to a different directory (with or without rename)."""
-        return (
-            PurePosixPath(self.old_filename).parent
-            != PurePosixPath(self.new_filename).parent
-        )
 
 
 # ---------------------------------------------------------------------------

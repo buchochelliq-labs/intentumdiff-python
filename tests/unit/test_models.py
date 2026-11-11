@@ -110,6 +110,23 @@ class TestSemanticDiff:
         assert dumped["change_groups"][0]["rule_id"] == "core.authored.rule"
         assert dumped["change_groups"][0]["metadata"] == {"reason": "core-authored"}
 
+    def test_dto_does_not_classify_file_lifecycle_from_paths(self):
+        # #303: rename/move is a core lifecycle fact; the DTO carries the filenames verbatim
+        # and derives nothing from them.
+        canned = {
+            "old_filename": "src/old/a.py",
+            "new_filename": "src/new/b.py",
+            "language": "python",
+            "metadata": {"file_lifecycle": "modified"},
+        }
+        d = SemanticDiff.model_validate(canned)
+
+        assert not hasattr(SemanticDiff, "file_renamed")
+        assert not hasattr(SemanticDiff, "file_moved")
+        dumped = d.model_dump(mode="json")
+        assert {key: dumped[key] for key in canned} == canned
+        assert not {"file_renamed", "file_moved", "renamed", "moved"} & set(dumped)
+
     def test_style_only_metadata_is_immutable_copy_and_json_safe(self):
         metadata = {"ignored_style_changes": [{"rule_id": "test.style"}]}
         d = SemanticDiff(
