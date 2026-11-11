@@ -367,12 +367,12 @@ def create_app(
     @app.get("/languages", summary="List supported languages")
     async def languages() -> dict[str, list[str]]:
         """Return all language IDs accepted by the ``/diff`` endpoint."""
-        return {"languages": _supported_languages(_differ)}
+        return {"languages": await asyncio.to_thread(_supported_languages, _differ)}  # #320
 
     @app.get("/language-info", summary="List language and parser plugin metadata")
     async def language_info() -> dict[str, list[dict[str, Any]]]:
         """Return grouped language/plugin metadata for the playground UI."""
-        return {"languages": _language_info(_differ)}
+        return {"languages": await asyncio.to_thread(_language_info, _differ)}
 
     @app.post("/diff", summary="Compute semantic diff")
     async def diff(req: DiffRequest) -> Response:
