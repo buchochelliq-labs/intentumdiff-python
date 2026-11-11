@@ -103,6 +103,10 @@ Proof: no reference from `src`; tests that only exercised these are removed or r
   `core.number_literal.canonical_value.safe` implemented and enabled). Core
   (`crates/rust-core-host/invariances`) is the only catalogue; tests check served groups
   against explicit expected rule ids.
+- **#302 done**: `SemanticDiff.style_only(...)`, which manufactured
+  `has_semantic_changes=False, is_style_only=True` in Python, is deleted (no production
+  caller). Style-only verdicts come only from core results; the DTO keeps its consistency
+  check (style-only and semantic changes cannot both be true).
 - Still open: the core finalize `tree_too_large` decline is answered by a Python-requested
   `source_fallback_diff` (S3), and the certified-batch decline reroute (S4).
 

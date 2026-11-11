@@ -82,37 +82,41 @@ class TestChange:
 
 
 class TestSemanticDiff:
-    def test_style_only_constructor(self):
-        d = SemanticDiff.style_only("a.py", "b.py", "python")
-        assert d.is_style_only
-        assert not d.has_semantic_changes
-        assert d.changes == []
-        assert d.change_groups == []
+    def test_no_python_style_only_verdict_constructor(self):
+        # #302: the style-only verdict is core-certified; the DTO only carries it.
+        assert not hasattr(SemanticDiff, "style_only")
 
-    def test_style_only_constructor_accepts_evidence(self):
-        group = ChangeGroup(
-            kind=ChangeGroupKind.IGNORED_STYLE,
-            rule_id="test.style",
-            metadata={"reason": "ignored"},
-        )
-        d = SemanticDiff.style_only(
-            "a.py",
-            "b.py",
-            "python",
-            change_groups=[group],
-            metadata={"ignored_style_changes": [{"rule_id": "test.style"}]},
-        )
+    def test_core_style_only_verdict_is_transported_unchanged(self):
+        canned = {
+            "old_filename": "a.py",
+            "new_filename": "b.py",
+            "language": "python",
+            "changes": [],
+            "change_groups": [{
+                "kind": "IGNORED_STYLE",
+                "rule_id": "core.authored.rule",
+                "metadata": {"reason": "core-authored"},
+            }],
+            "has_semantic_changes": False,
+            "is_style_only": True,
+            "metadata": {"ignored_style_changes": [{"rule_id": "core.authored.rule"}]},
+        }
+        d = SemanticDiff.model_validate(canned)
+        dumped = d.model_dump(mode="json")
 
-        assert d.is_style_only
-        assert d.change_groups == [group]
-        assert d.metadata["ignored_style_changes"][0]["rule_id"] == "test.style"
+        assert {key: dumped[key] for key in canned if key != "change_groups"} == {
+            key: value for key, value in canned.items() if key != "change_groups"
+        }
+        assert dumped["change_groups"][0]["rule_id"] == "core.authored.rule"
+        assert dumped["change_groups"][0]["metadata"] == {"reason": "core-authored"}
 
     def test_style_only_metadata_is_immutable_copy_and_json_safe(self):
         metadata = {"ignored_style_changes": [{"rule_id": "test.style"}]}
-        d = SemanticDiff.style_only(
-            "a.py",
-            "b.py",
-            "python",
+        d = SemanticDiff(
+            old_filename="a.py",
+            new_filename="b.py",
+            language="python",
+            is_style_only=True,
             metadata=metadata,
         )
 
@@ -136,7 +140,8 @@ class TestSemanticDiff:
             )
 
     def test_model_json_round_trip(self):
-        d = SemanticDiff.style_only("a.py", "b.py", "python")
+        d = SemanticDiff(old_filename="a.py", new_filename="b.py", language="python",
+                         is_style_only=True)
         restored = SemanticDiff.model_validate_json(d.model_dump_json())
         assert restored == d
 

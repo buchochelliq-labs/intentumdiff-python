@@ -505,27 +505,6 @@ class SemanticDiff(BaseModel, frozen=True):
             )
         return self
 
-    @classmethod
-    def style_only(
-        cls,
-        old_filename: str,
-        new_filename: str,
-        language: str,
-        *,
-        change_groups: list[ChangeGroup] | None = None,
-        metadata: Mapping[str, Any] | None = None,
-    ) -> SemanticDiff:
-        """Convenience constructor for the style-only shortcut."""
-        return cls(
-            old_filename=old_filename,
-            new_filename=new_filename,
-            language=language,
-            change_groups=change_groups or [],
-            has_semantic_changes=False,
-            is_style_only=True,
-            metadata=metadata or {},
-        )
-
     @property
     def file_renamed(self) -> bool:
         """True when the file was renamed in-place (same directory, different basename)."""

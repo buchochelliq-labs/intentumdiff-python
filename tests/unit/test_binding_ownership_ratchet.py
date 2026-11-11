@@ -28,6 +28,8 @@ _RETIRED = {
     "_known_evaluator": "core invariances/rules.yaml",
     "_known_languages": "core invariances/rules.yaml",
     "_status_consistency": "core invariances/rules.yaml",
+    # #302: Python-manufactured style-only verdict (core finalize_review / review_text).
+    "SemanticDiff.style_only": "core-certified SemanticDiff",
 }
 
 _RETIRED_SUFFIXES = ("_SCHEMA_URL", "_SCHEMA_URLS")

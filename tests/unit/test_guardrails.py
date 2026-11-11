@@ -312,7 +312,10 @@ guardrails:
 
 def test_policy_file_is_protected_by_default() -> None:
     result = apply_guardrails_to_diff(
-        SemanticDiff.style_only("intentumdiff.yaml", "intentumdiff.yaml", "yaml"),
+        SemanticDiff(
+            old_filename="intentumdiff.yaml", new_filename="intentumdiff.yaml",
+            language="yaml", is_style_only=True,
+        ),
         old_tree=None,
         new_tree=None,
         old_source="guardrails: {}\n",
