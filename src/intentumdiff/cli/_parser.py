@@ -132,16 +132,16 @@ def _build_parser() -> argparse.ArgumentParser:
             "and to HEAD~1 when --new is an explicit commit ref."
         ),
     )
-    git_p.add_argument("--new", default="", metavar="REF",
-                       help=(
-                           "New git ref (default: working tree; HEAD plus staged). "
-                           "Pass a commit ref to do commit-to-commit diff."
-                       ))
-    git_p.add_argument(
+    # One new side only: --staged/--unpushed/--new silently overrode each other (#319).
+    git_scope = git_p.add_mutually_exclusive_group()
+    git_scope.add_argument("--new", default="", metavar="REF", help=(
+        "New git ref (default: working tree; HEAD plus staged). "
+        "Pass a commit ref to do commit-to-commit diff."))
+    git_scope.add_argument(
         "--staged", action="store_true", default=False,
         help="Diff HEAD against the git index (staged files only).",
     )
-    git_p.add_argument(
+    git_scope.add_argument(
         "--unpushed", action="store_true", default=False,
         help="Diff the remote tracking branch against HEAD (commits not yet pushed).",
     )
