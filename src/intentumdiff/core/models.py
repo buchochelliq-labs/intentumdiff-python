@@ -820,6 +820,22 @@ class CrossFileChange(BaseModel, frozen=True):
     description: str = ""
 
 
+class CommitIndexError(BaseModel, frozen=True):
+    """One changed file core could not index for cross-file analysis (#298).
+
+    ``code`` is core's stable machine code (``fuel_exceeded``, ``output_limit_exceeded``,
+    ``malformed_tree``, ``parser_error``); ``reason`` is the human-readable text.
+    """
+
+    path: str
+    old_filename: str = ""
+    new_filename: str = ""
+    language: str = ""
+    side: Literal["old", "new", "both"]
+    code: str
+    reason: str = ""
+
+
 class GuardrailViolation(BaseModel, frozen=True):
     """A project policy rule matched a protected semantic change."""
 
@@ -896,3 +912,10 @@ class CommitDiff(BaseModel, frozen=True):
     file_diffs: list[SemanticDiff] = Field(default_factory=list)
     cross_file_changes: list[CrossFileChange] = Field(default_factory=list)
     parse_errors: list[str] = Field(default_factory=list)
+    # Commit cross-file index completeness, as reported by core (#298). ``None`` when the
+    # producer did not run core's commit index (the fields are core's, never inferred here).
+    # ``cross_file_changes`` proves "no cross-file change" only when the status is "complete".
+    cross_file_index_status: Literal["complete", "partial"] | None = None
+    cross_file_index_complete: bool | None = None
+    indexed_file_count: int | None = None
+    index_errors: list[CommitIndexError] = Field(default_factory=list)

@@ -585,6 +585,18 @@ def try_rust_diff_symbol_tables(old_json: str, new_json: str) -> list[dict[str, 
     return _required_engine_json("diff_symbol_tables_json", old_json, new_json, result_type=list)
 
 
+def commit_cross_file_index(files: list[dict[str, Any]]) -> dict[str, Any]:
+    """Core's commit-wide cross-file index over host-parsed trees (core #298).
+
+    Each file is ``{old_filename, new_filename, language, old_tree, new_tree, old_error,
+    new_error}``. Core decides which files are indexable, reports the rest in
+    ``index_errors`` and owns ``cross_file_index_status``.
+    """
+    return _required_engine_json(
+        "commit_cross_file_index_json", json.dumps(files), result_type=dict
+    )
+
+
 def load_project_diff_config_data(
     start_path: str | None, explicit_path: str | None
 ) -> dict[str, Any]:

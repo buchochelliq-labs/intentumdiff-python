@@ -1,7 +1,7 @@
 {
   "_comment": "Classification of every module shipped in the intentumdiff package (issue #338). tests/unit/test_binding_surface.py enforces it: no unclassified module, no new behavior module, and no behavior module may grow past max_lines. Lower max_lines when a module shrinks; delete the entry when the module is removed.",
   "behavior_module_budget": 51,
-  "behavior_line_budget": 20217,
+  "behavior_line_budget": 20184,
   "modules": {
     "__init__.py": {
       "category": "packaging",
@@ -121,7 +121,7 @@
     "core/commit_differ.py": {
       "category": "behavior",
       "target": "core commit_plumbing.rs / index-engine",
-      "max_lines": 483
+      "max_lines": 450
     },
     "core/config.py": {
       "category": "binding",
