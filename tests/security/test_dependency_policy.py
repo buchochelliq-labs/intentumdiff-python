@@ -8,6 +8,7 @@ Dependency policy tests for known advisory gaps that generic scanners can miss.
 from __future__ import annotations
 
 import re
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -27,26 +28,30 @@ _PYPI_WRAPPER_ADVISORY_POLICY = {
 }
 
 
-def _read_lockfile_versions(package: str) -> list[str]:
-    """Return all pinned versions of *package* found in uv.lock."""
-    lock_path = _REPO_ROOT / "uv.lock"
-    if not lock_path.exists():
-        return []
-    text = lock_path.read_text(encoding="utf-8")
-    pattern = re.compile(
-        rf'name\s*=\s*"{re.escape(package)}"[^\[]*?version\s*=\s*"([^"]+)"',
-        re.DOTALL,
-    )
-    return pattern.findall(text)
+def _pinned_versions(package: str) -> list[str]:
+    """Exact ``package==X`` pins in pyproject.toml's runtime dependencies.
+
+    The repository has no lockfile: pyproject.toml is the release input. CI installs it
+    (``pip install -e .[dev,serve]``) and the release workflow builds the wheel from it, so this
+    test reads the same pins that ship (#325). A missing pyproject is a release-input error.
+    """
+    pyproject = _REPO_ROOT / "pyproject.toml"
+    assert pyproject.is_file(), f"release input missing: {pyproject}"
+    dependencies = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]["dependencies"]
+    pattern = re.compile(rf"^{re.escape(package)}\s*==\s*([^\s;,]+)\s*(?:;.*)?$", re.IGNORECASE)
+    return [m.group(1) for dep in dependencies if (m := pattern.match(dep.strip()))]
 
 
-def test_wasmtime_lockfile_no_longer_pins_known_vulnerable_version() -> None:
-    """The normal locked dependency path must not contain the affected wrapper."""
-    pinned = set(_read_lockfile_versions("wasmtime"))
-    affected = _PYPI_WRAPPER_ADVISORY_POLICY["wasmtime"]["affected_versions"]
+def test_wasmtime_release_pin_is_exact_and_not_known_vulnerable() -> None:
+    """The shipped dependency set pins one exact wrapper version outside the blocklist."""
+    pinned = _pinned_versions("wasmtime")
+    policy = _PYPI_WRAPPER_ADVISORY_POLICY["wasmtime"]
 
-    assert not (pinned & affected)
-    assert pinned
+    assert len(pinned) == 1, f"pyproject.toml must pin wasmtime exactly (==), found {pinned}"
+    assert pinned[0] not in policy["affected_versions"]
+    assert pinned[0] not in loader._VULNERABLE_WASMTIME_VERSIONS
+    major = int(pinned[0].split(".")[0])
+    assert major >= int(policy["fixed_requirement"].split(">=")[1].split(".")[0])
 
 
 def test_wasmtime_advisory_policy_matches_loader_blocklist() -> None:
