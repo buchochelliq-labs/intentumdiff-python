@@ -101,8 +101,8 @@ def test_msbuild_reorder_with_version_bump_surfaces_exactly_the_bump() -> None:
     change = diff.changes[0]
     assert change.change_type == ChangeType.MODIFICATION
     assert change.old_node is not None and change.new_node is not None
-    assert change.old_node.label == "version=13.0.3"
-    assert change.new_node.label == "version=13.0.4"
+    assert change.old_node.label == "Version=13.0.3"
+    assert change.new_node.label == "Version=13.0.4"
 
 
 def test_msbuild_added_package_is_one_compact_addition() -> None:
