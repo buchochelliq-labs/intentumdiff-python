@@ -95,3 +95,11 @@ class PluginLoadError(PluginError):
 
 class PluginSecurityError(PluginLoadError):
     """A security gate denied loading; parser fallback must not bypass the denial."""
+
+
+class RegistryManifestError(RuntimeError):
+    """The plugin registry manifest is not valid YAML or fails the registry schema (#309).
+
+    A ``RuntimeError``, the error :func:`~intentumdiff.plugins.hub.fetch_official_registry`
+    documents for a registry it cannot fetch or parse. The message lists every violation.
+    """

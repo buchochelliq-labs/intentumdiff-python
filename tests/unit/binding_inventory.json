@@ -1,7 +1,7 @@
 {
   "_comment": "Classification of every module shipped in the intentumdiff package (issue #338). tests/unit/test_binding_surface.py enforces it: no unclassified module, no new behavior module, and no behavior module may grow past max_lines. Lower max_lines when a module shrinks; delete the entry when the module is removed.",
   "behavior_module_budget": 51,
-  "behavior_line_budget": 20111,
+  "behavior_line_budget": 20065,
   "modules": {
     "__init__.py": {
       "category": "packaging",
@@ -46,7 +46,7 @@
     "analysis/guardrail_reports.py": {
       "category": "behavior",
       "target": "core guardrail_policy.rs (evaluation already Rust; reporting/orchestration remain)",
-      "max_lines": 256
+      "max_lines": 252
     },
     "analysis/guardrails.py": {
       "category": "behavior",
@@ -98,12 +98,12 @@
     "cli/_commands.py": {
       "category": "behavior",
       "target": "native intentumdiff CLI (core crates/cli); Python console script to become a launcher",
-      "max_lines": 2248
+      "max_lines": 2244
     },
     "cli/_parser.py": {
       "category": "behavior",
       "target": "native intentumdiff CLI (core crates/cli); Python console script to become a launcher",
-      "max_lines": 1071
+      "max_lines": 1056
     },
     "cli/_shared.py": {
       "category": "behavior",
@@ -149,12 +149,12 @@
     "differ.py": {
       "category": "behavior",
       "target": "core review API (api::review_sources / review_text); keep only DTO marshalling",
-      "max_lines": 1581
+      "max_lines": 1567
     },
     "github_app.py": {
       "category": "behavior",
       "target": "product shell outside this binding (designer decision)",
-      "max_lines": 303
+      "max_lines": 300
     },
     "intentumdiff_rust_core/__init__.py": {
       "category": "binding",
@@ -200,7 +200,7 @@
     "lsp/servers.py": {
       "category": "behavior",
       "target": "core lsp_enrich.rs, or a product shell outside this binding",
-      "max_lines": 356
+      "max_lines": 355
     },
     "lsp_server/__init__.py": {
       "category": "packaging",
@@ -265,7 +265,7 @@
     "plugins/registry_schema.py": {
       "category": "behavior",
       "target": "core parser_registry.rs and registry validators",
-      "max_lines": 280
+      "max_lines": 279
     },
     "rust_core.py": {
       "category": "binding",
@@ -278,7 +278,7 @@
     "serve/_app.py": {
       "category": "behavior",
       "target": "product shell outside this binding (designer decision)",
-      "max_lines": 478
+      "max_lines": 476
     },
     "sources/__init__.py": {
       "category": "packaging",
@@ -360,7 +360,7 @@
     "watcher.py": {
       "category": "behavior",
       "target": "product shell outside this binding (designer decision)",
-      "max_lines": 259
+      "max_lines": 257
     }
   }
 }

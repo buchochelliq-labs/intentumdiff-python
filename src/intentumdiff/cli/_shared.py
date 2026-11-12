@@ -362,9 +362,9 @@ def _render_text(diff: SemanticDiff, fmt: str, fuel: int | None = None) -> str:
 
     try:
         diff_json = diff.model_dump_json()
+        from intentumdiff._differ_runtime import _fuel_budget  # the API's policy: -1 stays -1
         plugin_fuel = fuel if fuel is not None else 100_000_000
-        adaptive_fuel = max(plugin_fuel, 20_000_000 + len(diff_json) * 100)
-        pl = load_plugin(candidates[0], adaptive_fuel)
+        pl = load_plugin(candidates[0], _fuel_budget(plugin_fuel, 20_000_000 + len(diff_json) * 100))
         return pl.call_render(diff_json)
     except Exception as exc:
         _err.print(f"[red]Renderer error: {exc}[/red]")
@@ -526,7 +526,7 @@ def _emit_guardrail_reports(
 def _exit_if_guardrail_result_fails(result: GuardrailCheckResult) -> None:
     if result.passed:
         return
-    _err.print("[bold red]Immutable semantic guardrail violation detected.[/bold red]")
+    _err.print("[bold red]Guardrail check failed: protected semantic change detected.[/bold red]")
     sys.exit(2)
 
 

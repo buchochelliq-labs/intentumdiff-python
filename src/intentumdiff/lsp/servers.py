@@ -305,9 +305,9 @@ treated as already-running and IntentumDiff simply connects to
 def load_lsp_servers_json(path: "Path | str") -> dict[str, LspServerEntry]:
     """Load user-defined LSP server entries from an ``lsp_servers.json`` file.
 
-    Returns a mapping of **language → entry**.  If multiple entries share the
-    same language the last one in the file wins.  Returns an empty dict if the
-    file does not exist.
+    Returns a mapping of **language → entry** in file order.  Two entries for the
+    same language are rejected (ValueError naming both) rather than one silently
+    shadowing the other (#312).  Returns an empty dict if the file does not exist.
 
     Parameters
     ----------
@@ -333,6 +333,7 @@ def load_lsp_servers_json(path: "Path | str") -> dict[str, LspServerEntry]:
         raise ValueError(f"{p}: expected a JSON object at the top level")
 
     result: dict[str, LspServerEntry] = {}
+    names: dict[str, str] = {}
     for server_name, data in raw.items():
         if not isinstance(data, dict):
             raise ValueError(
@@ -344,13 +345,11 @@ def load_lsp_servers_json(path: "Path | str") -> dict[str, LspServerEntry]:
             raise ValueError(
                 f"{p}: invalid entry {server_name!r}: {exc}"
             ) from exc
-        # Key by language; first entry for a language wins.
-        if entry.language not in result:
-            result[entry.language] = entry
-        else:
-            logger.debug(
-                "lsp_servers.json: skipping %r — language %r already registered",
-                server_name, entry.language,
+        if entry.language in result:
+            raise ValueError(
+                f"{p}: entries {server_name!r} and {names[entry.language]!r} both serve "
+                f"language {entry.language!r}; keep one"
             )
+        result[entry.language], names[entry.language] = entry, server_name
 
     return result

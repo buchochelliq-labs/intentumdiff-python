@@ -52,7 +52,11 @@ def _is_temp_file(path: str) -> bool:
 
 
 class _WatchEventHandler(FileSystemEventHandler):
-    """Filters transient files and dispatches modified/created paths to FileWatcher."""
+    """Filters transient files and dispatches modified/created/deleted paths to FileWatcher.
+
+    A deletion is debounced like a save, so delete-then-create (an atomic save) is one review;
+    a file core finds missing when its timer fires is reported as deleted, never reviewed (#326).
+    """
 
     def __init__(self, watcher: FileWatcher) -> None:
         super().__init__()
@@ -66,14 +70,8 @@ class _WatchEventHandler(FileSystemEventHandler):
             return
         self._watcher._schedule_diff(path)
 
-    def on_created(self, event: FileSystemEvent) -> None:
-        """Handles atomic-rename saves (VS Code on Windows, vim 'writebackup')."""
-        if event.is_directory:
-            return
-        path = str(event.src_path)
-        if _is_temp_file(path):
-            return
-        self._watcher._schedule_diff(path)
+    on_created = on_modified  # atomic-rename saves (VS Code on Windows, vim 'writebackup')
+    on_deleted = on_modified  # see the class docstring
 
     def on_moved(self, event: FileSystemEvent) -> None:
         """Handles rename-into-place saves (common on Windows with ReadDirectoryChangesW)."""
@@ -233,9 +231,9 @@ class FileWatcher:
                 f"[dim]— untracked (no version at {self._ref!r})[/dim]"
             )
             return
-        except FileNotFoundError:
-            # File was deleted between the event firing and the diff running
-            return
+        except FileNotFoundError:  # core: no working-tree file; deleted, not re-created (#326)
+            msg = f"{abs_path} — deleted (deletions are not reviewed while watching)"
+            return self._out.print(msg, style="dim", markup=False)
         except PluginNotFoundError:
             # No parser registered for this file extension — silently ignore
             return
@@ -249,11 +247,11 @@ class FileWatcher:
         ts = datetime.datetime.now().strftime("%H:%M:%S")
         self._out.print(Rule(title=f"[cyan]{rel_path_str}[/cyan]  [dim]{ts}[/dim]"))
 
-        if not diff.changes:
-            self._out.print(f"[dim]{rel_path_str} — no changes[/dim]")
-            return
-        if diff.is_style_only:
+        if diff.is_style_only:  # core's flag first: a style-only record has no changes (#310)
             self._out.print(f"[dim]{rel_path_str} — style changes only[/dim]")
+            return
+        if not diff.changes and not diff.is_fallback:  # a fallback is rendered, never "none"
+            self._out.print(f"[dim]{rel_path_str} — no changes[/dim]")
             return
 
         self._render_fn(diff)

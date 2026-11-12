@@ -5,10 +5,8 @@ contract. This module is its dependency-free ENFORCEMENT: :func:`validate_regist
 security-load-bearing subset (required top-level shape, name/checksum/dep-hash patterns, the
 trust-tier and source enums, no unknown fields) so the #95 CI vetting pipeline can block a
 malformed or untrusted registry entry BEFORE it is published — the registry is the root of
-trust. Stdlib-only (no ``jsonschema`` dependency), matching the thin-binding rule.
-
-Returns a list of human-readable error strings (empty == valid) rather than raising, so a
-vetting run can report every problem in one pass.
+trust. Stdlib-only (no ``jsonschema`` dependency). Returns every human-readable error (empty ==
+valid) rather than raising, so a vetting run can report every problem in one pass.
 """
 
 from __future__ import annotations
@@ -16,6 +14,7 @@ from __future__ import annotations
 import json
 import re
 from importlib import resources
+from pathlib import Path
 from typing import Any
 
 _NAME_RE = re.compile(r"^(?:intentumdiff-)?[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
@@ -38,9 +37,7 @@ _VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
 
 def _parse_version(value: str) -> tuple[int, int, int] | None:
     match = _VERSION_RE.match(value.strip())
-    if match is None:
-        return None
-    return (int(match.group(1)), int(match.group(2)), int(match.group(3)))
+    return None if match is None else (int(match[1]), int(match[2]), int(match[3]))
 
 
 def abi_compatible(target: str, host: str = HOST_CONTRACT_VERSION) -> bool:
@@ -58,30 +55,25 @@ def abi_compatible(target: str, host: str = HOST_CONTRACT_VERSION) -> bool:
         return False
     return parsed_target[0] == parsed_host[0] and parsed_target[1] <= parsed_host[1]
 
-_ENTRY_FIELDS = frozenset(
-    {
-        "source",
-        "ref",
-        "repo",
-        "description",
-        "wasm_checksums",
-        "dep_hashes",
-        "allowed_dependencies",
-        "trust_tier",
-        "capabilities",
-        "abi_target",
-        "provenance_manifest_ref",
-    }
-)
-_TOP_LEVEL_FIELDS = frozenset({"version", "plugins"})
+_ENTRY_FIELDS = frozenset({
+    "source", "ref", "repo", "description", "wasm_checksums", "dep_hashes",
+    "allowed_dependencies", "trust_tier", "capabilities", "abi_target", "provenance_manifest_ref",
+})
+_TOP_LEVEL_FIELDS = frozenset({"version", "plugins", "renderer_components"})
+# The core-owned renderer bundle (not an installable parser plugin): an immutable core commit
+# and exact pins for all four internal renderers, as intentumdiff-registry publishes it (#330).
+_RENDERER_FILES = frozenset({
+    "html_renderer.wasm", "llm_renderer.wasm", "patch_renderer.wasm", "terminal_renderer.wasm",
+})
+_RENDERER_BUNDLE_FIELDS = frozenset({"repository", "ref", "artifact", "wasm_checksums"})
+_RENDERER_BUNDLE_VALUES = (("repository", "intentumdiff-core"), ("artifact", "renderer-components"))
+_GIT_SHA_RE = re.compile(r"^[a-f0-9]{40}$")
 
 
 def load_schema() -> dict[str, Any]:
     """Return the packaged registry JSON Schema."""
-    text = resources.files("intentumdiff.plugins").joinpath("registry.schema.json").read_text(
-        encoding="utf-8"
-    )
-    return json.loads(text)
+    schema = resources.files("intentumdiff.plugins").joinpath("registry.schema.json")
+    return json.loads(schema.read_text(encoding="utf-8"))
 
 
 def _validate_entry(name: str, entry: Any, errors: list[str]) -> None:
@@ -94,12 +86,12 @@ def _validate_entry(name: str, entry: Any, errors: list[str]) -> None:
     if unknown:
         errors.append(f"{where}: unknown field(s): {', '.join(sorted(unknown))}")
 
-    source = entry.get("source", "git")
-    if source not in _SOURCE_VALUES:
+    source = entry.get("source", "git")  # type-check first: a list/dict is unhashable (#329)
+    if not isinstance(source, str) or source not in _SOURCE_VALUES:
         errors.append(f"{where}.source: {source!r} not in {sorted(_SOURCE_VALUES)}")
 
     trust = entry.get("trust_tier", "official")
-    if trust not in _TRUST_TIERS:
+    if not isinstance(trust, str) or trust not in _TRUST_TIERS:
         errors.append(f"{where}.trust_tier: {trust!r} not in {sorted(_TRUST_TIERS)}")
 
     for str_field in ("ref", "repo", "description", "abi_target", "provenance_manifest_ref"):
@@ -111,9 +103,9 @@ def _validate_entry(name: str, entry: Any, errors: list[str]) -> None:
         errors.append(f"{where}.wasm_checksums: must be a mapping")
     else:
         for fname, digest in checksums.items():
-            if not _WASM_FILE_RE.match(str(fname)):
+            if not _WASM_FILE_RE.fullmatch(str(fname)):
                 errors.append(f"{where}.wasm_checksums: {fname!r} is not a .wasm filename")
-            if not (isinstance(digest, str) and _SHA256_RE.match(digest)):
+            if not (isinstance(digest, str) and _SHA256_RE.fullmatch(digest)):
                 errors.append(f"{where}.wasm_checksums[{fname!r}]: not a lowercase SHA-256 hex")
 
     dep_hashes = entry.get("dep_hashes", {})
@@ -121,9 +113,9 @@ def _validate_entry(name: str, entry: Any, errors: list[str]) -> None:
         errors.append(f"{where}.dep_hashes: must be a mapping")
     else:
         for key, value in dep_hashes.items():
-            if not _DEP_KEY_RE.match(str(key)):
+            if not _DEP_KEY_RE.fullmatch(str(key)):
                 errors.append(f"{where}.dep_hashes: {key!r} is not 'package==version'")
-            if not (isinstance(value, str) and _DEP_HASH_RE.match(value)):
+            if not (isinstance(value, str) and _DEP_HASH_RE.fullmatch(value)):
                 errors.append(f"{where}.dep_hashes[{key!r}]: not 'sha256:<hex>'")
 
     for list_field in ("allowed_dependencies", "capabilities"):
@@ -131,6 +123,32 @@ def _validate_entry(name: str, entry: Any, errors: list[str]) -> None:
             value = entry[list_field]
             if not (isinstance(value, list) and all(isinstance(i, str) for i in value)):
                 errors.append(f"{where}.{list_field}: must be a list of strings")
+
+
+def _validate_renderer_components(bundle: Any, errors: list[str]) -> None:
+    where = "renderer_components"
+    if not isinstance(bundle, dict):
+        return errors.append(f"{where}: must be a mapping")
+    for label, fields in (("missing", _RENDERER_BUNDLE_FIELDS - set(bundle)),
+                          ("unknown", set(bundle) - _RENDERER_BUNDLE_FIELDS)):
+        if fields:
+            errors.append(f"{where}: {label} field(s): {', '.join(sorted(fields))}")
+    for field, required in _RENDERER_BUNDLE_VALUES:
+        if bundle.get(field) != required:
+            errors.append(f"{where}.{field}: must be {required}")
+    ref = bundle.get("ref")
+    if not isinstance(ref, str) or not _GIT_SHA_RE.fullmatch(ref):
+        errors.append(f"{where}.ref: must be an immutable 40-character git SHA")
+    pins = bundle.get("wasm_checksums")
+    if not isinstance(pins, dict):
+        return errors.append(f"{where}.wasm_checksums: must be a mapping")
+    if set(pins) != _RENDERER_FILES:
+        errors.append(f"{where}.wasm_checksums: must pin exactly four known renderers; "
+                      f"missing={sorted(_RENDERER_FILES - set(pins))} "
+                      f"unexpected={sorted(set(pins) - _RENDERER_FILES)}")
+    for name, digest in pins.items():
+        if not isinstance(digest, str) or not _SHA256_RE.fullmatch(digest):
+            errors.append(f"{where}.wasm_checksums[{name!r}]: not a lowercase SHA-256 hex")
 
 
 def validate_registry(data: Any) -> list[str]:
@@ -147,13 +165,15 @@ def validate_registry(data: Any) -> list[str]:
     if not isinstance(version, int) or isinstance(version, bool) or version < 1:
         errors.append("registry.version: required integer >= 1")
 
+    if "renderer_components" in data:
+        _validate_renderer_components(data["renderer_components"], errors)
     plugins = data.get("plugins")
     if not isinstance(plugins, dict):
         errors.append("registry.plugins: required mapping of name -> entry")
         return errors
 
     for name, entry in plugins.items():
-        if not _NAME_RE.match(str(name)):
+        if not _NAME_RE.fullmatch(str(name)):
             errors.append(f"plugins: {name!r} is not a package-safe plugin name")
         _validate_entry(str(name), entry, errors)
 
@@ -187,28 +207,18 @@ def render_catalog_markdown(registry: Any, *, title: str = "IntentumDiff plugin 
     official = sorted(n for n, e in plugins.items() if _effective_tier(e) == "official")
     community = sorted(n for n, e in plugins.items() if _effective_tier(e) == "community")
 
-    lines: list[str] = [f"# {title}", ""]
-    lines.append(f"_{len(plugins)} plugins — generated from the registry manifest._")
-    lines.append("")
+    count = f"_{len(plugins)} plugins — generated from the registry manifest._"
+    lines = [f"# {title}", "", count, ""]
 
     def _section(heading: str, names: list[str], note: str) -> None:
-        lines.append(f"## {heading} ({len(names)})")
-        lines.append("")
-        if note:
-            lines.append(f"> {note}")
-            lines.append("")
+        lines.extend([f"## {heading} ({len(names)})", ""] + ([f"> {note}", ""] if note else []))
         if not names:
-            lines.append("_None._")
-            lines.append("")
-            return
+            return lines.extend(["_None._", ""])
         for name in names:
             entry = plugins[name]
             lines.append(f"### {name}")
             desc = entry.get("description")
-            if desc:
-                lines.append("")
-                lines.append(str(desc))
-            lines.append("")
+            lines.extend((["", str(desc)] if desc else []) + [""])
             lines.append(f"- **Source**: {entry.get('source', 'git')} `{entry.get('ref', 'main')}`")
             if entry.get("abi_target"):
                 lines.append(f"- **ABI target**: `{entry['abi_target']}`")
@@ -219,41 +229,30 @@ def render_catalog_markdown(registry: Any, *, title: str = "IntentumDiff plugin 
             lines.append("")
 
     _section("Official", official, "Org-built and scanned; checksums verified on install.")
-    _section(
-        "Community",
-        community,
-        "Listed but unverified (custom source or no checksums). "
-        "Install only if you trust the source.",
-    )
+    _section("Community", community, "Listed but unverified (custom source or no checksums). "
+             "Install only if you trust the source.")
     return "\n".join(lines).rstrip() + "\n"
 
 
 def _load_registry_document(path: str) -> Any:
     """Parse a registry manifest from a ``.yaml``/``.json`` file."""
-    from pathlib import Path
-
     text = Path(path).read_text(encoding="utf-8")
     if path.endswith((".yaml", ".yml")):
         import yaml  # pyyaml is already a runtime dep (hub.py)
-
         return yaml.safe_load(text)
     return json.loads(text)
 
 
 def main(argv: list[str] | None = None) -> int:
     """CLI for the #95 vetting pipeline: validate a registry manifest, exit non-zero on any
-    violation. The plugins-repo PR gate runs ``python -m intentumdiff.plugins.registry_schema
-    registry.yaml`` (alongside the checksum/capability/provenance checks) to block a bad entry
-    before merge."""
+    violation. The registry PR gate runs ``python -m intentumdiff.plugins.registry_schema
+    registry.yaml`` (with the checksum/capability/provenance checks) before merge."""
     import argparse
 
     parser = argparse.ArgumentParser(description=main.__doc__)
     parser.add_argument("manifest", help="path to registry.yaml (or .json)")
-    parser.add_argument(
-        "--catalog",
-        action="store_true",
-        help="after validating, print the Markdown discovery catalog to stdout (#95)",
-    )
+    parser.add_argument("--catalog", action="store_true",
+                        help="print the Markdown discovery catalog after validating (#95)")
     args = parser.parse_args(argv)
 
     try:

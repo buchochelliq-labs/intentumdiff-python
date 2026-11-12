@@ -6,6 +6,7 @@ The stub models native bytes at the ctypes boundary, not Rust semantics.
 """
 
 import ctypes
+import json
 
 import pytest
 
@@ -69,6 +70,7 @@ def test_explicit_rust_result_preserves_null_false_and_empty(monkeypatch, raw, e
         ("not_found", FileNotFoundError),
         ("internal", RuntimeError),
         ("value_error", ValueError),
+        ("size_limit", rust_core.CoreSizeLimitError),
     ],
 )
 def test_rust_error_kind_is_not_reclassified(monkeypatch, kind, error):
@@ -77,3 +79,19 @@ def test_rust_error_kind_is_not_reclassified(monkeypatch, kind, error):
     with pytest.raises(error, match="core rejected input"):
         rust_core._c_abi_call("supports_language", "python")
     assert stub.free_count == 1
+
+
+def test_size_limit_error_keeps_the_value_error_contract(monkeypatch):
+    # Core #308 gave size-limit failures their own kind; it must stay catchable as the
+    # ValueError (and native operation failure) it was before, with core's message verbatim.
+    message = (
+        "size limit exceeded: CST is 9 bytes; limit is 1 bytes "
+        "(raise diff config `max_cst_bytes`)"
+    )
+    raw = json.dumps({"ok": False, "error": message, "error_type": "size_limit"}).encode()
+    _stub_native_envelope(monkeypatch, raw)
+    with pytest.raises(rust_core.CoreSizeLimitError) as caught:
+        rust_core._c_abi_call("supports_language", "python")
+    assert isinstance(caught.value, ValueError)
+    assert isinstance(caught.value, rust_core._NativeCAbiOperationFailure)
+    assert str(caught.value) == message

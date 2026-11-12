@@ -34,7 +34,7 @@ _RETIRED = {
     "SemanticDiff.file_renamed": "core lifecycle facts",
     "SemanticDiff.file_moved": "core lifecycle facts",
     # #296: the DTO's own copy of the guardrail gate, which overwrote the supplied verdict.
-    "GuardrailCheckResult._derive_counts": "core guardrail_check_result (pending)",
+    "GuardrailCheckResult._derive_counts": "core guardrail_check_result",
 }
 
 _RETIRED_SUFFIXES = ("_SCHEMA_URL", "_SCHEMA_URLS")

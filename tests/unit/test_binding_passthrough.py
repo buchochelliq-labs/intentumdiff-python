@@ -29,7 +29,7 @@ from typing import Any
 
 import pytest
 
-from intentumdiff import SemanticDiffer, review_text
+from intentumdiff import CoreSizeLimitError, SemanticDiffer, review_text
 from intentumdiff import rust_core
 from intentumdiff.core.models import SemanticDiff
 
@@ -216,6 +216,7 @@ _ERROR_KINDS = [
     ("internal", RuntimeError),
     ("value_error", ValueError),
     ("bad_request", ValueError),
+    ("size_limit", CoreSizeLimitError),
 ]
 
 

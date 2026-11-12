@@ -96,10 +96,10 @@ def _make_mock_differ():
     return mock
 
 
-def _guardrail_diff() -> SemanticDiff:
+def _guardrail_diff(severity: GuardrailSeverity = GuardrailSeverity.IMMUTABLE) -> SemanticDiff:
     violation = GuardrailViolation(
         rule_id="prod-host",
-        severity=GuardrailSeverity.IMMUTABLE,
+        severity=severity,
         file="config.yaml",
         language="yaml",
         semantic_path="server.host",
@@ -735,6 +735,44 @@ def test_guardrails_check_exits_two_for_strict_immutable(tmp_path: Path) -> None
 
     assert exc_info.value.code == 2
     assert json.loads(output.read_text(encoding="utf-8"))["version"] == "2.1.0"
+
+
+def test_guardrails_check_strict_fails_on_an_important_only_violation(tmp_path: Path) -> None:
+    # 0.0.3 behaviour change: the exit code reads core's verdict (guardrail_check_result),
+    # under which strict fails on ANY violation, not only an immutable one (#296).
+    ns = _parse("guardrails", "check", str(tmp_path), "--strict")
+    mock = MagicMock()
+    mock.diff_commit.return_value = [_guardrail_diff(GuardrailSeverity.IMPORTANT)]
+
+    with (
+        patch("intentumdiff.cli._shared.SemanticDiffer", return_value=mock),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        _cmd_guardrails_check(ns)
+
+    assert exc_info.value.code == 2
+
+
+def test_guardrails_check_exit_code_reads_the_core_verdict(tmp_path: Path) -> None:
+    # A canned core verdict decides the exit code; the CLI does not re-derive it.
+    from intentumdiff.core.models import GuardrailCheckResult
+
+    canned = GuardrailCheckResult(
+        violations=[], violation_count=0, immutable_count=0, important_count=0,
+        checked_files=0, strict=False, passed=False,
+    )
+    ns = _parse("guardrails", "check", str(tmp_path))
+    mock = MagicMock()
+    mock.diff_commit.return_value = []
+
+    with (
+        patch("intentumdiff.cli._shared.SemanticDiffer", return_value=mock),
+        patch("intentumdiff.cli._commands._guardrail_result", return_value=canned),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        _cmd_guardrails_check(ns)
+
+    assert exc_info.value.code == 2
 
 
 def test_guardrails_check_fuel_overrides_intentumdiff_yaml(tmp_path: Path) -> None:

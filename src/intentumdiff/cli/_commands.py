@@ -119,14 +119,10 @@ def _cmd_git(args: argparse.Namespace) -> None:
     from intentumdiff.sources.git_source import StagedSource, _REF_STAGED, _REF_UNPUSHED
     from intentumdiff.vcs.git_cli import NotAGitRepositoryError
 
-    repo_path = args.repo  # '.' when not supplied
-
-    # Resolve the effective new_ref from mutually-exclusive scope flags.
-    new_ref: str = args.new  # may be "", ":staged", ":unpushed", or an explicit ref
-    if getattr(args, "staged", False):
-        new_ref = _REF_STAGED
-    elif getattr(args, "unpushed", False):
-        new_ref = _REF_UNPUSHED
+    if getattr(args, "repo_option", None) is not None and args.repo != ".":
+        _err.print("[red]Name the repository once: --repo or the REPO positional.[/red]")
+        sys.exit(2)
+    repo_path = getattr(args, "repo_option", None) or args.repo  # --repo, REPO or '.' (#317)
 
     # Resolve the effective new_ref from mutually-exclusive scope flags.
     new_ref: str = args.new  # may be "", ":staged", ":unpushed", or an explicit ref
@@ -138,10 +134,8 @@ def _cmd_git(args: argparse.Namespace) -> None:
     # Smart --old default: HEAD for working-tree / scoped modes; HEAD~1 when an
     # explicit commit ref is given for --new so that `intentumdiff git --new HEAD`
     # means "show the last commit" rather than HEAD vs HEAD = no diff.
-    _is_working_tree_mode = not new_ref or new_ref in (_REF_STAGED, _REF_UNPUSHED)
-    old_ref: str = args.old if args.old is not None else (
-        "HEAD" if _is_working_tree_mode else "HEAD~1"
-    )
+    working_tree_mode = not new_ref or new_ref in (_REF_STAGED, _REF_UNPUSHED)
+    old_ref: str = args.old if args.old is not None else ("HEAD" if working_tree_mode else "HEAD~1")
 
     try:
         if args.file:
@@ -238,13 +232,12 @@ def _cmd_git(args: argparse.Namespace) -> None:
             _err.print(f"[red]Repository path not found:[/red] {repo_path}")
             # When the repo path looks like a git ref name (e.g. "main", "HEAD",
             # "new") the user probably typed '-- ref' instead of '--new ref'.
-            if not Path(repo_path).is_absolute():
-                import re as _re
-                if _re.fullmatch(r"[A-Za-z0-9_/.\-]+", repo_path):
-                    _err.print(
-                        f"[yellow]Hint: '{repo_path}' looks like a git ref. "
-                        f"Did you mean [bold]--new {repo_path}[/bold]?[/yellow]"
-                    )
+            import re as _re
+            if not Path(repo_path).is_absolute() and _re.fullmatch(r"[A-Za-z0-9_/.\-]+", repo_path):
+                _err.print(
+                    f"[yellow]Hint: '{repo_path}' looks like a git ref. "
+                    f"Did you mean [bold]--new {repo_path}[/bold]?[/yellow]"
+                )
         else:
             _err.print(
                 f"[red]Not a git repository:[/red] {repo_path!r}  "
@@ -1880,8 +1873,7 @@ def _cmd_serve(args: argparse.Namespace) -> None:
     port: int = args.port
 
     # Guard against accidentally exposing the playground to the network.
-    _loopback = {"127.0.0.1", "::1", "localhost"}
-    if host not in _loopback and not getattr(args, "allow_remote", False):
+    if host not in {"127.0.0.1", "::1", "localhost"} and not getattr(args, "allow_remote", False):
         _err.print(
             f"[bold red]Error:[/bold red] binding to '{host}' would expose the "
             "playground on the network.  "
@@ -1894,24 +1886,25 @@ def _cmd_serve(args: argparse.Namespace) -> None:
 
     # Try the requested port; fall back to a free OS-assigned port if taken.
     import socket
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as _s:
-        _s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        try:
-            _s.bind((host, port))
-            _s.close()
-        except OSError:
-            _s.bind((host, 0))
-            port = _s.getsockname()[1]
-            _console.print(
-                f"[yellow]Warning:[/yellow] requested port was unavailable; "
-                f"binding to free port [cyan]{port}[/cyan] instead."
-            )
-
-    _console.print(
-        f"[bold green]IntentumDiff serve[/bold green] listening on "
-        f"[cyan]http://{host}:{port}[/cyan]  "
-        f"([dim]Ctrl+C to stop[/dim])"
-    )
+    family = socket.AF_INET6 if ":" in host else socket.AF_INET  # an IPv6 literal (#323)
+    try:
+        with socket.socket(family, socket.SOCK_STREAM) as _s:
+            _s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                _s.bind((host, port))
+            except OSError:
+                _s.bind((host, 0))
+                port = _s.getsockname()[1]
+                _console.print(
+                    f"[yellow]Warning:[/yellow] requested port was unavailable; "
+                    f"binding to free port [cyan]{port}[/cyan] instead."
+                )
+    except OSError as exc:  # e.g. no IPv6 on this host: a diagnostic, not a traceback
+        _err.print(f"[red]Error:[/red] cannot bind {host!r}: {exc}")
+        sys.exit(1)
+    shown = f"[{host}]" if family == socket.AF_INET6 else host
+    _console.print(f"[bold green]IntentumDiff serve[/bold green] listening on "
+                   f"[cyan]http://{shown}:{port}[/cyan]  ([dim]Ctrl+C to stop[/dim])")
     uvicorn.run(app, host=host, port=port, log_level="warning")
 
 
@@ -2055,15 +2048,15 @@ def _add_output_args(p: argparse.ArgumentParser) -> None:
 
 
 def _parse_megapixels(value: str) -> int:
-    try:
+    try:  # nan is not > 0; inf and exponent overflow raise OverflowError in int() (#315)
         megapixels = float(value)
-    except ValueError:
-        raise argparse.ArgumentTypeError(
-            f"invalid megapixel value {value!r}: use a positive number"
-        ) from None
-    if megapixels <= 0:
-        raise argparse.ArgumentTypeError("max decoded megapixels must be positive")
-    return max(1, int(megapixels * 1_000_000))
+        if megapixels > 0:
+            return max(1, int(megapixels * 1_000_000))
+    except (ValueError, OverflowError):
+        pass
+    raise argparse.ArgumentTypeError(
+        f"invalid megapixel value {value!r}: use a finite positive number"
+    )
 
 
 def _add_asset_diff_args(p: argparse.ArgumentParser) -> None:
@@ -2190,8 +2183,8 @@ def _add_guardrail_args(p: argparse.ArgumentParser) -> None:
         action="store_true",
         default=False,
         help=(
-            "Exit non-zero when an immutable protected config guardrail "
-            "violation is detected."
+            "Exit 2 when any protected config guardrail violation "
+            "(important or immutable) is detected."
         ),
     )
     p.add_argument(
@@ -2229,6 +2222,7 @@ class _GitPositionalsAction(argparse.Action):
     With one positional:  ``git FILE``        → repo=".", file=FILE
     With two positionals: ``git REPO FILE``   → repo=REPO, file=FILE
     With zero positionals:                    → repo=".", file=None (commit-wide)
+    More than two is a usage error: dropping the rest silently shrank the review (#318).
     """
 
     def __call__(
@@ -2238,7 +2232,9 @@ class _GitPositionalsAction(argparse.Action):
         values: list[str],
         option_string: str | None = None,
     ) -> None:
-        if len(values) >= 2:
+        if len(values) > 2:
+            parser.error(f"git takes at most two positionals ([REPO] FILE); got extra {values[2:]}")
+        if len(values) == 2:
             namespace.repo = values[0]
             namespace.file = values[1]
         elif len(values) == 1:

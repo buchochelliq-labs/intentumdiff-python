@@ -6,6 +6,7 @@ import hashlib
 import ipaddress
 import json
 import logging
+import math
 import os
 import socket
 import ssl
@@ -273,7 +274,7 @@ def _fetch_or_cache(
     url = candidate.url
     if url is None:
         raise ValueError("schema candidate has no URL to fetch")
-    cached = _read_cache(candidate, root)
+    cached = _read_cache(candidate, root, now)
     if cached and now - cached["fetched_at"] < ttl:
         return _resolution_from_cache(candidate, cached, "cache_hit")
 
@@ -325,19 +326,11 @@ def _resolve_from_cache(
     *,
     allow_stale: bool,
 ) -> SchemaResolution:
-    cached = _read_cache(candidate, root)
-    if not cached:
+    cached = _read_cache(candidate, root, now)
+    if not cached or (not allow_stale and now - cached["fetched_at"] >= ttl):
         return SchemaResolution(
-            provider_id=candidate.provider_id,
-            source_url=candidate.url,
-            status="cache_miss",
-            identity_fields=candidate.identity_fields,
-        )
-    if not allow_stale and now - cached["fetched_at"] >= ttl:
-        return SchemaResolution(
-            provider_id=candidate.provider_id,
-            source_url=candidate.url,
-            status="cache_stale",
+            provider_id=candidate.provider_id, source_url=candidate.url,
+            status="cache_miss" if not cached else "cache_stale",
             identity_fields=candidate.identity_fields,
         )
     status = "cache_hit" if now - cached["fetched_at"] < ttl else "stale_cache"
@@ -368,21 +361,28 @@ def _resolution_from_cache(
     )
 
 
-def _read_cache(candidate: SchemaCandidate, root: Path) -> dict[str, Any] | None:
+def _read_cache(candidate: SchemaCandidate, root: Path, now: float) -> dict[str, Any] | None:
+    """A complete cache record, or None (a cache miss) for a missing or malformed one (#307)."""
     path = _cache_file(candidate, root)
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-        if isinstance(data, dict):
-            return data
-    except Exception:
-        return None
+    except (OSError, ValueError, RecursionError):
+        data = None
+    stamp = data.get("fetched_at") if isinstance(data, dict) else None
+    if (type(stamp) in (int, float) and math.isfinite(stamp) and stamp <= now
+            and isinstance(data.get("schema"), dict)):
+        return data
+    if path.exists():
+        logger.warning("Ignoring malformed schema cache record %s", path)
     return None
 
 
 def _write_cache(candidate: SchemaCandidate, root: Path, data: Mapping[str, Any]) -> None:
     path = _cache_file(candidate, root)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, sort_keys=True, indent=2), encoding="utf-8")
+    temporary = path.with_name(f"{path.name}.{os.getpid()}.tmp")  # readers never see a partial
+    temporary.write_text(json.dumps(data, sort_keys=True, indent=2), encoding="utf-8")
+    os.replace(temporary, path)
 
 
 def _cache_file(candidate: SchemaCandidate, root: Path) -> Path:
@@ -472,9 +472,9 @@ def _schema_commands_allowed(env: Mapping[str, str]) -> bool:
 
 def _schema_ttl_seconds(env: Mapping[str, str]) -> int:
     raw = env.get("INTENTUMDIFF_SCHEMA_CACHE_TTL_SECONDS", "")
-    try:
+    try:  # nan / inf / exponent overflow fall back to the default (#307)
         return max(0, int(float(raw)))
-    except ValueError:
+    except (ValueError, OverflowError):
         return DEFAULT_SCHEMA_TTL_SECONDS
 
 

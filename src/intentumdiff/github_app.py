@@ -50,7 +50,7 @@ def verify_webhook_signature(secret: str, body: bytes, signature_header: str | N
     if not secret or not signature_header or not signature_header.startswith("sha256="):
         return False
     expected = "sha256=" + hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
-    return hmac.compare_digest(expected, signature_header)
+    return hmac.compare_digest(expected.encode("ascii"), signature_header.encode("utf-8"))
 
 
 def parse_pull_request_url(url: str) -> PullRequestRef:
@@ -94,16 +94,13 @@ def parse_pull_request_event(payload: Mapping[str, Any]) -> PullRequestRef:
     full_name = str(repository.get("full_name") or "")
     if "/" not in full_name:
         raise GitHubAppError("Webhook repository.full_name must be OWNER/REPO")
-    number = pull_request.get("number") or payload.get("number")
-    try:
-        pr_number = int(number)
-    except (TypeError, ValueError) as exc:
-        raise GitHubAppError("Webhook pull request number must be an integer") from exc
+    pr_number = pull_request.get("number") or payload.get("number")
+    # Exact int only: int() coerced True and 1.5 to pull request 1 (#322); bool is excluded.
+    if type(pr_number) is not int or pr_number <= 0:
+        raise GitHubAppError("Webhook pull request number must be a positive integer")
     owner, repo = full_name.split("/", 1)
     if not owner or not repo:
         raise GitHubAppError("Webhook repository.full_name must be OWNER/REPO")
-    if pr_number <= 0:
-        raise GitHubAppError("Webhook pull request number must be positive")
     return PullRequestRef(owner=owner, repo=repo, number=pr_number)
 
 

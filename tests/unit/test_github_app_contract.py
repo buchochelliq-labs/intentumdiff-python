@@ -159,3 +159,43 @@ def test_github_app_webhook_rejects_unsigned_or_unconfigured_requests() -> None:
     unsigned = client.post("/github/webhook", content=body, headers=headers)
     assert unsigned.status_code == 401
     assert unsigned.json()["detail"] == "invalid signature"
+
+
+_SIGNED_BODY = b"{}"
+_VALID_SIGNATURE = "sha256=" + hmac.new(b"audit-secret", _SIGNED_BODY, hashlib.sha256).hexdigest()
+
+
+@pytest.mark.parametrize(
+    "header",
+    [
+        None,
+        "",
+        "sha256=é",  # non-ASCII (#321): used to raise TypeError in compare_digest
+        "sha256=" + "é" * 64,
+        "sha256=" + "z" * 64,  # non-hex, right length
+        "sha256=" + "a" * 63,  # wrong length
+        "sha1=" + "a" * 40,  # wrong prefix
+        _VALID_SIGNATURE.upper(),  # wrong-case prefix
+        _VALID_SIGNATURE + "\n",
+    ],
+)
+def test_malformed_webhook_signatures_are_rejected_without_raising(header) -> None:
+    assert verify_webhook_signature("audit-secret", _SIGNED_BODY, header) is False
+
+
+def test_valid_and_wrong_webhook_signature_controls() -> None:
+    assert verify_webhook_signature("audit-secret", _SIGNED_BODY, _VALID_SIGNATURE) is True
+    assert verify_webhook_signature("audit-secret", b"{ }", _VALID_SIGNATURE) is False
+
+
+@pytest.mark.parametrize("number", [True, False, 1.5, 1.0, "7", -3, 0, None, [7], {"n": 7}])
+def test_webhook_pull_request_number_must_be_an_exact_positive_integer(number) -> None:
+    # #322: int() used to coerce True and 1.5 to pull request 1.
+    payload = {"repository": {"full_name": "owner/repo"}, "pull_request": {"number": number}}
+    with pytest.raises(ValueError, match="positive integer"):
+        parse_pull_request_event(payload)
+
+
+def test_webhook_pull_request_number_keeps_exact_identity() -> None:
+    payload = {"repository": {"full_name": "owner/repo"}, "pull_request": {"number": 2**40}}
+    assert parse_pull_request_event(payload).number == 2**40

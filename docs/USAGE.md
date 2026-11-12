@@ -22,7 +22,10 @@ filename; pass `language_hint=` to override.
 ## CLI
 
 ```bash
-intentumdiff git HEAD~1 HEAD          # semantic diff of a commit range
+intentumdiff git                      # every changed file vs HEAD (current repository)
+intentumdiff git --repo ../other      # the same for another repository
+intentumdiff git src/app.py           # one file; `git REPO FILE` names the repository too
+intentumdiff git --old HEAD~1 --new HEAD   # semantic diff of a commit range
 intentumdiff file old.py new.py       # two files
 intentumdiff string "$OLD" "$NEW" --filename x.py
 intentumdiff review                   # working-tree review
