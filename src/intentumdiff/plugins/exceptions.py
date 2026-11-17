@@ -109,3 +109,13 @@ class RegistryManifestError(RuntimeError):
     def __init__(self, message: str, errors: list[dict[str, str]] | None = None) -> None:
         super().__init__(message)
         self.errors: list[dict[str, str]] = list(errors or [])
+
+
+class RegistryManifestWarning(UserWarning):
+    """Core's validator rejected part of the plugin registry manifest; loading continued (#309).
+
+    Entries core reports under ``/plugins/<name>`` are skipped and every other entry loads; a
+    manifest whose top level is unusable (core errors at ``/`` or ``/plugins``) loads none. The
+    message lists core's ``"<pointer>: <message>"`` errors and names the entries not loaded.
+    Strict tooling uses :func:`~intentumdiff.plugins.registry_schema.check_registry_manifest`.
+    """

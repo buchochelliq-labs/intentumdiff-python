@@ -565,6 +565,7 @@ def _cmd_plugins_list(_args: argparse.Namespace) -> None:
 
 def _cmd_plugins_add(args: argparse.Namespace) -> None:
     import os as _os
+    import warnings as _warnings
 
     from intentumdiff.plugins.hub import (
         PluginSpec,
@@ -578,6 +579,7 @@ def _cmd_plugins_add(args: argparse.Namespace) -> None:
         save_plugins_file,
         security_check_plugin,
     )
+    from intentumdiff.plugins.hub import logger as _hub_logger
 
     source: str = getattr(args, "source", "git")
     skip_verify: bool = getattr(args, "skip_verify", False)
@@ -591,9 +593,7 @@ def _cmd_plugins_add(args: argparse.Namespace) -> None:
                 "INTENTUMDIFF_ALLOW_SKIP_VERIFY=1 to prevent accidental use.[/bold red]"
             )
             sys.exit(1)
-        _err.print(
-            "[yellow]Warning: security verification skipped (--skip-verify).[/yellow]"
-        )
+        _err.print("[yellow]Warning: security verification skipped (--skip-verify).[/yellow]")
 
     # Preserve existing pinned Wasm/dependency provenance before pip has any
     # side effects.  A malformed manifest or dangling symlink is not an empty
@@ -613,14 +613,20 @@ def _cmd_plugins_add(args: argparse.Namespace) -> None:
     registry_entry: RegistryEntry | None = None
     if not args.repo and not skip_verify:
         try:
-            registry = fetch_official_registry(
-                strict=getattr(args, "strict_registry", False),
-            )
-            short = (
-                args.plugin_name[len("intentumdiff-"):]
-                if args.plugin_name.startswith("intentumdiff-")
-                else args.plugin_name
-            )
+            # #309: an invalid manifest only skips entries; show its warning once, here, and not
+            # again through the logging last-resort handler.
+            with _warnings.catch_warnings(record=True) as caught:
+                _warnings.simplefilter("always")
+                _hub_logger.disabled = True
+                try:
+                    registry = fetch_official_registry(
+                        strict=getattr(args, "strict_registry", False),
+                    )
+                finally:
+                    _hub_logger.disabled = False
+            for caught_warning in caught:
+                _err.print("[yellow]Registry warning:[/yellow]", Text(str(caught_warning.message)))
+            short = args.plugin_name.removeprefix("intentumdiff-")
             registry_entry = registry.get(short)
             if registry_entry is not None:
                 # #94: refuse an ABI-incompatible plugin at RESOLVE time, before any install.
@@ -716,10 +722,7 @@ def _cmd_plugins_add(args: argparse.Namespace) -> None:
     if args.save:
         yaml_path = Path(args.file)
         # Replace only the matching entry; retain all other pinned provenance.
-        existing = [
-            s for s in existing_manifest
-            if s.name != spec.name and s.name != spec.package_name
-        ]
+        existing = [s for s in existing_manifest if s.name not in (spec.name, spec.package_name)]
         existing.append(spec)
         save_plugins_file(yaml_path, existing)
         _console.print(f"[green]Saved to {yaml_path}[/green]")
@@ -749,9 +752,7 @@ def _cmd_plugins_install(args: argparse.Namespace) -> None:
                 "INTENTUMDIFF_ALLOW_SKIP_VERIFY=1 to prevent accidental use.[/bold red]"
             )
             sys.exit(1)
-        _err.print(
-            "[yellow]Warning: security verification skipped (--skip-verify).[/yellow]"
-        )
+        _err.print("[yellow]Warning: security verification skipped (--skip-verify).[/yellow]")
 
     yaml_path = Path(args.file)
     if not yaml_path.exists():
@@ -813,9 +814,7 @@ def _cmd_plugins_install(args: argparse.Namespace) -> None:
                 )
                 for e in errors:
                     _err.print(f"    [red]{e}[/red]")
-                _err.print(
-                    f"  [red]Uninstalling '{spec.package_name}'.[/red]"
-                )
+                _err.print(f"  [red]Uninstalling '{spec.package_name}'.[/red]")
                 pip_uninstall(spec.package_name)
                 security_failed.append(spec.name)
 

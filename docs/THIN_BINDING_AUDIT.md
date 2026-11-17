@@ -151,6 +151,19 @@ Proof: no reference from `src`; tests that only exercised these are removed or r
   `tests/unit/test_allowed_plugins_semantics.py` (None, [], grammar, opaque plugin, language
   and non-identifier allowlists agree across listing, selection and the batch gate; a canned
   verdict passes through; malformed answers raise).
+- **#309 done**: an invalid registry manifest no longer blocks loading (product decision).
+  `parse_registry_manifest` still asks core's `validate_registry_manifest` and adds no rule
+  of its own: it only reads each error's RFC 6901 `path`. Entries with an error under
+  `/plugins/<name>` (`~1`/`~0` decoded) are skipped; an error at `/` or `/plugins`, or a top
+  level without a `plugins` mapping, loads none. Entries are built from the JSON form core
+  judged. Every such load emits one `RegistryManifestWarning` (core's `"<path>: <message>"`
+  strings and the skipped names), logged too; `plugins add` prints it once on stderr. Text
+  that is not YAML or has no JSON form still raises `RegistryManifestError` (its one caller,
+  `plugins add`, already reports that and continues unverified, so startup is not blocked).
+  `check_registry_manifest` stays strict for registry tooling. Proof:
+  `tests/unit/test_registry_manifest_loading.py` (good entries load beside a bad one, escaped
+  names, unusable top levels give an empty inventory and a warning, valid manifests warn
+  nothing, a canned core rejection decides alone, the CLI warning reaches stderr once).
 - Still open: the core finalize `tree_too_large` decline is answered by a Python-requested
   `source_fallback_diff` (S3), and the certified-batch decline reroute (S4).
 
