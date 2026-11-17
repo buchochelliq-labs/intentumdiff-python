@@ -2,6 +2,16 @@
 
 ## v0.0.3 — unreleased
 
+### Registry 9889613 (registry #20) parser components
+
+- `REGISTRY_REF` pins registry `9889613d4829c0f43d7a29e89b9ddf1a783d9c24` (registry #20),
+  which re-pins 41 parser components to their reviewed `release/v0.0.3-rc` CI builds.
+  The previous wheel staged components from registry `8911328` (#17), which predates
+  registry #18/#19 and every parser fix merged since, including the complete-literal
+  JS/TS/JSON/SQL/YAML components.
+- With these components and core 8898e3f, the 760-case language assessment passes all
+  682 oracle-judged probes (previously 591 with the stale components), with no regressions.
+
 ### Core 74618c3 (core #312) adoption
 
 - `CORE_REF` pins core `74618c311836983b4f60ae2d8389edfdd14f7793` (merge of core #312,
