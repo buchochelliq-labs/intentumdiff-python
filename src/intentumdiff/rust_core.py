@@ -452,6 +452,14 @@ def try_rust_finalize_review(
         fallback_diff = data.get("fallback_diff")
         if fallback_diff is not None and not isinstance(fallback_diff, dict):
             raise ValueError("invalid Rust finalize response: malformed fallback_diff")
+        # Core #252: the proof rule and the suppression record go back to
+        # complete_routed_review verbatim, so core (not Python) states completeness.
+        proof = data.get("equivalence_proof")
+        if proof is not None and not isinstance(proof, str):
+            raise ValueError("invalid Rust finalize response: malformed equivalence_proof")
+        suppression_trace = data.get("suppression_trace")
+        if suppression_trace is not None and not isinstance(suppression_trace, list):
+            raise ValueError("invalid Rust finalize response: malformed suppression_trace")
 
         return {
             "fallback_diff": (
@@ -465,6 +473,8 @@ def try_rust_finalize_review(
             "no_surviving_changes": data["no_surviving_changes"],
             "ignored_style_changes": [dict(item) for item in ignored],
             "trace": [dict(item) for item in trace],
+            "equivalence_proof": proof,
+            "suppression_trace": suppression_trace,
         }
     except Exception as exc:  # noqa: BLE001 - an engine failure is not an unsupported decline.
         raise RuntimeError(f"Rust finalize review failed: {exc}") from exc
@@ -1314,6 +1324,15 @@ def _require_complete_batch_diff_dto(payload: Any) -> dict[str, Any]:
             raise ValueError(f"Rust complete batch diff requires {field} boolean")
     if not isinstance(payload.get("metadata"), dict):
         raise ValueError("Rust complete batch diff requires metadata object")
+    # Core #252: a stated completeness verdict travels with its `incomplete` field (object
+    # or null); the typed DTO checks both. Echo ops given a DTO without a verdict (one not
+    # served by core) return none, which stays None rather than being invented here.
+    if payload.get("completeness") is not None:
+        if payload["completeness"] not in ("complete", "equivalent", "incomplete"):
+            raise ValueError("Rust complete batch diff requires completeness "
+                             "'complete', 'equivalent' or 'incomplete'")
+        if "incomplete" not in payload:
+            raise ValueError("Rust complete batch diff requires incomplete (object or null)")
     return payload
 
 

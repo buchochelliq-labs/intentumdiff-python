@@ -250,7 +250,7 @@ class FileWatcher:
         if diff.is_style_only:  # core's flag first: a style-only record has no changes (#310)
             self._out.print(f"[dim]{rel_path_str} — style changes only[/dim]")
             return
-        if not diff.changes and not diff.is_fallback:  # a fallback is rendered, never "none"
+        if not diff.changes and not diff.is_fallback and diff.completeness != "incomplete":
             self._out.print(f"[dim]{rel_path_str} — no changes[/dim]")
             return
 

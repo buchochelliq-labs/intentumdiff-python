@@ -2,6 +2,37 @@
 
 ## v0.0.3 — unreleased
 
+### Core 74618c3 (core #312) adoption
+
+- `CORE_REF` pins core `74618c311836983b4f60ae2d8389edfdd14f7793` (merge of core #312,
+  review completeness, core #252).
+- `SemanticDiff` carries core's `completeness` (`"complete"` | `"equivalent"` |
+  `"incomplete"`) and `incomplete` (`IncompleteReview`: `reason`, `message`, `report_url`,
+  `language`, `core_version`, `source_ranges[]`, `source_ranges_truncated`,
+  `source_ranges_available` and `report` = `IncompleteReport` with `title`,
+  `body_markdown`, `truncated`, `issue_url` and the sanitised `outline`). Both are
+  marshalled verbatim (strict types; unknown keys kept; JSON output is core's DTO) and never
+  derived in Python. `IncompleteReview` and `IncompleteReport` are exported from
+  `intentumdiff`. A malformed verdict (an unknown `completeness`, a verdict without the
+  `incomplete` key, `incomplete` set on any other state, or a mistyped report field) raises
+  the DTO translation error (`ValueError`). `completeness` is `None` only on a DTO core did
+  not serve (e.g. a `SemanticDiff` built by the caller).
+- Member reorders inside JSON objects, YAML mappings and TOML tables are now `equivalent`
+  with `metadata.equivalence_proof = "keyed_data.unordered_mapping_member_order"`.
+  `try_rust_finalize_review` previously dropped finalize's `equivalence_proof` (and the
+  `suppression_trace` the bug report's outline uses) before `complete_routed_review`; both
+  are now transported unchanged.
+- CLI: an incomplete review shows core's `incomplete.message` verbatim (core's terminal
+  panel replaces "No changes detected", and the message is repeated on stderr). On an
+  interactive terminal, or with the new `--report-bug` flag on `git`, `file`, `patch` and
+  `string`, the CLI prints core's `report.title` and `report.body_markdown` for preview and
+  asks `[y/N]`; only an explicit `y`/`yes` calls `webbrowser.open(report.issue_url)`. When
+  `report.truncated` is true it says the URL was shortened and that the printed body is the
+  full report to paste. Without a TTY nothing is ever opened; the CLI prints the message and
+  how to report. All of this is on stderr, so JSON and other machine output is unchanged.
+- `intentumdiff watch` renders an incomplete review through core's renderer instead of
+  printing "no changes".
+
 ### Core 9b46bfb (core #310) adoption
 
 - Wasm fuel budgets (parser full-parse and renderer, API and CLI) come from core's

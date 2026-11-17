@@ -23,6 +23,7 @@ import os
 import shlex
 import sys
 import time
+import webbrowser
 from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
@@ -406,6 +407,56 @@ def _render_with_profile(
     started = time.perf_counter()
     _render(diff, args.format, args.output, fuel=fuel)
     _emit_phase_profiles(diff, render_ms=(time.perf_counter() - started) * 1000)
+    _offer_incomplete_reports([diff], args)
+
+
+# Fixed CLI wording around core's report (core #252). Everything else the report flow
+# prints is core-authored text (message, title, body_markdown); nothing local is added.
+_REPORT_PREVIEW_HEADER = "Bug report preview (nothing has been sent):"
+_REPORT_TRUNCATED_NOTE = ("The pre-filled issue URL was shortened to fit. The full report body "
+                          "is printed above: paste it into the issue.")
+_REPORT_PROMPT = "Open this pre-filled GitHub issue in your browser? [y/N] "
+_REPORT_NOT_OPENED = "Nothing was opened."
+_REPORT_HOW_TO = ("No terminal is attached, so nothing was opened. To preview and report this "
+                  "bug, rerun the command in a terminal with --report-bug.")
+_REPORT_HINT = "To preview a pre-filled bug report, rerun the command with --report-bug."
+
+
+def _offer_incomplete_reports(diffs: list[SemanticDiff], args: argparse.Namespace) -> None:
+    """Offer core's bug report for incomplete reviews; open the URL only on an explicit yes.
+
+    Writes to stderr only, so stdout (and JSON, which carries ``completeness`` and
+    ``incomplete`` as core sent them) is untouched. Without a TTY nothing is opened.
+    """
+    interactive = sys.stdin.isatty() and sys.stdout.isatty()
+    opted_in = bool(getattr(args, "report_bug", False))
+    offer = opted_in or (interactive and args.format == "terminal")
+    for diff in diffs:
+        if diff.completeness != "incomplete" or diff.incomplete is None:
+            continue
+        report = diff.incomplete.report
+        _write_stderr(diff.incomplete.message)
+        if not offer:
+            _write_stderr(_REPORT_HOW_TO if not interactive else _REPORT_HINT)
+            continue
+        _write_stderr(_REPORT_PREVIEW_HEADER, report.title, report.body_markdown)
+        if report.truncated:
+            _write_stderr(_REPORT_TRUNCATED_NOTE)
+        if not interactive:
+            _write_stderr(_REPORT_HOW_TO)
+            continue
+        sys.stderr.write(_REPORT_PROMPT)
+        sys.stderr.flush()
+        if sys.stdin.readline().strip().lower() in ("y", "yes"):
+            webbrowser.open(report.issue_url)
+        else:
+            _write_stderr(_REPORT_NOT_OPENED)
+
+
+def _write_stderr(*blocks: str) -> None:
+    """Write text literally (no Rich markup: core's Markdown may contain brackets)."""
+    sys.stderr.write("".join(f"{block}\n" for block in blocks if block))
+    sys.stderr.flush()
 
 
 def _combine_html_reviews(pages: list[tuple[str, str]]) -> str:
@@ -469,6 +520,7 @@ def _render_many_with_profile(
         _write_output(_combine_html_reviews(list(zip(labels, parts, strict=True))), args.output)
     else:
         _write_output("\n".join(parts), args.output)
+    _offer_incomplete_reports(diffs, args)
 
 
 def _has_immutable_guardrail(diff: SemanticDiff) -> bool:

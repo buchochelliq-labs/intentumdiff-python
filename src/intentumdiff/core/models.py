@@ -21,6 +21,7 @@ from pydantic import (
     Field,
     PrivateAttr,
     field_serializer,
+    model_serializer,
     field_validator,
     model_validator,
 )
@@ -464,6 +465,122 @@ class ChangeStreamEvent(BaseModel, frozen=True):
 
 
 # ---------------------------------------------------------------------------
+# Review completeness (core #252 / #312)
+# ---------------------------------------------------------------------------
+
+
+class _CoreDto(BaseModel):
+    """A core-authored DTO marshalled verbatim: strict types, unknown fields kept.
+
+    Serialisation emits exactly the keys core sent (absent optional keys stay absent),
+    so JSON output passes core's DTO through unchanged.
+    """
+
+    model_config = ConfigDict(frozen=True, strict=True, extra="allow")
+
+    @model_serializer(mode="wrap")
+    def _verbatim(self, handler: Any) -> dict[str, Any]:
+        data = handler(self)
+        sent = self.model_fields_set
+        aliases = {name: field.alias for name, field in type(self).model_fields.items()
+                   if field.alias}
+        keys = sent | {aliases[name] for name in sent if name in aliases}
+        return {aliases.get(key, key): value for key, value in data.items() if key in keys}
+
+
+class IncompleteSourceRange(_CoreDto):
+    """A changed line hunk (zero-based lines, exclusive end bytes)."""
+
+    old_start_byte: int = Field(ge=0)
+    old_end_byte: int = Field(ge=0)
+    new_start_byte: int = Field(ge=0)
+    new_end_byte: int = Field(ge=0)
+    old_start_line: int = Field(ge=0)
+    old_end_line: int = Field(ge=0)
+    new_start_line: int = Field(ge=0)
+    new_end_line: int = Field(ge=0)
+
+
+class ReproRegionSide(_CoreDto):
+    start_line: int = Field(ge=0)
+    start_col: int = Field(ge=0)
+    end_line: int = Field(ge=0)
+    end_col: int = Field(ge=0)
+    bytes: int = Field(ge=0)
+
+
+class ReproRegion(_CoreDto):
+    index: int = Field(ge=0)
+    old: ReproRegionSide
+    new: ReproRegionSide
+    old_skeleton: str | None = None
+    old_shape: str | None = None
+    new_skeleton: str | None = None
+    new_shape: str | None = None
+
+
+class ReproPlugin(_CoreDto):
+    id: str | None
+    version: str | None
+
+
+class ReproSuppressedKind(_CoreDto):
+    change_type: str
+    node_type: str
+    count: int = Field(ge=0)
+
+
+class ReproSuppression(_CoreDto):
+    # ``pass`` is a Python keyword; the DTO key is kept verbatim through the alias.
+    pass_: str = Field(alias="pass")
+    removed: list[ReproSuppressedKind]
+    added: list[ReproSuppressedKind]
+
+
+class ReproOutline(_CoreDto):
+    """Core's sanitised structural outline: no source text, filenames or paths."""
+
+    schema_version: int
+    reason: str
+    core_version: str
+    language: str
+    plugin: ReproPlugin | None
+    regions: list[ReproRegion]
+    regions_truncated: bool
+    structure_available: bool
+    suppressions: list[ReproSuppression] | None
+    placeholder_count: int = Field(ge=0)
+
+
+class IncompleteReport(_CoreDto):
+    """Core's pre-built bug report. Bindings preview it and open ``issue_url`` only on
+    explicit user confirmation; ``truncated`` means the URL carries a shortened body."""
+
+    title: str
+    body_markdown: str
+    truncated: bool
+    issue_url: str
+    outline: ReproOutline
+
+
+class IncompleteReview(_CoreDto):
+    """Why core could not explain a source delta; ``message`` is shown verbatim."""
+
+    reason: str
+    message: str
+    report_url: str
+    language: str
+    core_version: str
+    source_ranges: list[IncompleteSourceRange]
+    source_ranges_truncated: bool
+    source_ranges_available: bool
+    report: IncompleteReport
+
+
+ReviewCompleteness = Literal["complete", "equivalent", "incomplete"]
+
+
+# ---------------------------------------------------------------------------
 # Diff result
 # ---------------------------------------------------------------------------
 
@@ -493,6 +610,12 @@ class SemanticDiff(BaseModel, frozen=True):
     #: The coarse kind of content core reviewed (Core #308, for vscode#133), from core's
     #: closed table keyed on the routed language. States what was reviewed, never a risk.
     content_class: Literal["code", "docs", "config", "data", "text"] | None = None
+    #: Core's completeness verdict (core #252): ``complete``, ``equivalent`` (proved, see
+    #: ``metadata.equivalence_proof``) or ``incomplete``. Never derived in Python; ``None``
+    #: only on a DTO that did not come from core.
+    completeness: ReviewCompleteness | None = None
+    #: Set by core exactly when ``completeness == "incomplete"``; not a clean review.
+    incomplete: IncompleteReview | None = None
     metadata: Mapping[str, Any] = Field(default_factory=dict)
 
     @field_validator("metadata", mode="before")
@@ -516,6 +639,11 @@ class SemanticDiff(BaseModel, frozen=True):
         if self.is_style_only and self.has_semantic_changes:
             raise ValueError(
                 "is_style_only and has_semantic_changes cannot both be True"
+            )
+        # Shape check only: core sends ``incomplete`` exactly for an incomplete review.
+        if (self.completeness == "incomplete") != (self.incomplete is not None):
+            raise ValueError(
+                "incomplete must be an object exactly when completeness is 'incomplete'"
             )
         return self
 

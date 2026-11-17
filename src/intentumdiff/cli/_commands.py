@@ -62,6 +62,7 @@ from intentumdiff.cli._shared import (  # noqa: F401
     _guardrail_result,
     _json_default,
     _load_cli_config,
+    _offer_incomplete_reports,
     _parse_fuel,
     _record_diagnostics_db,
     _render,
@@ -273,6 +274,7 @@ def _cmd_file(args: argparse.Namespace) -> None:
             if change.text_diff:
                 line += f"  [{change.text_diff}]"
             _console.print(line)
+        _offer_incomplete_reports([diff], args)
     else:
         _render_with_profile(diff, args, fuel=differ._config.plugin_fuel)
     result = _emit_guardrail_reports(diff, args)
@@ -2044,6 +2046,8 @@ def _add_output_args(p: argparse.ArgumentParser) -> None:
         default=None,
         help="Write output to FILE instead of stdout",
     )
+    p.add_argument("--report-bug", action="store_true", help="On an incomplete review, preview "
+                   "core's bug report and ask before opening the pre-filled issue in a browser.")
 
 
 def _parse_megapixels(value: str) -> int:
