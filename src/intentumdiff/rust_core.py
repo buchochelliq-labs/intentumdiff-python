@@ -16,6 +16,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from intentumdiff.core.models import (
+    FUEL_UNLIMITED,
     Change,
     ChangeGroup,
     ChangeType,
@@ -578,6 +579,22 @@ def render_cli_review(diff: SemanticDiff, *, width: int, color: bool) -> str:
     """Transport an authoritative DTO to Rust's rs-rich presentation renderer."""
     request = {"diff": diff.model_dump(mode="json"), "width": width, "color": color}
     return _required_engine_json("render_cli_review", json.dumps(request), result_type=str)
+
+
+def fuel_budget(plugin_fuel: int, content_len: int) -> int:
+    """Transport core's content-scaled Wasm fuel policy (``fuel_budget``, #308).
+
+    Core answers ``{"fuel": u64}`` or ``{"fuel": null}`` (unlimited, a negative
+    ``plugin_fuel``); ``null`` is returned as the binding's ``FUEL_UNLIMITED`` (-1).
+    """
+    config_json = json.dumps({"plugin_fuel": plugin_fuel})
+    result = _required_engine_json("fuel_budget", config_json, content_len, result_type=dict)
+    fuel = result.get("fuel", ...)
+    if fuel is None:
+        return FUEL_UNLIMITED
+    if type(fuel) is not int or fuel < 0:
+        raise RuntimeError(f"Rust engine operation fuel_budget returned invalid {result!r}")
+    return fuel
 
 
 def try_rust_build_symbol_table(files_json: str) -> str:

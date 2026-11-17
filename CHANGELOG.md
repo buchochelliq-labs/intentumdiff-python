@@ -2,6 +2,15 @@
 
 ## v0.0.3 — unreleased
 
+### Core 9b46bfb (core #310) adoption
+
+- Wasm fuel budgets (parser full-parse and renderer, API and CLI) come from core's
+  `fuel_budget` operation; the Python `_fuel_budget` helper and its formulas are gone (#308).
+  **Behaviour change:** core scales the configured `plugin_fuel` floor to
+  `20M + 20,000 × content bytes` (the renderer used `20M + 100 × bytes`, the full-parse path
+  `50M + 150,000 × the larger side`); a pair parse counts both sides' bytes. `-1` (or any
+  negative `plugin_fuel`) stays unlimited and a budget below 1M is kept exactly.
+
 ### Core 0877c75 (core #308) adoption
 
 - `NodeFacts` carries core's new `visibility` (`public|internal|private|protected|special|unknown`)

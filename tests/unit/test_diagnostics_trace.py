@@ -6,7 +6,6 @@ from intentumdiff import SemanticDiffer
 from intentumdiff.analysis.diagnostics import DiagnosticsRecorder
 from intentumdiff.core.models import DiffConfig
 from intentumdiff.differ import (
-    _fuel_budget,
     _record_engine_telemetry,
     _summarize_engine_telemetry,
 )
@@ -179,16 +178,6 @@ def test_engine_telemetry_does_not_flag_large_linear_file_as_hotspot() -> None:
     summary = _summarize_engine_telemetry(records)
 
     assert summary["fuel_hotspots"] == []
-
-
-def test_adaptive_fuel_treats_realistic_settings_as_floor_not_hard_cap() -> None:
-    assert _fuel_budget(10_000_000, 250_000_000) == 250_000_000
-    assert _fuel_budget(100_000_000, 250_000_000) == 250_000_000
-    assert _fuel_budget(-1, 250_000_000) == -1
-
-
-def test_adaptive_fuel_preserves_tiny_explicit_exhaustion_budgets() -> None:
-    assert _fuel_budget(1_000, 250_000_000) == 1_000
 
 
 def test_enabled_diff_records_stable_pipeline_stages() -> None:

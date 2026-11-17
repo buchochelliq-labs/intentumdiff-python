@@ -43,7 +43,7 @@ finer-grained ops, with Python-owned language allowlists and fallback choices be
    core `live_handle_diff` / `working_tree_source_content`.
 10. **[Fixed in #296]** **Guardrail pass/fail decided in Python twice** (`models.py`, `guardrail_reports.py`) and turned
     into CLI exit code 2; core has no equivalent op.
-11. **Two terminal renderers and two fuel formulas** (`SemanticDiffer.render` vs the CLI's core
+11. **[Fixed in #306/#308]** **Two terminal renderers and two fuel formulas** (`SemanticDiffer.render` vs the CLI's core
     `render_cli_review`; `_fuel_budget` vs the CLI's `max(fuel, 20M+len*100)`).
 
 ## Fix plan, in dependency order
@@ -65,7 +65,7 @@ Proof: no reference from `src`; tests that only exercised these are removed or r
 | S7 | Guardrail discovery, pass/fail, SARIF, annotations | `config::find_config_path`; new `guardrail_check_result`, `render_guardrail_{sarif,annotations}` | Discovery matrix vs core; SARIF snapshot | M |
 | S8 | `language_metadata.py` tables, registry alias tables | New `parser_catalog_metadata` op over `parser_manifest.json` | Detection over the manifest equals the native live server | M |
 | S9 | Indexer blob listing, binary rules, Python cache key | New `list_text_blobs(repo, ref)`; existing `cache_make_key` | `index_repo` = `index_directory` = core on a mixed-binary fixture | M |
-| S10 | Python terminal renderer and fuel formulas | Existing `render_cli_review`; new `fuel_budget` | `render()` output equals CLI output | S |
+| S10 **done** | Python terminal renderer and fuel formulas | Existing `render_cli_review`; new `fuel_budget` (core #310) | `render()` output equals CLI output; every budget is core's answer | S |
 
 ## Progress
 
@@ -125,6 +125,12 @@ Proof: no reference from `src`; tests that only exercised these are removed or r
   `render_cli_review` (width 80, no colour), the CLI's renderer, instead of its own Rich
   markup renderer; source text such as `[/].py` stays literal and API/CLI output is equal.
   The fuel formulas are one Python helper (`_fuel_budget`, #308) until core has `fuel_budget`.
+- **S10 done (#308)**: `_fuel_budget` and its formulas are deleted. The renderer budgets
+  (`SemanticDiffer.render`, the CLI's `_render_text`) and the full-parse budget transport core
+  #310's `fuel_budget` op (`[{"plugin_fuel": n}, content_len]` → `{"fuel": u64|null}`) through
+  `rust_core.fuel_budget`; `null` becomes `FUEL_UNLIMITED`. Core scales by 20,000 per byte
+  (the old renderer path used 100). Proof: `tests/unit/test_cli_render_fuel.py` (canned
+  budget passes through unchanged in one op, malformed answers raise, real-core policy).
 - Still open: the core finalize `tree_too_large` decline is answered by a Python-requested
   `source_fallback_diff` (S3), and the certified-batch decline reroute (S4).
 

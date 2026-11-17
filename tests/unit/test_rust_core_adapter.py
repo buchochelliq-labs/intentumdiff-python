@@ -1200,6 +1200,8 @@ def test_semantic_differ_batch_decline_requires_native_finalize_handler(monkeypa
         enrich_node_facts_json=real_backend.enrich_node_facts_json,
         # Every language's trees go to core profile enrichment (S1); use the real op.
         enrich_profile_labels_json=real_backend.enrich_profile_labels_json,
+        # The full-parse fuel budget is core's answer (#308); use the real op.
+        fuel_budget=real_backend.fuel_budget,
         version=lambda: "0.4.0",
         supports_language=lambda language: language == "python",
         diff_batch=lambda *args: json.dumps(payload),

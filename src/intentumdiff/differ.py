@@ -89,9 +89,6 @@ from intentumdiff._differ_runtime import (
     _drain_plugin_telemetry as _drain_plugin_telemetry,
 )
 from intentumdiff._differ_runtime import (
-    _fuel_budget as _fuel_budget,
-)
-from intentumdiff._differ_runtime import (
     _infer_file_lifecycle as _infer_file_lifecycle,
 )
 from intentumdiff._differ_runtime import (
@@ -142,6 +139,7 @@ from intentumdiff.plugins.exceptions import (
 from intentumdiff.plugins.registry import PluginRegistry
 from intentumdiff.rust_core import (
     enrich_node_facts,
+    fuel_budget,
     try_register_user_xml_dialects,
     try_rust_core_batch_diff,
     try_rust_core_batch_diffs,
@@ -571,7 +569,7 @@ class SemanticDiffer:
         except KeyError as exc:
             raise ValueError(str(exc)) from exc
         diff_json = diff.model_dump_json()
-        adaptive_fuel = _fuel_budget(self._config.plugin_fuel, 20_000_000 + len(diff_json) * 100)
+        adaptive_fuel = fuel_budget(self._config.plugin_fuel, len(diff_json.encode("utf-8")))
         return renderer.render(diff_json, fuel=adaptive_fuel)
 
     def diff_commit(
@@ -1137,13 +1135,9 @@ class SemanticDiffer:
         # Stages 3-6 are skipped: the plugin handles its own CST construction
         # and trivia filtering. The style-only shortcut is not available here
         # because there is no host-side CST to hash.
-        max_source_bytes = max(
-            len(old_content.encode("utf-8")),
-            len(new_content.encode("utf-8")),
-        )
-        adaptive_fuel = _fuel_budget(
+        adaptive_fuel = fuel_budget(  # core's pair policy scales by both sides' bytes (#308)
             self._config.plugin_fuel,
-            50_000_000 + max_source_bytes * 150_000,
+            len(old_content.encode("utf-8")) + len(new_content.encode("utf-8")),
         )
         logger.debug("full-parse mode for %r via %r", filename, parser.grammar_id)
 

@@ -72,7 +72,6 @@ class _PhaseProfiler:
         }
 
 
-_EXPLICIT_FUEL_EXHAUSTION_TEST_CAP = 1_000_000
 # Hotspot thresholds are calibrated to the measured worst legitimate parser plus ~30%
 # headroom. Two effects moved the floor in 2026-07: literal-container text capture in the
 # tree-sitter converters (issue #46 — a deliberate correctness cost), and whole-binary LTO
@@ -100,21 +99,6 @@ def _attach_content_type_metadata(
     metadata = dict(diff.metadata or {})
     metadata["content_type"] = detect_content_type(head)
     return diff.model_copy(update={"metadata": metadata})
-
-
-def _fuel_budget(base: int, extra: int) -> int:
-    """Return an adaptive budget without hiding explicit low-fuel tests.
-
-    Real editor/CLI fuel settings are a floor, not a guarantee that ordinary
-    source files will fail once they cross that exact number. Tiny budgets are
-    still respected so fuel-pressure tests can prove runaway plugins fail
-    explicitly instead of being silently promoted to a larger cap.
-    """
-    if base == -1:
-        return base
-    if base < _EXPLICIT_FUEL_EXHAUSTION_TEST_CAP:
-        return base
-    return max(base, extra)
 
 
 def _drain_plugin_telemetry(plugin_adapter: Any) -> list[dict[str, Any]]:
