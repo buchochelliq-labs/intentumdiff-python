@@ -31,14 +31,16 @@ def _valid_registry() -> dict:
                 "description": "dbt SQL + schema semantics",
                 "trust_tier": "official",
                 "wasm_checksums": {"dbt_sql_parser.wasm": _SHA},
-                "capabilities": ["intentdiff:plugin/parser"],
+                "capabilities": ["parser"],
                 "abi_target": "1.0.0",
                 "provenance_manifest_ref": "wasm_provenance.json",
             },
             "terraform": {
                 "source": "git",
-                "ref": "v0.2.0",
+                "ref": "b" * 40,
                 "wasm_checksums": {"terraform_parser.wasm": _SHA},
+                "capabilities": ["parser"],
+                "abi_target": "1.0.0",
                 "dep_hashes": {"intentumdiff-terraform==0.2.0": f"sha256:{_SHA}"},
                 "allowed_dependencies": ["some-reviewed-dep"],
             },
@@ -96,8 +98,8 @@ def test_bad_source_and_trust_tier_enums_are_rejected() -> None:
     reg["plugins"]["dbt"]["source"] = "svn"
     reg["plugins"]["terraform"]["trust_tier"] = "gold"
     errors = validate_registry(reg)
-    assert any(".source" in e and "svn" in e for e in errors)
-    assert any(".trust_tier" in e and "gold" in e for e in errors)
+    assert '/plugins/dbt/source: "svn" is not one of ["git", "pypi"]' in errors
+    assert '/plugins/terraform/trust_tier: "gold" is not one of ["official", "community"]' in errors
 
 
 def test_bad_checksum_and_dep_hash_shapes_are_rejected() -> None:
@@ -110,7 +112,7 @@ def test_bad_checksum_and_dep_hash_shapes_are_rejected() -> None:
     assert any("not a lowercase SHA-256" in e for e in errors)
     assert any("not a .wasm filename" in e for e in errors)
     assert any("package==version" in e for e in errors)
-    assert any("sha256:<hex>" in e for e in errors)
+    assert any("sha256:<lowercase hex>" in e for e in errors)
 
 
 def test_invalid_plugin_name_is_rejected() -> None:
@@ -211,8 +213,10 @@ def test_fetch_official_registry_parses_abi_target() -> None:
         {
             "version": 1,
             "plugins": {
-                "dbt": {"source": "pypi", "ref": "1.0.0", "abi_target": "1.0.0"},
-                "legacy": {"source": "git", "ref": "main"},  # no abi_target
+                "dbt": {"source": "pypi", "ref": "1.0.0", "abi_target": "1.0.0",
+                        "wasm_checksums": {"dbt.wasm": _SHA}, "capabilities": ["parser"]},
+                # no abi_target (core requires one only for the official tier)
+                "legacy": {"source": "git", "ref": "main", "trust_tier": "community"},
             },
         }
     )
@@ -254,7 +258,9 @@ def test_fetch_official_registry_parses_trust_tier() -> None:
         {
             "version": 1,
             "plugins": {
-                "official-one": {"source": "pypi", "wasm_checksums": {"a.wasm": _SHA}},
+                "official-one": {"source": "pypi", "ref": "1.0.0",
+                                 "wasm_checksums": {"a.wasm": _SHA},
+                                 "capabilities": ["parser"], "abi_target": "1.0.0"},
                 "community-one": {"source": "git", "trust_tier": "community"},
             },
         }
@@ -309,3 +315,21 @@ def test_cli_catalog_still_validates_first(tmp_path: Path, capsys) -> None:
     # --catalog does not bypass validation.
     assert _registry_cli([str(path), "--catalog"]) == 1
     assert "INVALID" in capsys.readouterr().out
+
+
+def test_schema_documents_cores_official_tier_policy() -> None:
+    """#329: the published schema states the policy core's validator enforces."""
+    entry = load_schema()["$defs"]["entry"]
+    wit = (
+        Path(__file__).resolve().parents[2] / "src" / "intentumdiff" / "plugins" / "wit"
+        / "plugin.wit"
+    ).read_text(encoding="utf-8")
+    exports = sorted(set(_re.findall(r"^\s*export\s+([a-z-]+);", wit, flags=_re.M)))
+    capabilities = entry["properties"]["capabilities"]
+    assert capabilities["items"]["enum"] == exports and capabilities["uniqueItems"] is True
+    official = entry["allOf"][0]
+    assert official["if"] == {"properties": {"trust_tier": {"const": "official"}}}
+    assert official["then"]["required"] == ["ref", "wasm_checksums", "capabilities", "abi_target"]
+    assert official["then"]["else"]["properties"]["ref"]["pattern"] == "^[a-f0-9]{40}$"
+    assert _re.fullmatch(entry["properties"]["abi_target"]["pattern"], "1.0.0")
+    assert not _re.fullmatch(entry["properties"]["abi_target"]["pattern"], "garbage")

@@ -362,9 +362,9 @@ def _render_text(diff: SemanticDiff, fmt: str, fuel: int | None = None) -> str:
 
     try:
         diff_json = diff.model_dump_json()
-        from intentumdiff._differ_runtime import _fuel_budget  # the API's policy: -1 stays -1
+        from intentumdiff.rust_core import fuel_budget  # core's policy: -1 stays -1 (#308)
         plugin_fuel = fuel if fuel is not None else 100_000_000
-        pl = load_plugin(candidates[0], _fuel_budget(plugin_fuel, 20_000_000 + len(diff_json) * 100))
+        pl = load_plugin(candidates[0], fuel_budget(plugin_fuel, len(diff_json.encode("utf-8"))))
         return pl.call_render(diff_json)
     except Exception as exc:
         _err.print(f"[red]Renderer error: {exc}[/red]")

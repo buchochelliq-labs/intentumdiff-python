@@ -2,6 +2,30 @@
 
 ## v0.0.3 — unreleased
 
+### Core 9b46bfb (core #310) adoption
+
+- Wasm fuel budgets (parser full-parse and renderer, API and CLI) come from core's
+  `fuel_budget` operation; the Python `_fuel_budget` helper and its formulas are gone (#308).
+  **Behaviour change:** core scales the configured `plugin_fuel` floor to
+  `20M + 20,000 × content bytes` (the renderer used `20M + 100 × bytes`, the full-parse path
+  `50M + 150,000 × the larger side`); a pair parse counts both sides' bytes. `-1` (or any
+  negative `plugin_fuel`) stays unlimited and a budget below 1M is kept exactly.
+- Registry manifests are validated by core's `validate_registry_manifest` operation; the
+  Python field, pattern and enum checks are gone (#329). `RegistryManifestError.errors`
+  carries core's `{"path", "message"}` errors (RFC 6901 paths) and `validate_registry()`
+  returns them as `"<path>: <message>"`. **Behaviour change:** official entries (the default
+  tier) now need an immutable 40-hex git `ref` (or an exact PyPI version), `wasm_checksums`,
+  `capabilities` and `abi_target`; capabilities must be unique and one of `diff-analyzer`,
+  `enricher`, `index-engine`, `parser`, `renderer`; `abi_target` must be `MAJOR.MINOR.PATCH`
+  in every tier. The published registry (f95ceaa) passes. Error strings changed.
+- `DiffConfig.allowed_plugins` has one rule, core's `parser_allowlist_matches`, in parser
+  discovery (`language_ids`, `language_info`), actual selection and the certified Python batch
+  (#311). `None` allows every parser and `[]` none; otherwise an entry must exactly equal a
+  parser's grammar id, plugin id (e.g. `intentumdiff-python:python:python`), catalogue alias
+  or declared language id. **Behaviour change:** plugin ids and language ids (e.g.
+  `typescript`) now select their parser, and `python-parser` / `python_parser`, which only the
+  batch gate accepted, select nothing anywhere.
+
 ### Core 0877c75 (core #308) adoption
 
 - `NodeFacts` carries core's new `visibility` (`public|internal|private|protected|special|unknown`)

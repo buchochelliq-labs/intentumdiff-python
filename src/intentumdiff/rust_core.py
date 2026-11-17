@@ -16,6 +16,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from intentumdiff.core.models import (
+    FUEL_UNLIMITED,
     Change,
     ChangeGroup,
     ChangeType,
@@ -580,6 +581,22 @@ def render_cli_review(diff: SemanticDiff, *, width: int, color: bool) -> str:
     return _required_engine_json("render_cli_review", json.dumps(request), result_type=str)
 
 
+def fuel_budget(plugin_fuel: int, content_len: int) -> int:
+    """Transport core's content-scaled Wasm fuel policy (``fuel_budget``, #308).
+
+    Core answers ``{"fuel": u64}`` or ``{"fuel": null}`` (unlimited, a negative
+    ``plugin_fuel``); ``null`` is returned as the binding's ``FUEL_UNLIMITED`` (-1).
+    """
+    config_json = json.dumps({"plugin_fuel": plugin_fuel})
+    result = _required_engine_json("fuel_budget", config_json, content_len, result_type=dict)
+    fuel = result.get("fuel", ...)
+    if fuel is None:
+        return FUEL_UNLIMITED
+    if type(fuel) is not int or fuel < 0:
+        raise RuntimeError(f"Rust engine operation fuel_budget returned invalid {result!r}")
+    return fuel
+
+
 def try_rust_build_symbol_table(files_json: str) -> str:
     """Extract a symbol table in Rust, raising on unavailable or invalid results.
 
@@ -892,6 +909,50 @@ def validate_dep_hashes(
     if not callable(fn):
         raise RuntimeError("backend does not expose validate_dep_hashes")
     return fn(dep_hashes, allowed_dependencies, package_name, install_target)
+
+
+def validate_registry_manifest(manifest_json: str) -> list[dict[str, str]]:
+    """Transport core's registry-manifest validator (``validate_registry_manifest``, #329).
+
+    Returns core's errors unchanged (``[]`` = valid), each ``{"path", "message"}``. A response
+    whose ``ok`` disagrees with its errors, or any other shape, raises.
+    """
+    result = _required_engine_json(
+        "validate_registry_manifest", manifest_json, result_type=dict
+    )
+    errors = result.get("errors")
+    if (
+        type(result.get("ok")) is not bool
+        or not isinstance(errors, list)
+        or result["ok"] is not (not errors)
+        or not all(
+            isinstance(e, dict) and set(e) == {"path", "message"}
+            and all(isinstance(v, str) for v in e.values())
+            for e in errors
+        )
+    ):
+        raise RuntimeError(f"Rust engine operation validate_registry_manifest returned {result!r}")
+    return errors
+
+
+def parser_allowlist_matches(
+    allowed_plugins: list[str] | None, identity: dict[str, Any]
+) -> dict[str, Any]:
+    """Transport core's parser-allowlist rule (``parser_allowlist_matches``, #311).
+
+    *identity* is ``{"plugin_id", "grammar_id", "languages", "aliases"}`` (all optional).
+    Returns core's ``{"matches": bool, "matched_by": str | None}`` unchanged; core's rule is
+    ``None`` = every parser, ``[]`` = none, else an exact grammar/plugin/alias/language id.
+    """
+    result = _required_engine_json(
+        "parser_allowlist_matches", allowed_plugins, json.dumps(identity), result_type=dict
+    )
+    matches, matched_by = result.get("matches"), result.get("matched_by", ...)
+    if type(matches) is not bool or not (
+        isinstance(matched_by, str) if matches else matched_by is None
+    ):
+        raise RuntimeError(f"Rust engine operation parser_allowlist_matches returned {result!r}")
+    return result
 
 
 # ── Git source-collection read ops (Rust-authoritative, #98, A2.4) ──────────

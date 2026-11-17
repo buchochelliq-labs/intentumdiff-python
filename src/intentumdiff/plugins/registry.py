@@ -20,7 +20,7 @@ non-empty string wins.
 
 Allowed-list filtering
 ──────────────────────
-If ``DiffConfig.allowed_plugins`` is set, only those grammar IDs are consulted ([] = none).
+``DiffConfig.allowed_plugins`` follows core's ``parser_allowlist_matches`` rule (#311).
 If ``DiffConfig.strict_plugins`` is True, an error is raised for any language
 not handled by the allowed list.
 """
@@ -445,23 +445,23 @@ class PluginRegistry:
             f"{sample}"
         )
 
+    def _allowed_parsers(self) -> list[ParserAdapter]:  # core's allowlist rule (#311)
+        from intentumdiff.rust_core import parser_allowlist_matches as allows
+        return [p for p in self.parsers if allows(self._config.allowed_plugins, {
+            "plugin_id": p.plugin_id, "grammar_id": p.grammar_id,
+            "languages": list(p.language_ids)})["matches"]]
+
     def language_ids(self) -> list[str]:
         """Return parser language IDs reported by loaded parser plugins."""
-        allowed = self._config.allowed_plugins  # core's rule: None = all, [] = none (#311)
         ids: set[str] = set()
-        for parser in self.parsers:
-            if allowed is not None and parser.grammar_id not in allowed:
-                continue
+        for parser in self._allowed_parsers():
             ids.update(parser.language_ids)
         return sorted(ids)
 
     def language_info(self) -> list[LanguageInfoGroup]:
         """Return parser metadata grouped by language ID."""
-        allowed = self._config.allowed_plugins
         grouped: dict[str, list] = {}
-        for parser in self.parsers:
-            if allowed is not None and parser.grammar_id not in allowed:
-                continue
+        for parser in self._allowed_parsers():
             for info in parser.language_info:
                 grouped.setdefault(info.language_id, []).append(info)
 

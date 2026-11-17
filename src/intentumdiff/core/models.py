@@ -647,7 +647,8 @@ class DiffConfig(BaseModel):
     # Extra CST node types to treat as trivia (merged with plugin defaults)
     extra_trivia_types: list[str] = Field(default_factory=list)
 
-    # Plugin control
+    # Plugin control. allowed_plugins follows core's parser_allowlist_matches rule (#311):
+    # None = every parser, [] = none, else exact grammar / plugin / alias / language ids.
     allowed_plugins: list[str] | None = None
     strict_plugins: bool = False
 
