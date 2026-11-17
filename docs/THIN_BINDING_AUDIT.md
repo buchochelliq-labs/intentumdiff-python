@@ -131,6 +131,16 @@ Proof: no reference from `src`; tests that only exercised these are removed or r
   `rust_core.fuel_budget`; `null` becomes `FUEL_UNLIMITED`. Core scales by 20,000 per byte
   (the old renderer path used 100). Proof: `tests/unit/test_cli_render_fuel.py` (canned
   budget passes through unchanged in one op, malformed answers raise, real-core policy).
+- **#329 done**: `plugins/registry_schema.py` no longer has its own manifest rules (field
+  sets, name/checksum/dep-hash/SHA patterns, source/tier enums, renderer-bundle pins).
+  `validate_registry`, the hub's manifest gate and the vetting CLI transport core #310's
+  `validate_registry_manifest` (`[manifest_json]` → `{"ok", "errors": [{"path","message"}]}`)
+  through `rust_core.validate_registry_manifest`, which checks the DTO (`ok` must agree with
+  `errors`). `RegistryManifestError.errors` carries core's errors unchanged. Python keeps the
+  YAML/JSON read, the JSON-form marshalling and message formatting. Proof:
+  `tests/unit/test_registry_*.py` (real registry fixture passes; issue probes, wrong-type
+  matrix and renderer-bundle errors come from core; a canned core rejection surfaces
+  verbatim). Still in Python: `abi_compatible` and the catalog renderer.
 - Still open: the core finalize `tree_too_large` decline is answered by a Python-requested
   `source_fallback_diff` (S3), and the certified-batch decline reroute (S4).
 

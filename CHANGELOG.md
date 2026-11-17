@@ -10,6 +10,14 @@
   `20M + 20,000 × content bytes` (the renderer used `20M + 100 × bytes`, the full-parse path
   `50M + 150,000 × the larger side`); a pair parse counts both sides' bytes. `-1` (or any
   negative `plugin_fuel`) stays unlimited and a budget below 1M is kept exactly.
+- Registry manifests are validated by core's `validate_registry_manifest` operation; the
+  Python field, pattern and enum checks are gone (#329). `RegistryManifestError.errors`
+  carries core's `{"path", "message"}` errors (RFC 6901 paths) and `validate_registry()`
+  returns them as `"<path>: <message>"`. **Behaviour change:** official entries (the default
+  tier) now need an immutable 40-hex git `ref` (or an exact PyPI version), `wasm_checksums`,
+  `capabilities` and `abi_target`; capabilities must be unique and one of `diff-analyzer`,
+  `enricher`, `index-engine`, `parser`, `renderer`; `abi_target` must be `MAJOR.MINOR.PATCH`
+  in every tier. The published registry (f95ceaa) passes. Error strings changed.
 
 ### Core 0877c75 (core #308) adoption
 

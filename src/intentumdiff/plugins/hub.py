@@ -88,7 +88,7 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
 from intentumdiff.plugins.exceptions import RegistryManifestError
-from intentumdiff.plugins.registry_schema import validate_registry
+from intentumdiff.plugins.registry_schema import check_registry_manifest
 
 logger = logging.getLogger(__name__)
 
@@ -441,9 +441,7 @@ def parse_registry_manifest(content: str) -> dict[str, RegistryEntry]:
         data = yaml.safe_load(content)
     except yaml.YAMLError as exc:
         raise RegistryManifestError(f"plugin registry manifest is not YAML: {exc}") from exc
-    errors = validate_registry(data)  # the CI vetting validator gates every entry (#309)
-    if errors:
-        raise RegistryManifestError("invalid plugin registry manifest: " + "; ".join(errors))
+    check_registry_manifest(data)  # core's validator gates every entry (#309, #329)
     entries: dict[str, RegistryEntry] = {}
     for plugin_name, entry_data in data["plugins"].items():
         entries[plugin_name] = RegistryEntry(

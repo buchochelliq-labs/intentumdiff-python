@@ -1,12 +1,11 @@
-"""Validate the plugin registry manifest against its published schema (#95).
+"""Validate the plugin registry manifest (#95) by transporting core's validator (#329).
 
 The JSON Schema (``registry.schema.json``, packaged alongside this module) is the documented
-contract. This module is its dependency-free ENFORCEMENT: :func:`validate_registry` checks the
-security-load-bearing subset (required top-level shape, name/checksum/dep-hash patterns, the
-trust-tier and source enums, no unknown fields) so the #95 CI vetting pipeline can block a
-malformed or untrusted registry entry BEFORE it is published — the registry is the root of
-trust. Stdlib-only (no ``jsonschema`` dependency). Returns every human-readable error (empty ==
-valid) rather than raising, so a vetting run can report every problem in one pass.
+contract. Its enforcement is core's ``validate_registry_manifest`` operation: field types,
+enums, patterns, the official-tier policy (immutable refs, checksums, capabilities and
+``abi_target`` required) and the capability vocabulary. This module only marshals the parsed
+manifest to core and formats core's ``{"path", "message"}`` errors; it returns every error
+(empty == valid) rather than raising, so a vetting run can report every problem in one pass.
 """
 
 from __future__ import annotations
@@ -17,14 +16,7 @@ from importlib import resources
 from pathlib import Path
 from typing import Any
 
-_NAME_RE = re.compile(r"^(?:intentumdiff-)?[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
-_WASM_FILE_RE = re.compile(r"^[A-Za-z0-9._-]+\.wasm$")
-_SHA256_RE = re.compile(r"^[a-f0-9]{64}$")
-_DEP_HASH_RE = re.compile(r"^sha256:[a-f0-9]{64}$")
-_DEP_KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*==[^=\s]+$")
-
-_SOURCE_VALUES = frozenset({"git", "pypi"})
-_TRUST_TIERS = frozenset({"official", "community"})
+from intentumdiff.plugins.exceptions import RegistryManifestError
 
 #: The plugin-contract ABI version this host implements. Mirrors ``package
 #: intentdiff:plugin@X`` in ``plugins/wit/plugin.wit``; the drift-guard test
@@ -55,20 +47,6 @@ def abi_compatible(target: str, host: str = HOST_CONTRACT_VERSION) -> bool:
         return False
     return parsed_target[0] == parsed_host[0] and parsed_target[1] <= parsed_host[1]
 
-_ENTRY_FIELDS = frozenset({
-    "source", "ref", "repo", "description", "wasm_checksums", "dep_hashes",
-    "allowed_dependencies", "trust_tier", "capabilities", "abi_target", "provenance_manifest_ref",
-})
-_TOP_LEVEL_FIELDS = frozenset({"version", "plugins", "renderer_components"})
-# The core-owned renderer bundle (not an installable parser plugin): an immutable core commit
-# and exact pins for all four internal renderers, as intentumdiff-registry publishes it (#330).
-_RENDERER_FILES = frozenset({
-    "html_renderer.wasm", "llm_renderer.wasm", "patch_renderer.wasm", "terminal_renderer.wasm",
-})
-_RENDERER_BUNDLE_FIELDS = frozenset({"repository", "ref", "artifact", "wasm_checksums"})
-_RENDERER_BUNDLE_VALUES = (("repository", "intentumdiff-core"), ("artifact", "renderer-components"))
-_GIT_SHA_RE = re.compile(r"^[a-f0-9]{40}$")
-
 
 def load_schema() -> dict[str, Any]:
     """Return the packaged registry JSON Schema."""
@@ -76,108 +54,38 @@ def load_schema() -> dict[str, Any]:
     return json.loads(schema.read_text(encoding="utf-8"))
 
 
-def _validate_entry(name: str, entry: Any, errors: list[str]) -> None:
-    where = f"plugins[{name!r}]"
-    if not isinstance(entry, dict):
-        errors.append(f"{where}: entry must be a mapping")
-        return
+def registry_manifest_errors(data: Any) -> list[dict[str, str]]:
+    """Core's errors for the parsed manifest *data*, unchanged (``[]`` == valid).
 
-    unknown = set(entry) - _ENTRY_FIELDS
-    if unknown:
-        errors.append(f"{where}: unknown field(s): {', '.join(sorted(unknown))}")
+    Raises :class:`RegistryManifestError` when *data* has no JSON form (for example a YAML
+    date or a NaN), since core validates the JSON document.
+    """
+    from intentumdiff.rust_core import validate_registry_manifest
 
-    source = entry.get("source", "git")  # type-check first: a list/dict is unhashable (#329)
-    if not isinstance(source, str) or source not in _SOURCE_VALUES:
-        errors.append(f"{where}.source: {source!r} not in {sorted(_SOURCE_VALUES)}")
-
-    trust = entry.get("trust_tier", "official")
-    if not isinstance(trust, str) or trust not in _TRUST_TIERS:
-        errors.append(f"{where}.trust_tier: {trust!r} not in {sorted(_TRUST_TIERS)}")
-
-    for str_field in ("ref", "repo", "description", "abi_target", "provenance_manifest_ref"):
-        if str_field in entry and not isinstance(entry[str_field], str):
-            errors.append(f"{where}.{str_field}: must be a string")
-
-    checksums = entry.get("wasm_checksums", {})
-    if not isinstance(checksums, dict):
-        errors.append(f"{where}.wasm_checksums: must be a mapping")
-    else:
-        for fname, digest in checksums.items():
-            if not _WASM_FILE_RE.fullmatch(str(fname)):
-                errors.append(f"{where}.wasm_checksums: {fname!r} is not a .wasm filename")
-            if not (isinstance(digest, str) and _SHA256_RE.fullmatch(digest)):
-                errors.append(f"{where}.wasm_checksums[{fname!r}]: not a lowercase SHA-256 hex")
-
-    dep_hashes = entry.get("dep_hashes", {})
-    if not isinstance(dep_hashes, dict):
-        errors.append(f"{where}.dep_hashes: must be a mapping")
-    else:
-        for key, value in dep_hashes.items():
-            if not _DEP_KEY_RE.fullmatch(str(key)):
-                errors.append(f"{where}.dep_hashes: {key!r} is not 'package==version'")
-            if not (isinstance(value, str) and _DEP_HASH_RE.fullmatch(value)):
-                errors.append(f"{where}.dep_hashes[{key!r}]: not 'sha256:<hex>'")
-
-    for list_field in ("allowed_dependencies", "capabilities"):
-        if list_field in entry:
-            value = entry[list_field]
-            if not (isinstance(value, list) and all(isinstance(i, str) for i in value)):
-                errors.append(f"{where}.{list_field}: must be a list of strings")
+    try:
+        manifest_json = json.dumps(data, allow_nan=False)
+    except (TypeError, ValueError) as exc:
+        message = f"plugin registry manifest is not JSON-representable: {exc}"
+        raise RegistryManifestError(message) from exc
+    return validate_registry_manifest(manifest_json)
 
 
-def _validate_renderer_components(bundle: Any, errors: list[str]) -> None:
-    where = "renderer_components"
-    if not isinstance(bundle, dict):
-        return errors.append(f"{where}: must be a mapping")
-    for label, fields in (("missing", _RENDERER_BUNDLE_FIELDS - set(bundle)),
-                          ("unknown", set(bundle) - _RENDERER_BUNDLE_FIELDS)):
-        if fields:
-            errors.append(f"{where}: {label} field(s): {', '.join(sorted(fields))}")
-    for field, required in _RENDERER_BUNDLE_VALUES:
-        if bundle.get(field) != required:
-            errors.append(f"{where}.{field}: must be {required}")
-    ref = bundle.get("ref")
-    if not isinstance(ref, str) or not _GIT_SHA_RE.fullmatch(ref):
-        errors.append(f"{where}.ref: must be an immutable 40-character git SHA")
-    pins = bundle.get("wasm_checksums")
-    if not isinstance(pins, dict):
-        return errors.append(f"{where}.wasm_checksums: must be a mapping")
-    if set(pins) != _RENDERER_FILES:
-        errors.append(f"{where}.wasm_checksums: must pin exactly four known renderers; "
-                      f"missing={sorted(_RENDERER_FILES - set(pins))} "
-                      f"unexpected={sorted(set(pins) - _RENDERER_FILES)}")
-    for name, digest in pins.items():
-        if not isinstance(digest, str) or not _SHA256_RE.fullmatch(digest):
-            errors.append(f"{where}.wasm_checksums[{name!r}]: not a lowercase SHA-256 hex")
+def format_manifest_error(error: dict[str, str]) -> str:
+    """``"<json pointer>: <message>"``; the document root is shown as ``/``."""
+    return f"{error['path'] or '/'}: {error['message']}"
+
+
+def check_registry_manifest(data: Any) -> None:
+    """Raise :class:`RegistryManifestError` carrying core's errors when *data* is invalid."""
+    errors = registry_manifest_errors(data)
+    if errors:
+        text = "; ".join(map(format_manifest_error, errors))
+        raise RegistryManifestError(f"invalid plugin registry manifest: {text}", errors)
 
 
 def validate_registry(data: Any) -> list[str]:
-    """Return every schema violation in *data* (empty list == a valid registry manifest)."""
-    errors: list[str] = []
-    if not isinstance(data, dict):
-        return ["registry: top level must be a mapping"]
-
-    unknown = set(data) - _TOP_LEVEL_FIELDS
-    if unknown:
-        errors.append(f"registry: unknown top-level field(s): {', '.join(sorted(unknown))}")
-
-    version = data.get("version")
-    if not isinstance(version, int) or isinstance(version, bool) or version < 1:
-        errors.append("registry.version: required integer >= 1")
-
-    if "renderer_components" in data:
-        _validate_renderer_components(data["renderer_components"], errors)
-    plugins = data.get("plugins")
-    if not isinstance(plugins, dict):
-        errors.append("registry.plugins: required mapping of name -> entry")
-        return errors
-
-    for name, entry in plugins.items():
-        if not _NAME_RE.fullmatch(str(name)):
-            errors.append(f"plugins: {name!r} is not a package-safe plugin name")
-        _validate_entry(str(name), entry, errors)
-
-    return errors
+    """Return every violation core reports for *data* (empty list == a valid manifest)."""
+    return [format_manifest_error(error) for error in registry_manifest_errors(data)]
 
 
 def _effective_tier(entry: dict) -> str:

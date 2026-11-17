@@ -911,6 +911,30 @@ def validate_dep_hashes(
     return fn(dep_hashes, allowed_dependencies, package_name, install_target)
 
 
+def validate_registry_manifest(manifest_json: str) -> list[dict[str, str]]:
+    """Transport core's registry-manifest validator (``validate_registry_manifest``, #329).
+
+    Returns core's errors unchanged (``[]`` = valid), each ``{"path", "message"}``. A response
+    whose ``ok`` disagrees with its errors, or any other shape, raises.
+    """
+    result = _required_engine_json(
+        "validate_registry_manifest", manifest_json, result_type=dict
+    )
+    errors = result.get("errors")
+    if (
+        type(result.get("ok")) is not bool
+        or not isinstance(errors, list)
+        or result["ok"] is not (not errors)
+        or not all(
+            isinstance(e, dict) and set(e) == {"path", "message"}
+            and all(isinstance(v, str) for v in e.values())
+            for e in errors
+        )
+    ):
+        raise RuntimeError(f"Rust engine operation validate_registry_manifest returned {result!r}")
+    return errors
+
+
 # ── Git source-collection read ops (Rust-authoritative, #98, A2.4) ──────────
 
 

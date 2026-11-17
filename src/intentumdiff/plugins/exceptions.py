@@ -98,8 +98,14 @@ class PluginSecurityError(PluginLoadError):
 
 
 class RegistryManifestError(RuntimeError):
-    """The plugin registry manifest is not valid YAML or fails the registry schema (#309).
+    """The plugin registry manifest is not valid YAML or fails core's validator (#309, #329).
 
     A ``RuntimeError``, the error :func:`~intentumdiff.plugins.hub.fetch_official_registry`
-    documents for a registry it cannot fetch or parse. The message lists every violation.
+    documents for a registry it cannot fetch or parse. The message lists every violation;
+    ``errors`` carries core's ``validate_registry_manifest`` errors unchanged, each a
+    ``{"path": <RFC 6901 pointer>, "message": str}`` dict (empty for a YAML/JSON error).
     """
+
+    def __init__(self, message: str, errors: list[dict[str, str]] | None = None) -> None:
+        super().__init__(message)
+        self.errors: list[dict[str, str]] = list(errors or [])

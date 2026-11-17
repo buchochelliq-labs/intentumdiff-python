@@ -1,5 +1,5 @@
-"""#329 (part): the canonical registry validator returns errors, never raises, and matches
-patterns against the whole string."""
+"""#329: core's registry validator (transported unchanged) returns errors, never raises,
+matches patterns against the whole string and enforces the official-tier policy."""
 
 from __future__ import annotations
 
@@ -59,7 +59,8 @@ def test_unhashable_enum_values_are_errors(field, value) -> None:
     manifest = copy.deepcopy(_VALID)
     _entry(manifest)[field] = value
     errors = validate_registry(manifest)
-    assert any(f".{field}:" in error for error in errors), errors
+    assert any(error.startswith(f"/plugins/intentumdiff-audit-parser/{field}: must be a string")
+               for error in errors), errors
 
 
 @pytest.mark.parametrize(
@@ -84,3 +85,30 @@ def test_plugin_name_with_trailing_newline_is_rejected() -> None:
         "intentumdiff-audit-parser"
     )
     assert any("package-safe" in error for error in validate_registry(manifest))
+
+
+@pytest.mark.parametrize(
+    ("mutate", "expected"),
+    [
+        (lambda e: e.update(ref="main"), "/ref: official git entries need an immutable"),
+        (lambda e: e.pop("ref"), "/ref: required for official entries"),
+        (lambda e: e.update(abi_target="garbage"), "/abi_target: must be MAJOR.MINOR.PATCH"),
+        (lambda e: e.update(capabilities=["parser", "parser"]),
+         '/capabilities/1: duplicate capability "parser"'),
+        (lambda e: e.update(capabilities=["network-shell"]),
+         '/capabilities/0: unknown capability "network-shell"'),
+    ],
+    ids=["mutable-ref", "no-ref", "bad-abi", "duplicate-capability", "unknown-capability"],
+)
+def test_the_issue_probes_are_errors(mutate, expected) -> None:
+    manifest = copy.deepcopy(_VALID)
+    mutate(_entry(manifest))
+    errors = validate_registry(manifest)
+    where = "/plugins/intentumdiff-audit-parser" + expected
+    assert any(e.startswith(where) for e in errors), errors
+
+
+def test_community_entries_keep_optional_fields_optional() -> None:
+    manifest = {"version": 1, "plugins": {"x": {"source": "git", "ref": "main",
+                                                 "trust_tier": "community"}}}
+    assert validate_registry(manifest) == []

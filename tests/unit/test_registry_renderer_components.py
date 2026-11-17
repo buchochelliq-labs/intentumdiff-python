@@ -1,4 +1,4 @@
-"""#330: the canonical validator accepts the published registry contract, renderer bundle included.
+"""#330/#329: core's validator accepts the published registry contract, renderer bundle included.
 
 `tests/fixtures/registry/registry-f95ceaa.yaml` is intentumdiff-registry's registry.yaml at
 f95ceaaf87008ec724fbd4d6866785f20f421be6, the manifest its vendored validator accepts.
@@ -32,33 +32,41 @@ def _bundle(**changes):
     return manifest
 
 
+_PINS = "/renderer_components/wasm_checksums"
+
+
 @pytest.mark.parametrize(
     ("manifest", "expected"),
     [
-        (_bundle(ref="main"), "renderer_components.ref: must be an immutable 40-character git SHA"),
-        (_bundle(ref="a" * 40 + "\n"), "renderer_components.ref: must be an immutable"),
-        (_bundle(repository="intentumdiff-python"), "renderer_components.repository: must be"),
-        (_bundle(artifact="x"), "renderer_components.artifact: must be renderer-components"),
-        (_bundle(extra=1), "renderer_components: unknown field(s): extra"),
-        (_bundle(wasm_checksums=[]), "renderer_components.wasm_checksums: must be a mapping"),
+        (_bundle(ref="main"),
+         "/renderer_components/ref: must be an immutable 40-character lowercase commit SHA"),
+        (_bundle(ref="a" * 40 + "\n"), "/renderer_components/ref: must be an immutable"),
+        (_bundle(repository="intentumdiff-python"),
+         '/renderer_components/repository: must be "intentumdiff-core"'),
+        (_bundle(artifact="x"), '/renderer_components/artifact: must be "renderer-components"'),
+        (_bundle(extra=1), "/renderer_components/extra: unknown field"),
+        (_bundle(wasm_checksums=[]), f"{_PINS}: must be an object, got array"),
         (_bundle(wasm_checksums={n: "0" * 64 for n in _RENDERERS[:3]}),
-         "must pin exactly four known renderers"),
+         f"{_PINS}/terminal_renderer.wasm: missing renderer pin"),
         (_bundle(wasm_checksums={**{n: "0" * 64 for n in _RENDERERS}, "x.wasm": "0" * 64}),
-         "unexpected=['x.wasm']"),
-        (_bundle(wasm_checksums={n: "0" * 63 for n in _RENDERERS}), "not a lowercase SHA-256"),
+         f"{_PINS}/x.wasm: unexpected renderer component"),
+        (_bundle(wasm_checksums={n: "0" * 63 for n in _RENDERERS}),
+         f"{_PINS}/html_renderer.wasm: not a lowercase SHA-256 hex digest"),
     ],
 )
 def test_bad_renderer_bundles_are_rejected(manifest, expected) -> None:
     errors = validate_registry(manifest)
-    assert any(expected in error for error in errors), errors
+    assert any(error.startswith(expected) for error in errors), errors
 
 
 def test_missing_bundle_fields_and_wrong_shape_are_rejected() -> None:
     manifest = copy.deepcopy(_CURRENT)
     del manifest["renderer_components"]["ref"]
-    assert any("missing field(s): ref" in e for e in validate_registry(manifest))
+    assert validate_registry(manifest) == [
+        "/renderer_components/ref: must be an immutable 40-character lowercase commit SHA"
+    ]
     manifest["renderer_components"] = ["not", "a", "mapping"]
-    assert validate_registry(manifest) == ["renderer_components: must be a mapping"]
+    assert validate_registry(manifest) == ["/renderer_components: must be an object, got array"]
 
 
 def test_the_bundle_stays_optional() -> None:
