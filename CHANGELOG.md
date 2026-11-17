@@ -18,6 +18,16 @@
   `capabilities` and `abi_target`; capabilities must be unique and one of `diff-analyzer`,
   `enricher`, `index-engine`, `parser`, `renderer`; `abi_target` must be `MAJOR.MINOR.PATCH`
   in every tier. The published registry (f95ceaa) passes. Error strings changed.
+- An invalid registry manifest no longer blocks loading (#309). Core's validator still judges
+  it, but entries it reports under `/plugins/<name>` are skipped and every other entry loads;
+  a manifest whose top level is unusable (not a mapping, or `plugins` missing or not a
+  mapping) loads no entries. Either way a `RegistryManifestWarning` (a `UserWarning`, exported
+  from `intentumdiff.plugins.exceptions`) lists core's `"<path>: <message>"` errors and names
+  the skipped entries; it is also logged, and `intentumdiff plugins add` prints it once on
+  stderr. **Behaviour change:** `parse_registry_manifest` / `fetch_official_registry` raise
+  `RegistryManifestError` only for text that is not YAML or has no JSON form. Strict
+  validation is unchanged: `check_registry_manifest`, `validate_registry()` and
+  `python -m intentumdiff.plugins.registry_schema` still fail on any error.
 - `DiffConfig.allowed_plugins` has one rule, core's `parser_allowlist_matches`, in parser
   discovery (`language_ids`, `language_info`), actual selection and the certified Python batch
   (#311). `None` allows every parser and `[]` none; otherwise an entry must exactly equal a
@@ -55,9 +65,10 @@
   errors instead of being ignored.
 - `plugins add/install --skip-verify` takes the `--yes` confirmation its message asks for;
   `plugins install --strict-registry`, which had no effect, is rejected (#314).
-- A malformed plugin registry manifest raises `RegistryManifestError` with every violation
-  (#309); the validator accepts the published `renderer_components` bundle (#330), never raises
-  on wrong types and matches whole strings (#329).
+- A malformed plugin registry manifest is reported with every violation: strict validation
+  raises `RegistryManifestError`, loading warns and skips the rejected entries (#309); the
+  validator accepts the published `renderer_components` bundle (#330), never raises on wrong
+  types and matches whole strings (#329).
 - `lsp_servers.json` with two entries for one language is rejected (#312).
 - `intentumdiff serve`: escaped lone surrogates get a 422 (#316), the language catalog loads off
   the event loop (#320), and `--host ::1` binds IPv6 (#323).

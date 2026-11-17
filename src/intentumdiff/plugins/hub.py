@@ -76,6 +76,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.metadata as _meta
+import json
 import logging
 import re
 import ssl
@@ -83,12 +84,13 @@ import subprocess
 import sys
 import urllib.error
 import urllib.request
+import warnings
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
-from intentumdiff.plugins.exceptions import RegistryManifestError
-from intentumdiff.plugins.registry_schema import check_registry_manifest
+from intentumdiff.plugins.exceptions import RegistryManifestError, RegistryManifestWarning
+from intentumdiff.plugins.registry_schema import format_manifest_error, registry_manifest_errors
 
 logger = logging.getLogger(__name__)
 
@@ -389,31 +391,12 @@ def fetch_official_registry(
     strict: bool = False,
     timeout: int = 15,
 ) -> dict[str, RegistryEntry]:
-    """
-    Fetch and parse the official plugin registry manifest.
+    """Fetch the official registry manifest at *ref* and parse it into ``{name -> entry}``.
 
-    Parameters
-    ----------
-    ref:
-        Git ref (branch, tag, or commit SHA) of the registry repo to fetch
-        from.  Default ``"main"``.  **Pin to a commit SHA in production for
-        reproducible, tamper-evident installs.**
-    strict:
-        When ``True``, *ref* must be a full 40-character commit SHA.  This
-        enforces the production/CI policy: mutable refs (branch names, tags)
-        are rejected (the ``--strict-registry`` CLI flag).
-    timeout:
-        HTTP timeout in seconds.
-
-    Returns
-    -------
-    dict[str, RegistryEntry]
-        Mapping of short plugin name → registry entry.
-
-    Raises
-    ------
-    RuntimeError
-        If the registry cannot be fetched, or :class:`RegistryManifestError` if it is invalid.
+    Pin *ref* to a commit SHA in production; ``strict=True`` (``--strict-registry``) requires a
+    full 40-character SHA. Raises ``RuntimeError`` when the registry cannot be fetched and
+    :class:`RegistryManifestError` when it is not YAML or has no JSON form; core-rejected
+    entries are skipped with a :class:`RegistryManifestWarning` (#309).
     """
     _validate_registry_ref(ref, strict=strict)
     url = f"{OFFICIAL_REGISTRY_RAW_URL}/{ref}/registry.yaml"
@@ -433,17 +416,34 @@ def fetch_official_registry(
 def parse_registry_manifest(content: str) -> dict[str, RegistryEntry]:
     """Parse a registry manifest (YAML text) into ``{short name -> RegistryEntry}``.
 
-    Split out from :func:`fetch_official_registry` so the parse (including the #94
-    ``abi_target``) is testable without the network fetch.
+    Core's validator judges every entry (#309, #329) without blocking the load: entries it
+    rejects are skipped (none load if the top level is) with a :class:`RegistryManifestWarning`.
     """
     yaml = _require_yaml()
     try:
         data = yaml.safe_load(content)
     except yaml.YAMLError as exc:
         raise RegistryManifestError(f"plugin registry manifest is not YAML: {exc}") from exc
-    check_registry_manifest(data)  # core's validator gates every entry (#309, #329)
+    errors = registry_manifest_errors(data)
+    data = json.loads(json.dumps(data))  # the document core judged (keys are JSON strings)
+    tokens = [error["path"].split("/")[1:] for error in errors]  # RFC 6901 reference tokens
+    skipped = {t[1].replace("~1", "/").replace("~0", "~") for t in tokens if len(t) > 1
+               and t[0] == "plugins"}
+    plugins = data.get("plugins") if isinstance(data, dict) else None
+    unusable = not isinstance(plugins, dict) or any(t in ([], [""], ["plugins"]) for t in tokens)
+    if unusable:
+        skipped, plugins = set(), {}
+    if errors or unusable:
+        names = ", ".join(sorted(skipped & set(plugins))) or "none"
+        outcome = "no entries were loaded" if unusable else f"skipped entries: {names}"
+        problems = "; ".join(map(format_manifest_error, errors)) or "no usable plugins mapping"
+        message = f"invalid plugin registry manifest ({problems}); {outcome}"
+        logger.warning("%s", message)
+        warnings.warn(message, RegistryManifestWarning, stacklevel=2)
     entries: dict[str, RegistryEntry] = {}
-    for plugin_name, entry_data in data["plugins"].items():
+    for plugin_name, entry_data in plugins.items():
+        if plugin_name in skipped:
+            continue
         entries[plugin_name] = RegistryEntry(
             name=plugin_name,
             source=entry_data.get("source", "git"),
