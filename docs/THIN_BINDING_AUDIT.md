@@ -164,6 +164,27 @@ Proof: no reference from `src`; tests that only exercised these are removed or r
   `tests/unit/test_registry_manifest_loading.py` (good entries load beside a bad one, escaped
   names, unusable top levels give an empty inventory and a warning, valid manifests warn
   nothing, a canned core rejection decides alone, the CLI warning reaches stderr once).
+- **Core #312 binding (review completeness, core #252)**: `SemanticDiff` carries core's
+  `completeness` (`complete` | `equivalent` | `incomplete`) and `incomplete` (typed
+  `IncompleteReview` → `IncompleteReport` → `ReproOutline`, plus `source_ranges`) verbatim:
+  strict types, unknown keys kept, absent keys stay absent on serialisation. Python derives
+  neither field. `_require_complete_batch_diff_dto` rejects an unknown verdict or a verdict
+  without the `incomplete` key, and the model rejects `incomplete` set on any other state.
+  A missing verdict stays `None` (not invented): echo ops such as `apply_guardrail_policy`
+  return none for a caller-built DTO. Every review route checked here (`diff_strings`,
+  `diff`, `diff_commit`, `review_text`) carries core's verdict. Part of
+  risk 4 is closed: `try_rust_finalize_review` no longer drops finalize's
+  `equivalence_proof` and `suppression_trace` before `complete_routed_review`, so the JSON,
+  YAML and TOML member-reorder proof and the report's suppression record reach core. The CLI
+  (a shell) prints core's `incomplete.message` verbatim on stderr (core's
+  `render_cli_review` already shows it instead of "No changes detected"), previews
+  `report.title`/`report.body_markdown` on an interactive terminal or with `--report-bug`,
+  and calls `webbrowser.open(report.issue_url)` only after an explicit `y`/`yes`; without a
+  TTY it never opens anything. The fixed CLI wording is module constants, so a test can
+  prove the preview holds only core text. This raised the `cli/_shared.py` (627 → 679) and
+  `cli/_commands.py` (2244 → 2247) line budgets: the report flow is a binding obligation of
+  core's DTO (`docs/C_ABI.md`) and the CLI has no core op to delegate the prompt to.
+  Proof: `tests/unit/test_review_completeness.py`.
 - Still open: the core finalize `tree_too_large` decline is answered by a Python-requested
   `source_fallback_diff` (S3), and the certified-batch decline reroute (S4).
 

@@ -61,6 +61,7 @@ class StreamGuardrailTransportTests(unittest.TestCase):
                                      _console=SimpleNamespace(print=printed.append),
                                      _err=SimpleNamespace(print=lambda *a: None),
                                      _render_with_profile=lambda *a, **kw: None,
+                                     _offer_incomplete_reports=lambda diffs, args: None,
                                      _emit_guardrail_reports=report,
                                      _record_diagnostics_db=lambda value, args: diagnostics.append(value))
                     load_function("cli/_shared.py", "_exit_if_guardrail_result_fails", namespace)
