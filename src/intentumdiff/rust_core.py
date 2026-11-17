@@ -935,6 +935,26 @@ def validate_registry_manifest(manifest_json: str) -> list[dict[str, str]]:
     return errors
 
 
+def parser_allowlist_matches(
+    allowed_plugins: list[str] | None, identity: dict[str, Any]
+) -> dict[str, Any]:
+    """Transport core's parser-allowlist rule (``parser_allowlist_matches``, #311).
+
+    *identity* is ``{"plugin_id", "grammar_id", "languages", "aliases"}`` (all optional).
+    Returns core's ``{"matches": bool, "matched_by": str | None}`` unchanged; core's rule is
+    ``None`` = every parser, ``[]`` = none, else an exact grammar/plugin/alias/language id.
+    """
+    result = _required_engine_json(
+        "parser_allowlist_matches", allowed_plugins, json.dumps(identity), result_type=dict
+    )
+    matches, matched_by = result.get("matches"), result.get("matched_by", ...)
+    if type(matches) is not bool or not (
+        isinstance(matched_by, str) if matches else matched_by is None
+    ):
+        raise RuntimeError(f"Rust engine operation parser_allowlist_matches returned {result!r}")
+    return result
+
+
 # ── Git source-collection read ops (Rust-authoritative, #98, A2.4) ──────────
 
 

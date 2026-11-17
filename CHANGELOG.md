@@ -18,6 +18,13 @@
   `capabilities` and `abi_target`; capabilities must be unique and one of `diff-analyzer`,
   `enricher`, `index-engine`, `parser`, `renderer`; `abi_target` must be `MAJOR.MINOR.PATCH`
   in every tier. The published registry (f95ceaa) passes. Error strings changed.
+- `DiffConfig.allowed_plugins` has one rule, core's `parser_allowlist_matches`, in parser
+  discovery (`language_ids`, `language_info`), actual selection and the certified Python batch
+  (#311). `None` allows every parser and `[]` none; otherwise an entry must exactly equal a
+  parser's grammar id, plugin id (e.g. `intentumdiff-python:python:python`), catalogue alias
+  or declared language id. **Behaviour change:** plugin ids and language ids (e.g.
+  `typescript`) now select their parser, and `python-parser` / `python_parser`, which only the
+  batch gate accepted, select nothing anywhere.
 
 ### Core 0877c75 (core #308) adoption
 

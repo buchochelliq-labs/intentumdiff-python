@@ -141,6 +141,16 @@ Proof: no reference from `src`; tests that only exercised these are removed or r
   `tests/unit/test_registry_*.py` (real registry fixture passes; issue probes, wrong-type
   matrix and renderer-bundle errors come from core; a canned core rejection surfaces
   verbatim). Still in Python: `abi_compatible` and the catalog renderer.
+- **#311 done**: the Python allowlist rules are gone: the registry's
+  `parser.grammar_id not in allowed` filters and differ.py's batch gate, which hard-coded
+  `python`, `python-parser`, `python_parser` and `intentumdiff:python:python` (not even the real
+  plugin id, `intentumdiff-python:python:python`). Discovery asks core #310's
+  `parser_allowlist_matches` (`[allowed_plugins|null, identity_json]` →
+  `{"matches","matched_by"}`) per loaded parser; the batch gate asks it for the batch parser's
+  catalogue identity (the one filename selection sees). Proof:
+  `tests/unit/test_allowed_plugins_semantics.py` (None, [], grammar, opaque plugin, language
+  and non-identifier allowlists agree across listing, selection and the batch gate; a canned
+  verdict passes through; malformed answers raise).
 - Still open: the core finalize `tree_too_large` decline is answered by a Python-requested
   `source_fallback_diff` (S3), and the certified-batch decline reroute (S4).
 

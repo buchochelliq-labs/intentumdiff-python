@@ -332,16 +332,16 @@ class SemanticDiffer:
             return "extra trivia types require Python pipeline"
         if self._config.extra_grammars.get("python"):
             return "custom Python grammar requires Python pipeline"
-        allowed = self._config.allowed_plugins
-        if allowed is not None and not any(
-            plugin_id in allowed
-            for plugin_id in (
-                "python",
-                "python-parser",
-                "python_parser",
-                "intentumdiff:python:python",
-            )
-        ):
+        # Core's allowlist rule (#311) on the batch parser's catalogue identity, the one
+        # filename selection sees: resolved path, catalogue id + entry names, languages.
+        from intentumdiff.plugins.builtins import python_parser_entry
+        from intentumdiff.rust_core import parser_allowlist_matches
+
+        path = str(Path(python_parser_entry()).resolve())
+        identity = next(({"plugin_id": path, "aliases": [e.plugin_id, *e.entry_names],
+                          "languages": list(e.language_guesses)}
+                         for e in self._registry._catalog() if e.resolved_path == path), {})
+        if not parser_allowlist_matches(self._config.allowed_plugins, identity)["matches"]:
             return "Python parser is not allowed by plugin policy"
         if self._registry.get_enrichers("python"):
             return "enrichers require Python pipeline"
