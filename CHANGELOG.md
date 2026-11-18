@@ -1,6 +1,8 @@
 # Changelog
 
-## v0.0.3 — unreleased
+## v0.0.3b1 — pre-release (unreleased)
+
+A pre-release: install it with `pip install --pre intentumdiff-python`.
 
 ### Registry 9889613 (registry #20) parser components
 
@@ -119,7 +121,7 @@
 - Corrupt schema-cache records are cache misses (#307); LSP start/send failures release every
   resource (#313); named-pipe writes are completed or fail visibly (#327).
 
-## v0.0.2b2 — pre-release candidate (not published)
+## v0.0.2b2 — 2026-11-05 (pre-release)
 
 A pre-release (beta), following the release rule that a version is a pre-release until it
 has been used in anger. 0.0.2b2 moves all semantic judgement into the shared Rust engine
@@ -202,7 +204,7 @@ an error rather than a partial or silently simplified review:
   overwriting the report with the final diff. Multi-file HTML output is one
   document with isolated renderer frames, not concatenated HTML pages.
 
-## v0.0.2b1 — 2026-08-09
+## v0.0.2b1 — 2026-08-09 (not published to PyPI)
 
 A beta, because 0.0.1 was published without anyone installing it and using it. That release
 was pulled from PyPI within a day; this one fixes what it got wrong.
