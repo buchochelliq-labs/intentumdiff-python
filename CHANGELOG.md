@@ -1,6 +1,25 @@
 # Changelog
 
-## v0.0.3 — unreleased
+## v0.0.3b1 — pre-release (unreleased)
+
+A pre-release: install it with `pip install --pre intentumdiff-python`.
+
+### Core 1c4bdbc and registry eb02686 (registry #20/#21) parser components
+
+- `CORE_REF` pins core `1c4bdbc5dfbe6e738b3d70d8964e7f148d711821` (core #323): Windows ARM64
+  admits the registry #20 PowerShell component, which its CI compiled there under metered
+  Wasmtime 48.0.7 (core #323); the certified native Python route ids operator leaves by
+  child index, like the component (core #321); and number respellings are proved
+  equivalent (core #320).
+- `REGISTRY_REF` pins registry `eb02686ba69eb8d03e751977ee3a4c9a84fae8a0` (registry #21),
+  which keeps registry #20's re-pin of 41 parser components to their reviewed
+  `release/v0.0.3-rc` CI builds and adds make-parser#9 (whitespace inside a make value is
+  data again).
+  The previous wheel staged components from registry `8911328` (#17), which predates
+  registry #18/#19 and every parser fix merged since, including the complete-literal
+  JS/TS/JSON/SQL/YAML components.
+- With these components and core 8898e3f, the 760-case language assessment passes all
+  682 oracle-judged probes (previously 591 with the stale components), with no regressions.
 
 ### Core 74618c3 (core #312) adoption
 
@@ -109,7 +128,7 @@
 - Corrupt schema-cache records are cache misses (#307); LSP start/send failures release every
   resource (#313); named-pipe writes are completed or fail visibly (#327).
 
-## v0.0.2b2 — pre-release candidate (not published)
+## v0.0.2b2 — 2026-11-05 (pre-release)
 
 A pre-release (beta), following the release rule that a version is a pre-release until it
 has been used in anger. 0.0.2b2 moves all semantic judgement into the shared Rust engine
@@ -192,7 +211,7 @@ an error rather than a partial or silently simplified review:
   overwriting the report with the final diff. Multi-file HTML output is one
   document with isolated renderer frames, not concatenated HTML pages.
 
-## v0.0.2b1 — 2026-08-09
+## v0.0.2b1 — 2026-08-09 (not published to PyPI)
 
 A beta, because 0.0.1 was published without anyone installing it and using it. That release
 was pulled from PyPI within a day; this one fixes what it got wrong.
