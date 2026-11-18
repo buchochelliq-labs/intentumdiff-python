@@ -10,7 +10,7 @@ import sys
 
 import pytest
 
-from scripts.smoke_published_wheel import PROVENANCE_SCRIPT
+from scripts.smoke_published_wheel import PROVENANCE_SCRIPT, Smoke
 
 
 @pytest.mark.parametrize('defect', ['none', 'missing', 'tampered', 'extra', 'count', 'source', 'registry'])
@@ -56,3 +56,23 @@ def test_installed_provenance_probe(tmp_path: Path, defect: str) -> None:
         assert 'VERIFIED 1 installed Wasm components' in result.stdout
     else:
         assert result.stderr
+
+
+def test_clean_stderr_covers_every_command(tmp_path: Path) -> None:
+    """Noise from any command fails the gate, not only from the last one run."""
+    smoke = Smoke(tmp_path)
+    smoke.exec([sys.executable, '-c', 'import sys; sys.stderr.write("Failed to catalog x\\n")'],
+               label='first')
+    smoke.exec([sys.executable, '-c', 'print("ok")'], label='last')
+    assert smoke.unexpected_stderr() == [('first', 'Failed to catalog x')]
+
+
+def test_expected_stderr_allows_only_its_pattern(tmp_path: Path) -> None:
+    smoke = Smoke(tmp_path)
+    smoke.exec([sys.executable, '-c', 'import sys; sys.stderr.write("Parse errors detected\\n")'],
+               label='broken input', expected_stderr=r'Parse errors detected')
+    assert smoke.unexpected_stderr() == []
+    smoke.exec([sys.executable, '-c',
+                'import sys; sys.stderr.write("Parse errors detected\\nTraceback\\n")'],
+               label='broken input 2', expected_stderr=r'Parse errors detected')
+    assert smoke.unexpected_stderr() == [('broken input 2', 'Traceback')]
