@@ -45,7 +45,7 @@ def test_approvals_require_four_platforms_and_digests():
 
 
 def test_metadata_denies_untested_run_and_wrong_artifacts(monkeypatch):
-    run = {"name": "CI", "event": "push", "head_branch": "release/v0.0.2-rc",
+    run = {"name": "CI", "event": "push", "head_branch": "release/v0.0.3-rc",
            "status": "completed", "conclusion": "success", "head_sha": SOURCE,
            "run_attempt": 1}
     jobs = {"jobs": [{"name": f"Python full suite ({os_name})", "conclusion": "success"}
@@ -65,14 +65,19 @@ def test_metadata_denies_untested_run_and_wrong_artifacts(monkeypatch):
         stdout = "tree-id\n"
     monkeypatch.setattr(promote, "github_api", fake_api)
     monkeypatch.setattr(promote.subprocess, "run", lambda *a, **kw: Completed())
-    assert promote.verify_metadata("org/repo", 123, SOURCE, _specs()) == 1
+    assert promote.verify_metadata("org/repo", 123, SOURCE, _specs(), "0.0.3b1") == 1
     run["conclusion"] = "failure"
     with pytest.raises(ValueError, match="not successful"):
-        promote.verify_metadata("org/repo", 123, SOURCE, _specs())
+        promote.verify_metadata("org/repo", 123, SOURCE, _specs(), "0.0.3b1")
     run["conclusion"] = "success"
+    # A 0.0.3 candidate tested on the previous release branch is not promotable.
+    run["head_branch"] = "release/v0.0.2-rc"
+    with pytest.raises(ValueError, match="release/v0.0.3-rc"):
+        promote.verify_metadata("org/repo", 123, SOURCE, _specs(), "0.0.3b1")
+    run["head_branch"] = "release/v0.0.3-rc"
     artifacts[2]["workflow_run"]["head_sha"] = "d" * 40
     with pytest.raises(ValueError, match="run/commit mismatch"):
-        promote.verify_metadata("org/repo", 123, SOURCE, _specs())
+        promote.verify_metadata("org/repo", 123, SOURCE, _specs(), "0.0.3b1")
 
 
 def _candidate(root: Path, platform: str, filename: str, content=b"wheel"):
@@ -136,3 +141,30 @@ def test_reject_digest_mismatch_and_core_pin_drift(tmp_path):
     with pytest.raises(ValueError, match="Core source mismatch"):
         promote.verify_downloads(tmp_path / "another", tmp_path / "publish2",
                                  SOURCE, CORE, 1, specs, "0.0.2")
+
+
+@pytest.mark.parametrize("version, branch", [
+    ("0.0.3", "release/v0.0.3-rc"),
+    ("0.0.3b1", "release/v0.0.3-rc"),
+    ("0.0.3rc2", "release/v0.0.3-rc"),
+    ("1.2.10a4", "release/v1.2.10-rc"),
+])
+def test_release_branch_follows_the_project_version(version, branch):
+    assert promote.release_branch(version) == branch
+
+
+@pytest.mark.parametrize("version", ["0.0", "0.0.3.post1", "0.0.3.dev1", "v0.0.3"])
+def test_release_branch_rejects_unsupported_versions(version):
+    with pytest.raises(ValueError, match="unsupported release version"):
+        promote.release_branch(version)
+
+
+def test_unquoted_wheels_json_reports_invalid_json():
+    env = {"GITHUB_REPOSITORY": "org/repo", "REVIEWED_RUN_ID": "123",
+           "REVIEWED_SOURCE_SHA": SOURCE, "REVIEWED_CORE_SHA": CORE,
+           "REVIEWED_WHEELS_JSON": "{ubuntu-latest:{id:1,sha256:abc}}"}
+    with pytest.raises(ValueError, match="not valid JSON"):
+        promote.load_approval(env)
+    env["REVIEWED_WHEELS_JSON"] = ""
+    with pytest.raises(ValueError, match="four independently approved"):
+        promote.load_approval(env)

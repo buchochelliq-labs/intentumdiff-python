@@ -8,20 +8,33 @@ import pytest
 
 from intentumdiff import SemanticDiffer
 from intentumdiff.analysis.schema_resolver import (
-    ADVISORY_ADF_NO_RAW_SCHEMA_URL,
-    AZURE_PIPELINES_SCHEMA_URL,
-    DATABRICKS_BUNDLE_SCHEMA_URL,
-    DBT_SCHEMA_URLS,
-    GITHUB_WORKFLOW_SCHEMA_URL,
-    KUBERNETES_SCHEMA_URL,
-    OPENAPI_30_SCHEMA_URL,
-    OPENAPI_31_SCHEMA_URL,
     FetchResponse,
     discover_declared_schema,
     provider_schema_candidate,
     resolve_schema,
     schema_resolution_metadata,
 )
+
+# Explicit expected results for core's built-in provider catalogue (``schema_profiles``).
+# Python no longer keeps its own copy of these tables (#297); the binding must transport
+# exactly what core selects.
+_DBT_SCHEMA_BASE = "https://raw.githubusercontent.com/dbt-labs/dbt-jsonschema/main/schemas/latest"
+DBT_SCHEMA_URLS = {
+    "dbt_project": f"{_DBT_SCHEMA_BASE}/dbt_project-latest.json",
+    "dbt_yml_files": f"{_DBT_SCHEMA_BASE}/dbt_yml_files-latest.json",
+}
+ADVISORY_ADF_NO_RAW_SCHEMA_URL = (
+    "https://learn.microsoft.com/en-sg/answers/questions/2125264/"
+    "are-there-json-schemas-for-adf-source-files"
+)
+DATABRICKS_BUNDLE_SCHEMA_URL = (
+    "https://raw.githubusercontent.com/databricks/cli/main/bundle/schema/jsonschema.json"
+)
+OPENAPI_31_SCHEMA_URL = "https://spec.openapis.org/oas/3.1/schema/2022-10-07"
+OPENAPI_30_SCHEMA_URL = "https://spec.openapis.org/oas/3.0/schema/2021-09-28"
+KUBERNETES_SCHEMA_URL = "https://json.schemastore.org/kubernetes.json"
+GITHUB_WORKFLOW_SCHEMA_URL = "https://json.schemastore.org/github-workflow.json"
+AZURE_PIPELINES_SCHEMA_URL = "https://json.schemastore.org/azure-pipelines.json"
 
 
 def _env(**overrides: str) -> dict[str, str]:
@@ -558,3 +571,36 @@ def test_schema_adapters_fail_loudly_without_engine(monkeypatch: pytest.MonkeyPa
 @pytest.mark.parametrize("content", ["version: 1\nservices: {}", "app:\n  models: 42", "version: 2\nmodels: 42"])
 def test_generic_yaml_does_not_claim_dbt(content: str) -> None:
     assert provider_schema_candidate("config.yml", "yaml", content) is None
+
+
+def test_provider_candidate_is_transported_from_core_unchanged(monkeypatch) -> None:
+    """#297: the provider URL/identity catalogue is core's; Python marshals the payload only."""
+    from intentumdiff.analysis import schema_resolver
+
+    calls: list[tuple[str, dict]] = []
+    canned = {
+        "provider_id": "canned:provider",
+        "url": "https://core.example/only-core-knows.json",
+        "command": ["canned", "schema"],
+        "status": None,
+        "advisory_url": None,
+        "identity_fields": ["core_only_key"],
+    }
+
+    def fake_call(op: str, payload: str):
+        calls.append((op, json.loads(payload)))
+        return dict(canned)
+
+    monkeypatch.setattr(schema_resolver, "_c_abi_call", fake_call)
+    candidate = provider_schema_candidate("dbt_project.yml", "yaml", "name: x")
+
+    assert calls == [(
+        "schema_profiles",
+        {"operation": "provider", "filename": "dbt_project.yml", "language": "yaml",
+         "content": "name: x"},
+    )]
+    assert candidate is not None
+    assert candidate.provider_id == "canned:provider"
+    assert candidate.url == "https://core.example/only-core-knows.json"
+    assert candidate.command == ("canned", "schema")
+    assert candidate.identity_fields == frozenset({"core_only_key"})

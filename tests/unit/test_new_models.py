@@ -260,7 +260,9 @@ class TestCommitDiff:
         assert cd.parse_errors == []
 
     def test_with_file_diffs(self):
-        diff = SemanticDiff.style_only("a.py", "b.py", "python")
+        diff = SemanticDiff(
+            old_filename="a.py", new_filename="b.py", language="python", is_style_only=True
+        )
         cd = CommitDiff(old_ref="abc123", new_ref="def456", file_diffs=[diff])
         assert len(cd.file_diffs) == 1
         assert cd.file_diffs[0] is diff
@@ -281,7 +283,9 @@ class TestCommitDiff:
             setattr(cd, "old_ref", "mutated")
 
     def test_serialisation_roundtrip(self):
-        diff = SemanticDiff.style_only("a.py", "b.py", "python")
+        diff = SemanticDiff(
+            old_filename="a.py", new_filename="b.py", language="python", is_style_only=True
+        )
         cc = _cross_change(ChangeType.MOVE_TO_MODULE)
         cd = CommitDiff(
             old_ref="HEAD~1",

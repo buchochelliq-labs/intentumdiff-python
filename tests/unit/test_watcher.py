@@ -329,3 +329,47 @@ class TestRunDiffExceptions:
             watcher._run_diff(str(tmp_path / "boom.py"))
 
         assert any("Error" in w or "boom" in w for w in warnings)
+
+
+class TestRenderOutcome:
+    """#310: the watcher reports core's authoritative outcome, checked in the right order."""
+
+    def _run(self, tmp_path: Path, diff) -> tuple[list[str], MagicMock]:
+        from intentumdiff.watcher import FileWatcher
+
+        render_fn = MagicMock()
+        watcher = FileWatcher([tmp_path], MagicMock(), render_fn=render_fn)
+        lines: list[str] = []
+        watcher._out = MagicMock()
+        watcher._out.print = lambda msg, **kw: lines.append(str(msg))
+        watcher._differ.diff.return_value = diff
+        with (
+            patch("intentumdiff.watcher.resolve_repo_root", return_value=str(tmp_path)),
+            patch("intentumdiff.watcher.WorkingTreeSource"),
+        ):
+            watcher._run_diff(str(tmp_path / "x.py"))
+        return lines[1:], render_fn  # lines[0] is the rule
+
+    @staticmethod
+    def _diff(**fields):
+        from intentumdiff.core.models import SemanticDiff
+
+        return SemanticDiff(old_filename="x.py", new_filename="x.py", language="python", **fields)
+
+    def test_empty_record_style_only_reports_style_only(self, tmp_path: Path) -> None:
+        lines, render_fn = self._run(tmp_path, self._diff(is_style_only=True))
+        assert lines == ["[dim]x.py — style changes only[/dim]"]
+        render_fn.assert_not_called()
+
+    def test_identity_reports_no_changes(self, tmp_path: Path) -> None:
+        lines, render_fn = self._run(tmp_path, self._diff())
+        assert lines == ["[dim]x.py — no changes[/dim]"]
+        render_fn.assert_not_called()
+
+    def test_fallback_without_changes_is_rendered_not_called_no_changes(
+        self, tmp_path: Path
+    ) -> None:
+        diff = self._diff(is_fallback=True, parse_errors=["tree too large"])
+        lines, render_fn = self._run(tmp_path, diff)
+        assert lines == []
+        render_fn.assert_called_once_with(diff)

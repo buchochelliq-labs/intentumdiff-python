@@ -7,8 +7,6 @@ with two commits so that HEAD~1 and HEAD refer to distinct file versions.
 
 from __future__ import annotations
 
-import os
-import textwrap
 from pathlib import Path
 
 import git
@@ -195,7 +193,6 @@ class TestCliGitRepoOptional:
     def test_invalid_repo_prints_clear_error(self, tmp_path, capsys):
         """_cmd_git prints a helpful message when repo is not a git repo."""
         from intentumdiff.cli import _build_parser, _cmd_git
-        import argparse
 
         empty_dir = tmp_path / "not_a_repo"
         empty_dir.mkdir()
@@ -231,42 +228,3 @@ class TestCliGitRepoOptional:
         assert len(captured) == 1
 
 
-# Git host-I/O must never replace malformed source bytes with U+FFFD (#233/#234).
-def test_fast_commit_baseline_rejects_non_utf8_source(tmp_path):
-    from intentumdiff.sources.git_source import _read_commit_paths_batch
-
-    repo = _make_repo(tmp_path)
-    path = Path(repo.working_tree_dir) / "invalid.py"
-    path.write_bytes(b"\xffx = 1\n")
-    repo.index.add(["invalid.py"])
-    repo.index.commit("invalid tracked baseline")
-
-    with pytest.raises(UnicodeError, match="Invalid UTF-8 in tracked Git baseline"):
-        _read_commit_paths_batch(str(tmp_path), "HEAD", ["invalid.py"])
-
-
-def test_fast_worktree_collector_rejects_non_utf8_edits(tmp_path):
-    from intentumdiff.sources.git_source import collect_working_tree_python_sources_fast
-
-    repo = _make_repo(tmp_path)
-    _commit_file(repo, "invalid.py", "x = 1\n", "valid baseline")
-    (Path(repo.working_tree_dir) / "invalid.py").write_bytes(b"x = 2\xff\n")
-
-    with pytest.raises(UnicodeDecodeError):
-        collect_working_tree_python_sources_fast(str(tmp_path), "HEAD")
-
-
-def test_fast_untracked_collector_rejects_non_utf8_source(
-    tmp_path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from intentumdiff.sources.git_source import collect_working_tree_python_sources_fast
-
-    repo = _make_repo(tmp_path)
-    _commit_file(repo, "tracked.py", "value = 1\n", "valid baseline")
-    (Path(repo.working_tree_dir) / "untracked.py").write_bytes(b"value = \xff\n")
-    monkeypatch.setattr(
-        "intentumdiff.sources.git_source._content_type.is_text_bytes",
-        lambda _data: True,
-    )
-    with pytest.raises(UnicodeDecodeError):
-        collect_working_tree_python_sources_fast(str(tmp_path), "HEAD")

@@ -46,24 +46,24 @@ def detect_cross_file_changes(
 
     result = try_rust_diff_symbol_tables(old_json, new_json)
 
-    changes: list[CrossFileChange] = []
-    for item in result:
-        changes.append(
-            CrossFileChange(
-                change_type=ChangeType(item["change_type"]),
-                symbol_name=item["symbol_name"],
-                old_file=item["old_file"],
-                new_file=item["new_file"],
-                old_node_id=item.get("old_node_id"),
-                new_node_id=item.get("new_node_id"),
-                old_position=item.get("old_position"),
-                new_position=item.get("new_position"),
-                old_language=item.get("old_language", ""),
-                new_language=item.get("new_language", ""),
-                node_type=item.get("node_type", ""),
-                symbol_kind=item.get("symbol_kind", ""),
-                confidence=item.get("confidence", 1.0),
-                description=item.get("description", ""),
-            )
-        )
-    return changes
+    return [cross_file_change_from_core(item) for item in result]
+
+
+def cross_file_change_from_core(item: dict) -> CrossFileChange:
+    """DTO mapping for one core cross-file change."""
+    return CrossFileChange(
+        change_type=ChangeType(item["change_type"]),
+        symbol_name=item["symbol_name"],
+        old_file=item["old_file"],
+        new_file=item["new_file"],
+        old_node_id=item.get("old_node_id"),
+        new_node_id=item.get("new_node_id"),
+        old_position=item.get("old_position"),
+        new_position=item.get("new_position"),
+        old_language=item.get("old_language", ""),
+        new_language=item.get("new_language", ""),
+        node_type=item.get("node_type", ""),
+        symbol_kind=item.get("symbol_kind", ""),
+        confidence=item.get("confidence", 1.0),
+        description=item.get("description", ""),
+    )

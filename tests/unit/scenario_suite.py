@@ -43,6 +43,8 @@ class Case:
     modifications: tuple[tuple[str, str], ...] = ()
     renames: tuple[tuple[str, str], ...] = ()
     moves: tuple[str, ...] = ()              # labels that MUST appear as MOVE
+    # definition labels that MUST appear as REFACTORING/CHANGE_SIGNATURE (core#297)
+    signature_changes: tuple[str, ...] = ()
     exact_total: int | None = None
     forbid_node_types: tuple[str, ...] = ()
     style_only: bool = False
@@ -104,6 +106,14 @@ def check_case(language: str, scenario: str, case: Case, diff: SemanticDiff) -> 
             and want in (c.new_node or c.old_node).label
             for c in diff.changes
         ), f"{tag}: missing MOVE {want!r} (got {[(x.change_type.value, (x.new_node or x.old_node).label) for x in diff.changes]})"
+
+    for want in case.signature_changes:
+        assert any(
+            c.change_type == ChangeType.REFACTORING
+            and c.refactoring_kind == RefactoringKind.CHANGE_SIGNATURE
+            and c.new_node is not None and c.new_node.label == want
+            for c in diff.changes
+        ), f"{tag}: missing CHANGE_SIGNATURE {want!r} (got {[(x.change_type.value, x.refactoring_kind, (x.new_node or x.old_node).label) for x in diff.changes]})"
 
     if case.exact_total is not None:
         assert len(diff.changes) == case.exact_total, (

@@ -26,6 +26,19 @@ PLATFORMS = {
 }
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
+RELEASE_VERSION = re.compile(r"^(\d+\.\d+\.\d+)(?:(?:a|b|rc)\d+)?$")
+
+
+def project_version() -> str:
+    with Path("pyproject.toml").open("rb") as f:
+        return tomllib.load(f)["project"]["version"]
+
+
+def release_branch(version: str) -> str:
+    """The RC branch a version's candidate must be tested on: 0.0.3b1 -> release/v0.0.3-rc."""
+    match = RELEASE_VERSION.fullmatch(version)
+    require(match is not None, f"unsupported release version {version!r}")
+    return f"release/v{match.group(1)}-rc"
 
 
 def require(condition: bool, message: str) -> None:
@@ -52,10 +65,16 @@ def load_approval(env: dict[str, str]) -> tuple[str, int, str, str, dict]:
     core = env.get("REVIEWED_CORE_SHA", "")
     require(bool(HEX40.fullmatch(source)), "reviewed source SHA required")
     require(bool(HEX40.fullmatch(core)), "reviewed Core SHA required")
+    raw = env.get("REVIEWED_WHEELS_JSON", "")
+    require(bool(raw.strip()),
+            "four independently approved artifact IDs and wheel SHA-256 values required")
     try:
-        specs = json.loads(env.get("REVIEWED_WHEELS_JSON", ""))
+        specs = json.loads(raw)
     except (ValueError, TypeError) as exc:
-        raise ValueError("four independently approved artifact IDs and wheel SHA-256 values required") from exc
+        raise ValueError(
+            "REVIEWED_WHEELS_JSON is not valid JSON (it must keep its double quotes); "
+            f"received {raw[:40]!r}..."
+        ) from exc
     require(isinstance(specs, dict) and set(specs) == set(PLATFORMS),
             "exactly four CI platform approvals required")
     seen_ids: set[int] = set()
@@ -71,12 +90,13 @@ def load_approval(env: dict[str, str]) -> tuple[str, int, str, str, dict]:
     return repo, int(run_raw), source, core, specs
 
 
-def verify_metadata(repo: str, run_id: int, source: str, specs: dict) -> int:
+def verify_metadata(repo: str, run_id: int, source: str, specs: dict, version: str) -> int:
     run = github_api(repo, f"actions/runs/{run_id}")
     require(run.get("name") == "CI", "candidate must come from CI")
     require(run.get("event") == "push", "candidate must be tested on a release branch push")
-    require(run.get("head_branch") == "release/v0.0.2-rc",
-            "candidate is not the release branch")
+    expected_branch = release_branch(version)
+    require(run.get("head_branch") == expected_branch,
+            f"candidate was not tested on {expected_branch}")
     require(run.get("status") == "completed" and run.get("conclusion") == "success",
             "candidate CI is not successful")
     require(run.get("head_sha") == source, "candidate CI source SHA mismatch")
@@ -176,15 +196,14 @@ def main() -> int:
     args = p.parse_args()
     try:
         repo, run_id, source, core, specs = load_approval(os.environ)
-        attempt = verify_metadata(repo, run_id, source, specs)
+        version = project_version()
+        attempt = verify_metadata(repo, run_id, source, specs, version)
         if args.phase == "metadata":
             ids = ",".join(str(specs[name]["id"]) for name in PLATFORMS)
             with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as f:
                 f.write(f"artifact_ids={ids}\n")
             print(f"Reviewed CI run {run_id} and all four exact artifact identities verified")
         else:
-            with Path("pyproject.toml").open("rb") as f:
-                version = tomllib.load(f)["project"]["version"]
             records = verify_downloads(args.download_root, args.output, source, core,
                                        attempt, specs, version)
             print(f"Promoted {len(records)} already-tested wheel bytes without rebuilding")

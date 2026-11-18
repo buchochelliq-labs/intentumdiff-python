@@ -189,3 +189,28 @@ class TestRenderPluginFormat:
         parsed = json.loads(received_json[0])
         assert parsed["language"] == "python"
         assert len(parsed["changes"]) == 1
+
+
+class TestRenderTerminalLiteralText:
+    """#306: source text is never Rich markup; API and CLI terminal output agree."""
+
+    @pytest.mark.parametrize(
+        "text", ["[/].py", "bad [/missing]", "changed [red]red[/red]", "[link=x]l[/link]"]
+    )
+    def test_bracket_tags_round_trip_literally(self, text):
+        change = Change(change_type=ChangeType.DELETION, old_node=_node(), description=text)
+        diff = SemanticDiff(
+            old_filename=text, new_filename="new.py", language="python", changes=[change]
+        )
+        output = SemanticDiffer().render(diff, output_format="terminal")
+        assert f"Old: {text}" in output  # the filename, literally
+        assert output.count(text) == 2  # ... and the description
+
+    def test_api_terminal_equals_cli_terminal(self):
+        from intentumdiff.cli._shared import _render_text
+
+        change = Change(change_type=ChangeType.DELETION, old_node=_node(), description="[b]x[/b]")
+        diff = _diff([change])
+        assert SemanticDiffer().render(diff, output_format="terminal") == _render_text(
+            diff, "terminal"
+        )

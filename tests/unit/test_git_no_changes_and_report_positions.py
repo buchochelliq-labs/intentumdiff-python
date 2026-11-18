@@ -88,7 +88,11 @@ def _violation_at(line0: int, col0: int):
         semantic_path="spec.key",
         position=NodePosition(start_line=line0, start_col=col0, end_line=line0, end_col=col0 + 5),
     )
-    return GuardrailCheckResult(violations=[violation])
+    immutable = int(violation.severity == GuardrailSeverity.IMMUTABLE)
+    return GuardrailCheckResult(
+        violations=[violation], violation_count=1, immutable_count=immutable,
+        important_count=1 - immutable, checked_files=1, strict=False, passed=True,
+    )
 
 
 def test_sarif_region_converts_zero_based_positions() -> None:

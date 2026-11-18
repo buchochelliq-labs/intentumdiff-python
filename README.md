@@ -17,11 +17,12 @@ does: **meaningful**, **refactoring**, **moved**, or **ignored style**.
 pip install --pre intentumdiff-python
 ```
 
-0.0.2b2 is a pre-release, so `--pre` is needed; without it pip installs the older 0.0.1.
+0.0.3b1 is a pre-release, so `--pre` is needed. Without it pip finds no installable version,
+because the only stable release, 0.0.1, has been yanked.
 Requires **Python 3.12+**. The wheel bundles the Rust engine and language parser
 components; built-in parsing needs no separate component download.
 
-**0.0.2 candidate platform limitation:** PowerShell is unavailable on Windows ARM64
+**Platform limitation:** PowerShell is unavailable on Windows ARM64
 because of the tracked compiler limitation in [#42](https://github.com/buchochelliq-labs/intentumdiff-python/issues/42).
 Rust reports this parser as unavailable; the package does not substitute a Python engine.
 
@@ -61,7 +62,7 @@ intentumdiff file old.py new.py
 intentumdiff git --help      # diff against a ref in a git repository
 ```
 
-## See the 0.0.2 candidate CLI
+## See the CLI
 
 This real installed-wheel recording changes the assigned value from `1` to `2`.
 Rust reports one modification; the main diff panel and table use **rs-rich**.
@@ -69,9 +70,40 @@ Rust reports one modification; the main diff panel and table use **rs-rich**.
 [![Installed 0.0.2b1 candidate showing one integer-value modification](https://raw.githubusercontent.com/buchochelliq-labs/intentumdiff-docs/1c082d29f58a616136290db7003baec96aa3c200/docs/assets/cli/current/meaningful.png)](https://github.com/buchochelliq-labs/intentumdiff-docs/blob/1c082d29f58a616136290db7003baec96aa3c200/docs/assets/cli/current/meaningful.mp4)
 
 [Watch the CLI examples and read their exact provenance](https://github.com/buchochelliq-labs/intentumdiff-docs/blob/1c082d29f58a616136290db7003baec96aa3c200/docs/cli-demos/index.md).
-The recordings use the verified Python #98 Linux wheel and **rs-rich-record**. They are
-pre-publication candidate evidence, not a claim that 0.0.2 is available on PyPI.
+The recordings use the verified Python #98 Linux wheel (an earlier 0.0.2b1 candidate) and
+**rs-rich-record**; they predate 0.0.3b1.
 Standalone guardrail reports and errors still use the existing presentation paths.
+
+## Complete, equivalent and incomplete reviews
+
+Every diff says how complete it is, in `diff.completeness`. The verdict comes from the
+engine; Python never guesses it.
+
+| `completeness` | Meaning |
+|---|---|
+| `"complete"` | `diff.changes` is the review. |
+| `"equivalent"` | The sources differ, but the engine proved they mean the same thing (for example JSON keys that were only reordered). `diff.metadata["equivalence_proof"]` names the rule when there is one. |
+| `"incomplete"` | The sources differ, but the engine could not explain the change. This is **not** "no changes". |
+
+For an incomplete review, `diff.incomplete.message` is the engine's explanation and
+`diff.incomplete.source_ranges` lists the line ranges it could not explain. The CLI prints
+that message in place of "No changes detected", and repeats it on stderr.
+
+### Reporting a bug: `--report-bug`
+
+When a review is incomplete, the CLI can help you report it. With `--report-bug` (on
+`file`, `git`, `patch` and `string`), or when run in an interactive terminal, it prints the
+issue title and body the engine wrote and asks `[y/N]` before opening anything:
+
+```bash
+intentumdiff file old.py new.py --report-bug
+```
+
+Only an explicit `y` opens the pre-filled GitHub issue in your browser. If the link can
+only carry a shortened report, the CLI says so; the printed body is the full report to
+paste. Without a terminal nothing is ever opened. The report holds only the engine's text:
+no file names, paths or source code. All of this goes to stderr, so JSON and other machine
+output are unchanged.
 
 ## Documentation
 

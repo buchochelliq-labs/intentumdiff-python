@@ -29,7 +29,10 @@ class TestPython(CodeScenarioSuite):
         # finalize — insertion shifts stay suppressed, a genuine swap surfaces as ONE MOVE
         # (the LIS keeps the first entity as stationary, so `add` is the reported mover).
         "move_fn": Case("def greet(name):\n    print('Hi ' + name)\n\ndef add(a, b):\n    return a + b\n", "def add(a, b):\n    return a + b\n\ndef greet(name):\n    print('Hi ' + name)\n", not_style_only=True, moves=("add",), exact_total=1),
-        "add_param": Case(_PY, _PY.replace("def add(a, b):", "def add(a, b, c):"), additions=("c",), exact_total=1),
+        # core#297: a parameter-shape change is one definition-level CHANGE_SIGNATURE
+        # (param_count 2 -> 3), not a bare leaf ADDITION of `c`.
+        "add_param": Case(_PY, _PY.replace("def add(a, b):", "def add(a, b, c):"),
+                          signature_changes=("add",), exact_total=1),
         # Issue #30: async-ness must survive into the tree — the toggle is a semantic change
         # (call site gets a coroutine), never style-only.
         "async_toggle": Case("def f():\n    return 1\n", "async def f():\n    return 1\n", not_style_only=True),

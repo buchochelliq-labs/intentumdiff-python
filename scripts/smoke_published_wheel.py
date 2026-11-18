@@ -22,8 +22,9 @@ Everything a new user does in their first five minutes, in order:
 3. the console script runs
 4. `python -m intentumdiff` works
 5. a real diff produces a real result
-6. **stderr is CLEAN** — the check that would have caught 0.0.1
-7. every URL in the error catalogue actually resolves
+6. **stderr is CLEAN** on every invocation — the check that would have caught 0.0.1
+7. every URL the package shows users (its output and its Project-URLs) resolves, and
+   there is at least one to check
 
 Usage:
     python scripts/smoke_published_wheel.py                    # from PyPI
@@ -99,6 +100,14 @@ print('VERIFIED', len(actual), 'installed Wasm components')
 """
 
 
+# Executed by the installed interpreter: the links PyPI shows for the package.
+PROJECT_URLS_SCRIPT = """
+from importlib.metadata import metadata
+for entry in metadata('intentumdiff-python').get_all('Project-URL') or []:
+    print(entry.split(',', 1)[-1].strip())
+"""
+
+
 class Smoke:
     def __init__(self, root: Path) -> None:
         self.root = root
@@ -107,6 +116,11 @@ class Smoke:
             / ("python.exe" if sys.platform == "win32" else "python")
         )
         self.failures: list[str] = []
+        #: (label, stdout, stderr, expected) of every command run against the installed
+        #: package, for the stderr and URL checks. `expected` matches the only stderr lines
+        #: a command may print (a deliberately broken input is expected to be reported).
+        #: pip install is not recorded: its notices are pip's, not the package's.
+        self.outputs: list[tuple[str, str, str, re.Pattern[str] | None]] = []
 
     def check(self, name: str, ok: bool, detail: str = "") -> None:
         print(f"  {'PASS' if ok else 'FAIL'}  {name}")
@@ -115,11 +129,29 @@ class Smoke:
                 print(f"        {detail.strip()[:400]}")
             self.failures.append(name)
 
-    def run(self, *args: str, **kw) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
-            [str(self.py), *args], capture_output=True, text=True,
-            encoding="utf-8", errors="replace", cwd=self.root, **kw
-        )
+    def run(self, *args: str, label: str = "", **kw) -> subprocess.CompletedProcess[str]:
+        return self.exec([str(self.py), *args], label=label or "python " + " ".join(args)[:60], **kw)
+
+    def exec(self, argv: list[str], *, label: str = "", record: bool = True,
+             expected_stderr: str | None = None, **kw) -> subprocess.CompletedProcess[str]:
+        kw.setdefault("cwd", self.root)
+        result = subprocess.run(argv, capture_output=True, text=True,
+                                encoding="utf-8", errors="replace", **kw)
+        if record:
+            label = label or " ".join([Path(argv[0]).name, *argv[1:]])[:80]
+            expected = re.compile(expected_stderr) if expected_stderr is not None else None
+            self.outputs.append((label, result.stdout, result.stderr, expected))
+        return result
+
+    def unexpected_stderr(self) -> list[tuple[str, str]]:
+        """(label, first unexpected line) for every command whose stderr is not clean."""
+        found = []
+        for label, _out, err, allowed in self.outputs:
+            lines = [ln for ln in err.splitlines() if ln.strip()
+                     and not (allowed and allowed.fullmatch(ln.strip()))]
+            if lines:
+                found.append((label, lines[0]))
+        return found
 
 
 
@@ -215,7 +247,8 @@ def main() -> int:
 
         # 1. Install exactly as a user would.
         target = args.wheel or args.package
-        r = s.run("-m", "pip", "install", "--quiet", target)
+        r = s.exec([str(s.py), "-m", "pip", "install", "--quiet",
+                    "--disable-pip-version-check", target], record=False)
         s.check(f"pip install {target}", r.returncode == 0, r.stderr)
         if r.returncode != 0:
             return report(s)
@@ -231,8 +264,7 @@ def main() -> int:
 
         # 3. Console script — the documented entry point.
         exe = s.py.parent / ("intentumdiff.exe" if sys.platform == "win32" else "intentumdiff")
-        r2 = subprocess.run([str(exe), "--version"], capture_output=True, text=True,
-                            encoding="utf-8", errors="replace")
+        r2 = s.exec([str(exe), "--version"])
         s.check("console script `intentumdiff --version`", r2.returncode == 0, r2.stderr)
 
         # 4. `python -m` — READMEs reach for this constantly, so it must work.
@@ -256,11 +288,11 @@ def main() -> int:
             after = root / f"incomplete-after.{extension}"
             before.write_text(old, encoding="utf-8")
             after.write_text(new, encoding="utf-8")
-            result = subprocess.run(
-                [str(exe), "diff", "--json", str(before), str(after)],
-                capture_output=True, text=True, encoding="utf-8", errors="replace",
-                cwd=root, timeout=120,
-            )
+            # The input is deliberately unparsable, so the CLI may say so; nothing else.
+            result = s.exec([str(exe), "diff", "--json", str(before), str(after)],
+                            label=f"diff --json incomplete {extension}", timeout=120,
+                            expected_stderr=r"Parse errors detected in '[^']+' - "
+                                            r"using Rust source fallback")
             try:
                 diff = json.loads(result.stdout)
                 changes = diff["changes"]
@@ -308,21 +340,8 @@ def main() -> int:
         old_file.write_text(OLD_SRC, encoding="utf-8")
         new_file.write_text(NEW_SRC, encoding="utf-8")
         for fmt in ("patch", "html", "llm"):
-            rendered = subprocess.run(
-                [
-                    str(exe),
-                    "file",
-                    str(old_file),
-                    str(new_file),
-                    "--format",
-                    fmt,
-                ],
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                cwd=root,
-            )
+            rendered = s.exec([str(exe), "file", str(old_file), str(new_file),
+                               "--format", fmt])
             s.check(
                 f"installed wheel renders --format {fmt}",
                 rendered.returncode == 0 and bool(rendered.stdout.strip()),
@@ -361,23 +380,38 @@ def main() -> int:
 
         # 6. THE ONE THAT MATTERS. 0.0.1 emitted ~69 plugin-catalogue errors on every
         #    invocation while still returning a result, so exit code alone said "fine".
+        #    Check EVERY command the package ran, not just the last: any of them can be
+        #    the one that prints the noise.
         noise = [
-            ln for ln in r.stderr.splitlines()
-            if ln.strip() and "Failed to catalog" in ln
+            f"{label}: {ln.strip()}" for label, _out, err, _expected in s.outputs
+            for ln in err.splitlines() if "Failed to catalog" in ln
         ]
         s.check(
-            "no plugin-catalogue errors on stderr",
+            f"no plugin-catalogue errors on stderr ({len(s.outputs)} commands)",
             not noise,
             f"{len(noise)} error line(s), first: {noise[0] if noise else ''}",
         )
+        noisy = s.unexpected_stderr()
+        s.check(
+            f"stderr is clean for all {len(s.outputs)} commands",
+            not noisy,
+            "; ".join(f"{label}: {line.strip()[:160]}" for label, line in noisy[:3]),
+        )
 
         # 7. Every URL the package tells users to visit must resolve. 0.0.1 pointed at
-        #    docs.intentumdiff.dev, which does not exist.
-        import re
+        #    docs.intentumdiff.dev, which does not exist. Scan every command's stderr (where
+        #    errors and report hints go). A healthy run may print no URL at all, so also
+        #    check the installed package's own Project-URLs
+        #    (what PyPI shows as its links) and require at least one URL: a check over
+        #    nothing passes vacuously.
         import urllib.error
         import urllib.request
 
-        urls = sorted(set(re.findall(r"https?://[^\s'\"<>)\]]+", r.stderr)))
+        r_meta = s.run("-c", PROJECT_URLS_SCRIPT, label="project urls")
+        s.check("installed metadata lists Project-URLs",
+                r_meta.returncode == 0 and bool(r_meta.stdout.strip()), r_meta.stderr)
+        seen = r_meta.stdout + "".join(err for _label, _out, err, _expected in s.outputs)
+        urls = sorted(set(re.findall(r"https?://[^\s'\"<>)\]]+", seen)))
         dead = []
         for u in urls:
             try:
@@ -391,9 +425,9 @@ def main() -> int:
             except Exception as e:  # DNS failure counts: the domain does not exist
                 dead.append(f"{u} -> {type(e).__name__}")
         s.check(
-            f"all {len(urls)} URL(s) in output resolve",
-            not dead,
-            "; ".join(dead[:3]),
+            f"all {len(urls)} URL(s) in output and Project-URLs resolve",
+            bool(urls) and not dead,
+            "; ".join(dead[:3]) if urls else "no URL found to check",
         )
 
         print(f"\n  version under test: {version or '(unknown)'}")

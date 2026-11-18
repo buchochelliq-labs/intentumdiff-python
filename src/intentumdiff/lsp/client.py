@@ -175,7 +175,11 @@ class AsyncLspClient:
             await self._cleanup_start_failure()
             raise
         except asyncio.CancelledError as exc:
-            # The server closed its connection during the initialize handshake.
+            current = asyncio.current_task()
+            if current is not None and current.cancelling():  # the caller cancelled: keep that
+                await self._cleanup_start_failure()
+                raise
+            # Otherwise the server closed its connection during the initialize handshake.
             # Yield once so _drain_stderr can read any buffered output.
             await asyncio.sleep(0)
             hint = self._stderr_hint()
@@ -194,24 +198,27 @@ class AsyncLspClient:
         logger.debug("LSP client connected to %s", self._config)
 
     async def _cleanup_start_failure(self) -> None:
-        """Cancel reader task and release resources after a failed :meth:`start`."""
-        if self._stderr_task is not None:
-            self._stderr_task.cancel()
-            with suppress(Exception):
-                await self._stderr_task
-            self._stderr_task = None
-        if self._reader_task is not None:
-            self._reader_task.cancel()
-            with suppress(Exception):
-                await self._reader_task
-            self._reader_task = None
-        if self._writer is not None:
-            with suppress(Exception):
-                self._writer.close()
-        if self._process is not None:
-            with suppress(Exception):
-                self._process.terminate()
-            self._process = None
+        """Release every resource a failed :meth:`start` owns, even when cancelled (#313).
+
+        Awaiting a cancelled task raises CancelledError, a BaseException, which used to escape
+        ``suppress(Exception)`` before the writer was closed and the process was terminated.
+        """
+        tasks = [task for task in (self._stderr_task, self._reader_task) if task is not None]
+        self._stderr_task = self._reader_task = None
+        process, self._process = self._process, None
+        for task in tasks:
+            task.cancel()
+        try:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        finally:
+            if self._writer is not None:
+                with suppress(Exception):
+                    self._writer.close()
+            if process is not None:
+                with suppress(ProcessLookupError):
+                    process.kill()  # it never finished initialize; reap it
+                with suppress(Exception):
+                    await asyncio.wait_for(process.wait(), timeout=3.0)
 
     async def _start_tcp(self) -> None:
         """Establish a TCP connection to an already-running server."""
@@ -411,31 +418,24 @@ class AsyncLspClient:
 
     async def _send_request(self, method: str, params: Any) -> Any:
         rid = self._next_request_id()
-        loop = asyncio.get_running_loop()
-        fut: asyncio.Future[Any] = loop.create_future()
+        fut: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
         self._pending[rid] = fut
-        self._send_raw(_request(method, params, rid))
-        # Drain the write buffer
-        writer = self._writer
-        if writer is None:
+        try:  # the registration never outlives this call, however it ends (#313)
+            self._send_raw(_request(method, params, rid))  # raises when not connected
+            writer: Any = self._writer
+            try:
+                await asyncio.wait_for(writer.drain(), timeout=self._timeout)
+            except asyncio.TimeoutError as exc:
+                message = f"Write timeout sending {method!r} to {self._config}"
+                raise LspTimeoutError(message) from exc
+            try:
+                return await asyncio.wait_for(asyncio.shield(fut), timeout=self._timeout)
+            except asyncio.TimeoutError as exc:
+                raise LspTimeoutError(
+                    f"No response to {method!r} from {self._config} within {self._timeout}s"
+                ) from exc
+        finally:
             self._pending.pop(rid, None)
-            raise LspConnectionError(f"LSP client for {self._config} is not connected")
-        try:
-            await asyncio.wait_for(writer.drain(), timeout=self._timeout)
-        except asyncio.TimeoutError as exc:
-            self._pending.pop(rid, None)
-            raise LspTimeoutError(
-                f"Write timeout sending {method!r} to {self._config}"
-            ) from exc
-        try:
-            return await asyncio.wait_for(
-                asyncio.shield(fut), timeout=self._timeout
-            )
-        except asyncio.TimeoutError as exc:
-            self._pending.pop(rid, None)
-            raise LspTimeoutError(
-                f"No response to {method!r} from {self._config} within {self._timeout}s"
-            ) from exc
 
     async def _drain_stderr(self) -> None:
         """Background task: drain subprocess stderr into a capped ring buffer."""

@@ -20,7 +20,7 @@ from intentumdiff.differ import SemanticDiffer
 try:
     from pygls.lsp.server import LanguageServer  # pygls >= 2.x
 except ImportError:
-    from pygls.server import LanguageServer  # type: ignore[assignment]  # pygls 1.x
+    pass  # type: ignore[assignment]  # pygls 1.x
 
 log = logging.getLogger(__name__)
 

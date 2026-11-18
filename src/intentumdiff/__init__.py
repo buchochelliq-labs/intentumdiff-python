@@ -33,6 +33,8 @@ from intentumdiff.core.models import (
     GuardrailCheckResult,
     GuardrailSeverity,
     GuardrailViolation,
+    IncompleteReport,
+    IncompleteReview,
     NodePosition,
     RefactoringKind,
     ReferenceKind,
@@ -54,6 +56,7 @@ from intentumdiff.sources.string_source import StringSource
 from intentumdiff.cache.store import CacheStore
 from intentumdiff.cache.sqlite_store import SqliteCacheStore
 from intentumdiff.live_server import LiveServer
+from intentumdiff.rust_core import CoreSizeLimitError
 
 __all__ = [
     # Differ
@@ -81,6 +84,8 @@ __all__ = [
     "DetectionResult",
     "FUEL_UNLIMITED",
     "SemanticDiff",
+    "IncompleteReview",
+    "IncompleteReport",
     "Change",
     "ChangeGroup",
     "ChangeGroupKind",
@@ -106,6 +111,8 @@ __all__ = [
     "Indexer",
     # Live server
     "LiveServer",
+    # Errors
+    "CoreSizeLimitError",
     # Testing
     "PluginTestHarness",
 ]

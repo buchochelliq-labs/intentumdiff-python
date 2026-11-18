@@ -1,250 +1,49 @@
+"""Invariance behaviour as served by core (#301).
+
+The invariance catalogue (rule ids, evaluators, admissible languages, status) and its schema
+are owned by intentumdiff-core (``crates/rust-core-host/invariances``, checked by core's
+``invariance_catalogue_contract`` test). The binding ships no copy of it; these tests check
+core's served output against explicit expected results.
+"""
+
 from __future__ import annotations
 
-import json
-import tomllib
-from importlib import resources
 from pathlib import Path
 
 import pytest
-from pydantic import ValidationError
 
 from intentumdiff import ChangeGroupKind, SemanticDiffer
-from intentumdiff.analysis.invariances import (
-    InvarianceRuleDefinition,
-    InvarianceRuleSet,
-    load_builtin_invariance_rules,
-)
 
 ROOT = Path(__file__).parents[2]
+
+# Explicit expectation: the catalogue rules core marks disabled. A disabled rule id must
+# never appear as a served change group.
+_CORE_DISABLED_RULE_IDS = ("core.number_literal.canonical_value.safe", "catalog.parser_only_languages")
 
 
 def _diff_css(old: str, new: str):
     return SemanticDiffer().diff_strings(old, new, "style.css", language_hint="css")
 
 
-def _parser_language_ids() -> set[str]:
-    data = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-    return set(data["project"]["entry-points"]["intentumdiff.parsers"])
+@pytest.mark.parametrize(
+    ("old", "new", "filename", "language"),
+    [
+        (".button { color: blue; }", ".button { color: #0000ff; }", "style.css", "css"),
+        ("ratio = 1.0\n", "ratio = 1.00\n", "example.py", "python"),
+        ("ratio = 1.5e3\n", "ratio = 1500.0\n", "example.py", "python"),
+    ],
+)
+def test_disabled_catalogue_rules_do_not_surface_from_rust(old, new, filename, language):
+    diff = SemanticDiffer().diff_strings(old, new, filename, language_hint=language)
+    assert not any(group.rule_id in _CORE_DISABLED_RULE_IDS for group in diff.change_groups)
 
 
-def _rules_schema() -> dict:
-    schema_path = ROOT / "src" / "intentumdiff" / "invariances" / "rules.schema.json"
-    return json.loads(schema_path.read_text(encoding="utf-8"))
-
-
-def test_python_invariance_module_is_catalogue_only():
-    import ast
-
-    path = ROOT / "src" / "intentumdiff" / "analysis" / "invariances.py"
-    module = ast.parse(path.read_text(encoding="utf-8"))
-    functions = {
-        node.name
-        for node in module.body
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-    }
-    assert functions == {"load_builtin_invariance_rules", "builtin_invariance_rule"}
-
-
-def test_disabled_catalogue_rules_do_not_surface_from_rust():
-    disabled = {
-        rule.id for rule in load_builtin_invariance_rules() if not rule.enabled
-    }
-    assert disabled
-    diff = _diff_css(".button { color: blue; }", ".button { color: #0000ff; }")
-    assert not any(group.rule_id in disabled for group in diff.change_groups)
-
-
-def test_packaged_yaml_rules_load_from_package_resources():
-    rule_path = resources.files("intentumdiff.invariances").joinpath("rules.yaml")
-
-    assert rule_path.is_file()
-    rules = load_builtin_invariance_rules()
-    assert any(rule.id == "css.color.canonical_equivalence" for rule in rules)
-
-
-def test_packaged_json_schema_loads_from_package_resources():
-    schema_path = resources.files("intentumdiff.invariances").joinpath(
-        "rules.schema.json"
-    )
-
-    assert schema_path.is_file()
-    schema = json.loads(schema_path.read_text(encoding="utf-8"))
-    assert schema["$schema"] == "https://json-schema.org/draft/2020-12/schema"
-    assert schema["$defs"]["rule"]["required"]
-
-
-def test_json_schema_language_enum_matches_registered_parsers():
-    schema_languages = set(_rules_schema()["$defs"]["language"]["enum"])
-
-    assert schema_languages == _parser_language_ids()
-
-
-def test_json_schema_matches_runtime_safety_contract():
-    schema = _rules_schema()
-    rule_schema = schema["$defs"]["rule"]
-    required = set(rule_schema["required"])
-
-    assert {
-        "id",
-        "languages",
-        "status",
-        "evaluator",
-        "group_kind",
-        "enabled",
-        "risk",
-        "equivalence_kind",
-        "explanation",
-    } <= required
-    assert schema["$defs"]["evaluator"]["enum"] == [
-        "css_color_equivalence",
-        "formatting_suppression_evidence",
-        "integer_literal_equivalence",
-        "style_only_shortcut_evidence",
-        "string_literal_equivalence",
-    ]
-    assert set(schema["$defs"]["status"]["enum"]) == {"implemented", "catalog"}
-    assert set(schema["$defs"]["risk"]["enum"]) == {"green", "amber", "red"}
-    assert rule_schema["additionalProperties"] is False
-
-
-def test_invalid_evaluator_names_are_rejected():
-    with pytest.raises(ValidationError, match="unknown invariance evaluator"):
-        InvarianceRuleDefinition(
-            id="bad.rule",
-            languages=("css",),
-            evaluator="os.system",
-            group_kind=ChangeGroupKind.IGNORED_STYLE,
-            enabled=True,
-            risk="green",
-            explanation="not allowed",
-        )
-
-
-def test_implemented_rules_require_evaluator():
-    with pytest.raises(ValidationError, match="implemented invariance rules require an evaluator"):
-        InvarianceRuleDefinition(
-            id="missing.evaluator",
-            languages=("css",),
-            status="implemented",
-            evaluator=None,
-            group_kind=ChangeGroupKind.IGNORED_STYLE,
-            enabled=True,
-            risk="green",
-            explanation="implemented rules need code",
-        )
-
-
-def test_catalog_rules_may_have_null_evaluator():
-    rule = InvarianceRuleDefinition(
-        id="catalog.only",
-        languages=("css",),
-        status="catalog",
-        evaluator=None,
-        group_kind=ChangeGroupKind.IGNORED_STYLE,
-        enabled=False,
-        risk="amber",
-        explanation="documented but not executable",
-        notes="safe because it cannot run",
-    )
-
-    assert rule.evaluator is None
-    assert rule.status == "catalog"
-
-
-def test_catalog_rules_must_be_disabled():
-    with pytest.raises(ValidationError, match="catalog invariance rules must be disabled"):
-        InvarianceRuleDefinition(
-            id="bad.catalog.enabled",
-            languages=("css",),
-            status="catalog",
-            evaluator=None,
-            group_kind=ChangeGroupKind.IGNORED_STYLE,
-            enabled=True,
-            risk="amber",
-            explanation="catalog rules cannot run",
-        )
-
-
-def test_invalid_language_ids_are_rejected():
-    with pytest.raises(ValidationError, match="unknown invariance languages"):
-        InvarianceRuleDefinition(
-            id="bad.language",
-            languages=("css", "not-a-language"),
-            status="catalog",
-            evaluator=None,
-            group_kind=ChangeGroupKind.IGNORED_STYLE,
-            enabled=False,
-            risk="amber",
-            explanation="language ids must match parser ids",
-        )
-
-
-def test_duplicate_rule_ids_are_rejected():
-    rule = {
-        "id": "duplicate.rule",
-        "languages": ["css"],
-        "status": "catalog",
-        "evaluator": None,
-        "enabled": False,
-        "risk": "amber",
-        "explanation": "duplicate ids should fail",
-        "notes": "test",
-    }
-
-    with pytest.raises(ValidationError, match="duplicate invariance rule ids"):
-        InvarianceRuleSet.model_validate({"version": 1, "rules": [rule, rule]})
-
-
-def test_builtin_catalog_covers_every_registered_parser_language():
-    covered = {
-        language
-        for rule in load_builtin_invariance_rules()
-        for language in rule.languages
-    }
-
-    assert _parser_language_ids() - covered == set()
-
-
-def test_pyproject_entry_points_match_source_tree_fallback_map():
-    """A parser must be wired in BOTH pyproject.toml AND the source-tree fallback map.
-
-    Editable installs snapshot entry-point metadata at install time (issue #61), so parser
-    discovery in a dev checkout relies on registry._FIRST_PARTY_PARSER_ENTRYPOINT_FALLBACKS.
-    A parser added to only one of the two silently routes to `generic` in a fresh env — the
-    class of breakage the gitignore/markdown additions repeatedly risked. Guard that the two
-    stay in lockstep on BOTH the language-id keys and the entry-function names.
-    """
-    from intentumdiff.plugins.registry import _FIRST_PARTY_PARSER_ENTRYPOINT_FALLBACKS
-
-    data = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-    pyproject_entries = data["project"]["entry-points"]["intentumdiff.parsers"]
-
-    pyproject_keys = set(pyproject_entries)
-    fallback_keys = set(_FIRST_PARTY_PARSER_ENTRYPOINT_FALLBACKS)
-    assert pyproject_keys == fallback_keys, (
-        "language-id keys differ: only in pyproject "
-        f"{sorted(pyproject_keys - fallback_keys)}; only in fallback map "
-        f"{sorted(fallback_keys - pyproject_keys)}"
-    )
-
-    pyproject_fns = {value.rsplit(":", 1)[-1] for value in pyproject_entries.values()}
-    fallback_fns = set(_FIRST_PARTY_PARSER_ENTRYPOINT_FALLBACKS.values())
-    assert pyproject_fns == fallback_fns, (
-        "entry-function names differ: only in pyproject "
-        f"{sorted(pyproject_fns - fallback_fns)}; only in fallback map "
-        f"{sorted(fallback_fns - pyproject_fns)}"
-    )
-
-
-def test_builtin_catalog_entries_have_review_metadata():
-    for rule in load_builtin_invariance_rules():
-        assert rule.risk in {"green", "amber", "red"}
-        assert rule.equivalence_kind
-        assert rule.explanation
-        assert rule.source_refs or rule.notes
-        if rule.status == "catalog":
-            assert rule.enabled is False
-            assert rule.evaluator is None
+def test_binding_ships_no_invariance_catalogue():
+    """#301: evaluator/language/status admissibility is core's; no Python copy remains."""
+    package = ROOT / "src" / "intentumdiff"
+    assert not (package / "invariances").exists()
+    assert not list(package.rglob("rules.yaml"))
+    assert not list(package.rglob("rules.schema.json"))
 
 
 def test_css_blue_and_hex_blue_are_ignored_with_explainable_evidence():

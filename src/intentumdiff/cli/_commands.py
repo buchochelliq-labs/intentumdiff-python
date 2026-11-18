@@ -62,6 +62,7 @@ from intentumdiff.cli._shared import (  # noqa: F401
     _guardrail_result,
     _json_default,
     _load_cli_config,
+    _offer_incomplete_reports,
     _parse_fuel,
     _record_diagnostics_db,
     _render,
@@ -119,14 +120,10 @@ def _cmd_git(args: argparse.Namespace) -> None:
     from intentumdiff.sources.git_source import StagedSource, _REF_STAGED, _REF_UNPUSHED
     from intentumdiff.vcs.git_cli import NotAGitRepositoryError
 
-    repo_path = args.repo  # '.' when not supplied
-
-    # Resolve the effective new_ref from mutually-exclusive scope flags.
-    new_ref: str = args.new  # may be "", ":staged", ":unpushed", or an explicit ref
-    if getattr(args, "staged", False):
-        new_ref = _REF_STAGED
-    elif getattr(args, "unpushed", False):
-        new_ref = _REF_UNPUSHED
+    if getattr(args, "repo_option", None) is not None and args.repo != ".":
+        _err.print("[red]Name the repository once: --repo or the REPO positional.[/red]")
+        sys.exit(2)
+    repo_path = getattr(args, "repo_option", None) or args.repo  # --repo, REPO or '.' (#317)
 
     # Resolve the effective new_ref from mutually-exclusive scope flags.
     new_ref: str = args.new  # may be "", ":staged", ":unpushed", or an explicit ref
@@ -138,10 +135,8 @@ def _cmd_git(args: argparse.Namespace) -> None:
     # Smart --old default: HEAD for working-tree / scoped modes; HEAD~1 when an
     # explicit commit ref is given for --new so that `intentumdiff git --new HEAD`
     # means "show the last commit" rather than HEAD vs HEAD = no diff.
-    _is_working_tree_mode = not new_ref or new_ref in (_REF_STAGED, _REF_UNPUSHED)
-    old_ref: str = args.old if args.old is not None else (
-        "HEAD" if _is_working_tree_mode else "HEAD~1"
-    )
+    working_tree_mode = not new_ref or new_ref in (_REF_STAGED, _REF_UNPUSHED)
+    old_ref: str = args.old if args.old is not None else ("HEAD" if working_tree_mode else "HEAD~1")
 
     try:
         if args.file:
@@ -238,13 +233,12 @@ def _cmd_git(args: argparse.Namespace) -> None:
             _err.print(f"[red]Repository path not found:[/red] {repo_path}")
             # When the repo path looks like a git ref name (e.g. "main", "HEAD",
             # "new") the user probably typed '-- ref' instead of '--new ref'.
-            if not Path(repo_path).is_absolute():
-                import re as _re
-                if _re.fullmatch(r"[A-Za-z0-9_/.\-]+", repo_path):
-                    _err.print(
-                        f"[yellow]Hint: '{repo_path}' looks like a git ref. "
-                        f"Did you mean [bold]--new {repo_path}[/bold]?[/yellow]"
-                    )
+            import re as _re
+            if not Path(repo_path).is_absolute() and _re.fullmatch(r"[A-Za-z0-9_/.\-]+", repo_path):
+                _err.print(
+                    f"[yellow]Hint: '{repo_path}' looks like a git ref. "
+                    f"Did you mean [bold]--new {repo_path}[/bold]?[/yellow]"
+                )
         else:
             _err.print(
                 f"[red]Not a git repository:[/red] {repo_path!r}  "
@@ -280,6 +274,7 @@ def _cmd_file(args: argparse.Namespace) -> None:
             if change.text_diff:
                 line += f"  [{change.text_diff}]"
             _console.print(line)
+        _offer_incomplete_reports([diff], args)
     else:
         _render_with_profile(diff, args, fuel=differ._config.plugin_fuel)
     result = _emit_guardrail_reports(diff, args)
@@ -572,6 +567,7 @@ def _cmd_plugins_list(_args: argparse.Namespace) -> None:
 
 def _cmd_plugins_add(args: argparse.Namespace) -> None:
     import os as _os
+    import warnings as _warnings
 
     from intentumdiff.plugins.hub import (
         PluginSpec,
@@ -585,6 +581,7 @@ def _cmd_plugins_add(args: argparse.Namespace) -> None:
         save_plugins_file,
         security_check_plugin,
     )
+    from intentumdiff.plugins.hub import logger as _hub_logger
 
     source: str = getattr(args, "source", "git")
     skip_verify: bool = getattr(args, "skip_verify", False)
@@ -598,9 +595,7 @@ def _cmd_plugins_add(args: argparse.Namespace) -> None:
                 "INTENTUMDIFF_ALLOW_SKIP_VERIFY=1 to prevent accidental use.[/bold red]"
             )
             sys.exit(1)
-        _err.print(
-            "[yellow]Warning: security verification skipped (--skip-verify).[/yellow]"
-        )
+        _err.print("[yellow]Warning: security verification skipped (--skip-verify).[/yellow]")
 
     # Preserve existing pinned Wasm/dependency provenance before pip has any
     # side effects.  A malformed manifest or dangling symlink is not an empty
@@ -620,14 +615,20 @@ def _cmd_plugins_add(args: argparse.Namespace) -> None:
     registry_entry: RegistryEntry | None = None
     if not args.repo and not skip_verify:
         try:
-            registry = fetch_official_registry(
-                strict=getattr(args, "strict_registry", False),
-            )
-            short = (
-                args.plugin_name[len("intentumdiff-"):]
-                if args.plugin_name.startswith("intentumdiff-")
-                else args.plugin_name
-            )
+            # #309: an invalid manifest only skips entries; show its warning once, here, and not
+            # again through the logging last-resort handler.
+            with _warnings.catch_warnings(record=True) as caught:
+                _warnings.simplefilter("always")
+                _hub_logger.disabled = True
+                try:
+                    registry = fetch_official_registry(
+                        strict=getattr(args, "strict_registry", False),
+                    )
+                finally:
+                    _hub_logger.disabled = False
+            for caught_warning in caught:
+                _err.print("[yellow]Registry warning:[/yellow]", Text(str(caught_warning.message)))
+            short = args.plugin_name.removeprefix("intentumdiff-")
             registry_entry = registry.get(short)
             if registry_entry is not None:
                 # #94: refuse an ABI-incompatible plugin at RESOLVE time, before any install.
@@ -723,10 +724,7 @@ def _cmd_plugins_add(args: argparse.Namespace) -> None:
     if args.save:
         yaml_path = Path(args.file)
         # Replace only the matching entry; retain all other pinned provenance.
-        existing = [
-            s for s in existing_manifest
-            if s.name != spec.name and s.name != spec.package_name
-        ]
+        existing = [s for s in existing_manifest if s.name not in (spec.name, spec.package_name)]
         existing.append(spec)
         save_plugins_file(yaml_path, existing)
         _console.print(f"[green]Saved to {yaml_path}[/green]")
@@ -756,9 +754,7 @@ def _cmd_plugins_install(args: argparse.Namespace) -> None:
                 "INTENTUMDIFF_ALLOW_SKIP_VERIFY=1 to prevent accidental use.[/bold red]"
             )
             sys.exit(1)
-        _err.print(
-            "[yellow]Warning: security verification skipped (--skip-verify).[/yellow]"
-        )
+        _err.print("[yellow]Warning: security verification skipped (--skip-verify).[/yellow]")
 
     yaml_path = Path(args.file)
     if not yaml_path.exists():
@@ -820,9 +816,7 @@ def _cmd_plugins_install(args: argparse.Namespace) -> None:
                 )
                 for e in errors:
                     _err.print(f"    [red]{e}[/red]")
-                _err.print(
-                    f"  [red]Uninstalling '{spec.package_name}'.[/red]"
-                )
+                _err.print(f"  [red]Uninstalling '{spec.package_name}'.[/red]")
                 pip_uninstall(spec.package_name)
                 security_failed.append(spec.name)
 
@@ -1880,8 +1874,7 @@ def _cmd_serve(args: argparse.Namespace) -> None:
     port: int = args.port
 
     # Guard against accidentally exposing the playground to the network.
-    _loopback = {"127.0.0.1", "::1", "localhost"}
-    if host not in _loopback and not getattr(args, "allow_remote", False):
+    if host not in {"127.0.0.1", "::1", "localhost"} and not getattr(args, "allow_remote", False):
         _err.print(
             f"[bold red]Error:[/bold red] binding to '{host}' would expose the "
             "playground on the network.  "
@@ -1894,24 +1887,25 @@ def _cmd_serve(args: argparse.Namespace) -> None:
 
     # Try the requested port; fall back to a free OS-assigned port if taken.
     import socket
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as _s:
-        _s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        try:
-            _s.bind((host, port))
-            _s.close()
-        except OSError:
-            _s.bind((host, 0))
-            port = _s.getsockname()[1]
-            _console.print(
-                f"[yellow]Warning:[/yellow] requested port was unavailable; "
-                f"binding to free port [cyan]{port}[/cyan] instead."
-            )
-
-    _console.print(
-        f"[bold green]IntentumDiff serve[/bold green] listening on "
-        f"[cyan]http://{host}:{port}[/cyan]  "
-        f"([dim]Ctrl+C to stop[/dim])"
-    )
+    family = socket.AF_INET6 if ":" in host else socket.AF_INET  # an IPv6 literal (#323)
+    try:
+        with socket.socket(family, socket.SOCK_STREAM) as _s:
+            _s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                _s.bind((host, port))
+            except OSError:
+                _s.bind((host, 0))
+                port = _s.getsockname()[1]
+                _console.print(
+                    f"[yellow]Warning:[/yellow] requested port was unavailable; "
+                    f"binding to free port [cyan]{port}[/cyan] instead."
+                )
+    except OSError as exc:  # e.g. no IPv6 on this host: a diagnostic, not a traceback
+        _err.print(f"[red]Error:[/red] cannot bind {host!r}: {exc}")
+        sys.exit(1)
+    shown = f"[{host}]" if family == socket.AF_INET6 else host
+    _console.print(f"[bold green]IntentumDiff serve[/bold green] listening on "
+                   f"[cyan]http://{shown}:{port}[/cyan]  ([dim]Ctrl+C to stop[/dim])")
     uvicorn.run(app, host=host, port=port, log_level="warning")
 
 
@@ -2052,18 +2046,20 @@ def _add_output_args(p: argparse.ArgumentParser) -> None:
         default=None,
         help="Write output to FILE instead of stdout",
     )
+    p.add_argument("--report-bug", action="store_true", help="On an incomplete review, preview "
+                   "core's bug report and ask before opening the pre-filled issue in a browser.")
 
 
 def _parse_megapixels(value: str) -> int:
-    try:
+    try:  # nan is not > 0; inf and exponent overflow raise OverflowError in int() (#315)
         megapixels = float(value)
-    except ValueError:
-        raise argparse.ArgumentTypeError(
-            f"invalid megapixel value {value!r}: use a positive number"
-        ) from None
-    if megapixels <= 0:
-        raise argparse.ArgumentTypeError("max decoded megapixels must be positive")
-    return max(1, int(megapixels * 1_000_000))
+        if megapixels > 0:
+            return max(1, int(megapixels * 1_000_000))
+    except (ValueError, OverflowError):
+        pass
+    raise argparse.ArgumentTypeError(
+        f"invalid megapixel value {value!r}: use a finite positive number"
+    )
 
 
 def _add_asset_diff_args(p: argparse.ArgumentParser) -> None:
@@ -2190,8 +2186,8 @@ def _add_guardrail_args(p: argparse.ArgumentParser) -> None:
         action="store_true",
         default=False,
         help=(
-            "Exit non-zero when an immutable protected config guardrail "
-            "violation is detected."
+            "Exit 2 when any protected config guardrail violation "
+            "(important or immutable) is detected."
         ),
     )
     p.add_argument(
@@ -2229,6 +2225,7 @@ class _GitPositionalsAction(argparse.Action):
     With one positional:  ``git FILE``        → repo=".", file=FILE
     With two positionals: ``git REPO FILE``   → repo=REPO, file=FILE
     With zero positionals:                    → repo=".", file=None (commit-wide)
+    More than two is a usage error: dropping the rest silently shrank the review (#318).
     """
 
     def __call__(
@@ -2238,7 +2235,9 @@ class _GitPositionalsAction(argparse.Action):
         values: list[str],
         option_string: str | None = None,
     ) -> None:
-        if len(values) >= 2:
+        if len(values) > 2:
+            parser.error(f"git takes at most two positionals ([REPO] FILE); got extra {values[2:]}")
+        if len(values) == 2:
             namespace.repo = values[0]
             namespace.file = values[1]
         elif len(values) == 1:

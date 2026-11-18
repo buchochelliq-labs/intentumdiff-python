@@ -3,7 +3,24 @@ import pytest
 
 from intentumdiff.core.models import Change, ChangeType, DiffConfig, NodePosition, SemanticNode
 from intentumdiff.differ import SemanticDiffer
-from intentumdiff.rust_core import apply_invariances, enrich_literal_labels, review_trees_equivalent
+from intentumdiff.rust_core import enrich_literal_labels, review_trees_equivalent
+
+
+def _core_apply_invariances(changes, *, old_tree, new_tree, old_source, new_source, language):
+    """Call core's apply_invariances op directly over the C ABI (no Python adapter)."""
+    import json
+
+    from intentumdiff.rust_core import _load_backend
+
+    return json.loads(_load_backend().apply_invariances_json(json.dumps({
+        "mode": "apply",
+        "changes": [change.model_dump(mode="json") for change in changes],
+        "old_tree": old_tree.model_dump(mode="json"),
+        "new_tree": new_tree.model_dump(mode="json"),
+        "old_source": old_source,
+        "new_source": new_source,
+        "language": language,
+    })))
 
 
 def literal(kind, label, start=0, end=0):
@@ -20,11 +37,11 @@ def literal(kind, label, start=0, end=0):
 def test_css_nested_tokens_remain_data_through_rust_abi(template, equivalent):
     before, after = template.replace("VALUE", "red"), template.replace("VALUE", "#f00")
     old, new = literal("stylesheet", before), literal("stylesheet", after)
-    result = apply_invariances(
+    result = _core_apply_invariances(
         [Change(change_type=ChangeType.MODIFICATION, old_node=old, new_node=new)],
         old_tree=old, new_tree=new, old_source=before, new_source=after, language="css",
     )
-    assert bool(result.changes) is not equivalent
+    assert bool(result["changes"]) is not equivalent
 
 
 @pytest.mark.parametrize("kind", ["string", "string_literal", "character_literal", "char_literal"])

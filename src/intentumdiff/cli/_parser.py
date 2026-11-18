@@ -119,29 +119,28 @@ def _build_parser() -> argparse.ArgumentParser:
     git_p = sub.add_parser("git", help="Diff a file between two git commits.")
     git_p.set_defaults(repo=".", file=None)
     git_p.add_argument(
-        "_git_pos", nargs="*", action=_GitPositionalsAction,
-        metavar="[REPO] [FILE]",
-        help="Optional repository root followed by file path. "
-             "Omit FILE to diff all changed files; omit REPO to use current directory.",
+        "_git_pos", nargs="*", action=_GitPositionalsAction, metavar="[[REPO] FILE]",
+        help="FILE to review (one positional), or REPO FILE (two). With no positional every "
+             "changed file is reviewed; use --repo for a repository other than the current one.",
     )
     git_p.add_argument(
-        "--old", default=None, metavar="REF",
-        help=(
-            "Old git ref to compare from. "
-            "Defaults to HEAD when --new is the working tree (default mode) or a scope flag, "
-            "and to HEAD~1 when --new is an explicit commit ref."
-        ),
+        "--repo", dest="repo_option", default=None, metavar="REPO",
+        help="Repository to review (default: current directory); all changed files without FILE.",
     )
-    git_p.add_argument("--new", default="", metavar="REF",
-                       help=(
-                           "New git ref (default: working tree; HEAD plus staged). "
-                           "Pass a commit ref to do commit-to-commit diff."
-                       ))
-    git_p.add_argument(
+    git_p.add_argument("--old", default=None, metavar="REF", help=(
+        "Old git ref to compare from. "
+        "Defaults to HEAD when --new is the working tree (default mode) or a scope flag, "
+        "and to HEAD~1 when --new is an explicit commit ref."))
+    # One new side only: --staged/--unpushed/--new silently overrode each other (#319).
+    git_scope = git_p.add_mutually_exclusive_group()
+    git_scope.add_argument("--new", default="", metavar="REF", help=(
+        "New git ref (default: working tree; HEAD plus staged). "
+        "Pass a commit ref to do commit-to-commit diff."))
+    git_scope.add_argument(
         "--staged", action="store_true", default=False,
         help="Diff HEAD against the git index (staged files only).",
     )
-    git_p.add_argument(
+    git_scope.add_argument(
         "--unpushed", action="store_true", default=False,
         help="Diff the remote tracking branch against HEAD (commits not yet pushed).",
     )
@@ -241,7 +240,7 @@ def _build_parser() -> argparse.ArgumentParser:
     file_p.add_argument(
         "--stream",
         action="store_true",
-        help="Yield changes as they are computed rather than waiting for the full diff.",
+        help="Print changes one by one (the full diff is computed first; not incremental).",
     )
     file_p.set_defaults(func=_cmd_file)
 
@@ -322,7 +321,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--strict",
         action="store_true",
         default=False,
-        help="Exit 2 when immutable guardrail violations are found.",
+        help="Exit 2 when any guardrail violation (important or immutable) is found.",
     )
     _add_fuel_arg(check_p)
     check_p.add_argument(
@@ -395,20 +394,14 @@ def _build_parser() -> argparse.ArgumentParser:
         "--allow-source-plugin", dest="allow_source_plugin", action="store_true",
         help="Allow installing from VCS/local/direct-URL sources (disables binary-only check).",
     )
-    pl_add.add_argument(
-        "--strict-registry", dest="strict_registry", action="store_true",
-        help=(
-            "Require the official registry ref to be a full 40-character commit SHA. "
-            "Rejects mutable refs (branch names, tags) for reproducible, tamper-evident installs. "
-            "Recommended for CI and production environments."
-        ),
-    )
+    pl_add.add_argument("--yes", action="store_true", help="Confirm --skip-verify (#314).")
+    pl_add.add_argument("--strict-registry", dest="strict_registry", action="store_true", help=(
+        "Require the official registry ref to be a full 40-character commit SHA. "
+        "Rejects mutable refs (branch names, tags) for reproducible, tamper-evident installs. "
+        "Recommended for CI and production environments."))
     pl_add.set_defaults(
-        save=True,
-        skip_verify=False,
-        allow_source_plugin=False,
-        strict_registry=False,
-        func=_cmd_plugins_add,
+        save=True, skip_verify=False, allow_source_plugin=False, strict_registry=False,
+        yes=False, func=_cmd_plugins_add,
     )
 
     # plugins install
@@ -432,19 +425,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--allow-source-plugin", dest="allow_source_plugin", action="store_true",
         help="Allow installing from VCS/local/direct-URL sources (disables binary-only check).",
     )
-    pl_install.add_argument(
-        "--strict-registry", dest="strict_registry", action="store_true",
-        help=(
-            "Require the official registry ref to be a full 40-character commit SHA. "
-            "Rejects mutable refs for reproducible, tamper-evident installs. "
-            "Recommended for CI and production environments."
-        ),
-    )
+    # No --strict-registry here: install reads manifest pins and never consults the registry,
+    # so the flag had no effect (#314). Pins are checked by `plugins add --strict-registry`.
+    pl_install.add_argument("--yes", action="store_true", help="Confirm --skip-verify.")
     pl_install.set_defaults(
-        skip_verify=False,
-        allow_source_plugin=False,
-        strict_registry=False,
-        func=_cmd_plugins_install,
+        skip_verify=False, allow_source_plugin=False, yes=False, func=_cmd_plugins_install,
     )
 
     # plugins remove
@@ -495,15 +480,15 @@ def _build_parser() -> argparse.ArgumentParser:
     # ── index ─────────────────────────────────────────────────────────────
     index_p = sub.add_parser(
         "index",
-        help="Pre-index a git repository to warm the parse and symbol-index cache.",
+        help="Pre-index a git repository to warm the parse cache.",
         description=(
             "Walk every text file in the repository at the given ref, "
             "parse each one, and store the results in the local cache "
             "directory.  Subsequent diff calls will be faster because the "
             "Wasm parse step is skipped for already-cached files.\n\n"
-            "The symbol index is also persisted so that a second call for "
-            "the same commit returns immediately from cache (use --force to "
-            "rebuild)."
+            "Only the parse cache is reused: the symbol index is rebuilt on every "
+            "run (a cached index is never trusted without proof that it is "
+            "complete for the commit), so a repeated call re-indexes."
         ),
     )
     index_p.add_argument(
@@ -530,7 +515,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--force",
         action="store_true",
         default=False,
-        help="Re-index even if a cached symbol index already exists for this commit.",
+        help="Accepted for compatibility; the symbol index is always rebuilt.",
     )
     index_p.add_argument(
         "--fuel",
@@ -709,7 +694,7 @@ def _build_parser() -> argparse.ArgumentParser:
         description=(
             "Re-diffs each changed file against its last committed state "
             "(WorkingTreeSource) whenever the file is modified on disk. "
-            "Uses OS-native file-system events (watchdog). "
+            "Uses watchdog file-system events; a deleted file is reported, not reviewed. "
             "Press Ctrl+C to stop."
         ),
     )
@@ -777,8 +762,8 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         default=False,
         help=(
-            "Send progressive ChangeStreamEvent responses instead of a single "
-            "SemanticDiff per request."
+            "Send ChangeStreamEvent responses instead of a single SemanticDiff "
+            "per request (events follow the completed diff; not incremental)."
         ),
     )
     watch_p.set_defaults(func=_cmd_watch)
@@ -831,7 +816,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--stream",
         action="store_true",
         default=False,
-        help="Stream progressive semantic events by default for diff requests.",
+        help="Send ChangeStreamEvents (after the completed diff) by default for diff requests.",
     )
     _add_fuel_arg(live_p)
     live_p.set_defaults(func=_cmd_live_server)
@@ -1012,7 +997,7 @@ if _CLICK_RUNTIME_AVAILABLE:
         ("guardrails", "Check protected config guardrail policy."),
         ("plugins", "Manage parser and renderer plugins."),
         ("security-check", "Check installed packages against OSV advisories."),
-        ("index", "Pre-index a git repository to warm caches."),
+        ("index", "Pre-index a git repository to warm the parse cache."),
         ("cache", "Inspect or manage the local cache database."),
         ("diagnostics", "Query local DuckDB fuel diagnostics."),
         ("watch", "Watch files/directories and show semantic diffs on save."),

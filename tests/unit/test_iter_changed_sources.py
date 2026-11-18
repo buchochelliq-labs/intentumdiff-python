@@ -17,10 +17,7 @@ import pytest
 
 from intentumdiff.core.models import ChangeType
 from intentumdiff.differ import SemanticDiffer
-from intentumdiff.sources.git_source import (
-    collect_working_tree_python_sources_fast,
-    iter_changed_sources,
-)
+from intentumdiff.sources.git_source import iter_changed_sources
 from tests.unit.platform_gates import powershell_unavailable
 
 
@@ -262,48 +259,6 @@ class TestIterChangedSources:
         assert new_path == "new_module.py"
         assert staging_status == "untracked"
 
-    def test_fast_working_tree_python_collector_reads_python_changes(self, tmp_path):
-        repo = _make_repo(tmp_path)
-        _commit_file(repo, "app.py", "value = 1\n", "init")
-        (Path(tmp_path) / "app.py").write_text("value = 2\n", encoding="utf-8")
-
-        result = collect_working_tree_python_sources_fast(repo.working_dir, "HEAD")
-
-        assert result is not None
-        sources, fallback_reason = result
-        assert fallback_reason is None
-        assert len(sources) == 1
-        old, new, old_path, new_path, staging_status = sources[0]
-        assert old.replace("\r\n", "\n") == "value = 1\n"
-        assert new.replace("\r\n", "\n") == "value = 2\n"
-        assert old_path == "app.py"
-        assert new_path == "app.py"
-        assert staging_status == "unstaged"
-
-    def test_fast_working_tree_python_collector_reads_untracked_python_changes(
-        self,
-        tmp_path,
-    ):
-        repo = _make_repo(tmp_path)
-        _commit_file(repo, "app.py", "value = 1\n", "init")
-        (Path(tmp_path) / "new_module.py").write_text(
-            "def new_function():\n    return 1\n",
-            encoding="utf-8",
-        )
-
-        result = collect_working_tree_python_sources_fast(repo.working_dir, "HEAD")
-
-        assert result is not None
-        sources, fallback_reason = result
-        assert fallback_reason is None
-        assert len(sources) == 1
-        old, new, old_path, new_path, staging_status = sources[0]
-        assert old == ""
-        assert "def new_function" in new
-        assert old_path == "new_module.py"
-        assert new_path == "new_module.py"
-        assert staging_status == "untracked"
-
     def test_competitor_live_buffer_untracked_file_has_visible_review_evidence(
         self,
         tmp_path,
@@ -344,23 +299,6 @@ class TestIterChangedSources:
         assert not diff.is_fallback
         assert not diff.parse_errors
         assert diff.changes or diff.change_groups
-
-    def test_fast_working_tree_python_collector_rejects_mixed_changes(self, tmp_path):
-        repo = _make_repo(tmp_path)
-        _commit_file(repo, "app.py", "value = 1\n", "init app")
-        _commit_file(repo, "README.md", "old\n", "init readme")
-        (Path(tmp_path) / "app.py").write_text("value = 2\n", encoding="utf-8")
-        (Path(tmp_path) / "README.md").write_text("new\n", encoding="utf-8")
-
-        result = collect_working_tree_python_sources_fast(repo.working_dir, "HEAD")
-
-        assert result is not None
-        sources, fallback_reason = result
-        assert sources == []
-        assert fallback_reason == (
-            "certified commit JSON requires all changed files to be Python"
-        )
-
 
 # ---------------------------------------------------------------------------
 # SemanticDiffer.diff_commit
@@ -800,7 +738,6 @@ class TestCliGitCommitWide:
 
     def test_cli_hint_for_ref_looking_repo_path(self, tmp_path, monkeypatch, capsys):
         """When REPO looks like a branch name, the error hints about --new."""
-        import sys
 
         from intentumdiff.cli import _build_parser, _cmd_git
 
@@ -817,7 +754,6 @@ class TestCliGitCommitWide:
 
     def test_cli_no_such_path_hint(self, tmp_path, monkeypatch, capsys):
         """'git new main' → error mentions --new hint when 'new' is a non-path word."""
-        import sys
 
         from intentumdiff.cli import _build_parser, _cmd_git
 

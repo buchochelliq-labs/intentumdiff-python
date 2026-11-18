@@ -11,7 +11,7 @@ from __future__ import annotations
 import os
 from collections.abc import Mapping
 from enum import Enum, IntEnum
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from types import MappingProxyType
 from typing import NamedTuple, Any, Literal
 
@@ -21,6 +21,7 @@ from pydantic import (
     Field,
     PrivateAttr,
     field_serializer,
+    model_serializer,
     field_validator,
     model_validator,
 )
@@ -231,6 +232,17 @@ class NodeFacts(BaseModel, frozen=True):
     attribute_count: int | None = None
     nested_block_count: int | None = None
     has_nested_block: bool | None = None
+
+    # Declaration facts (Core #308, for vscode#132). Closed enums only, never source text.
+    #: Declared visibility, decided by core's per-language rules; ``"unknown"`` when the
+    #: rules cannot decide.
+    visibility: Literal[
+        "public", "internal", "private", "protected", "special", "unknown"
+    ] | None = None
+    #: What makes a ``body == "stub"`` body a placeholder; set only for stub bodies.
+    stub_sentinel: Literal[
+        "pass", "ellipsis", "not_implemented", "docstring_only", "todo_macro", "panic"
+    ] | None = None
 
 
 class SemanticNode(BaseModel, frozen=True):
@@ -453,6 +465,122 @@ class ChangeStreamEvent(BaseModel, frozen=True):
 
 
 # ---------------------------------------------------------------------------
+# Review completeness (core #252 / #312)
+# ---------------------------------------------------------------------------
+
+
+class _CoreDto(BaseModel):
+    """A core-authored DTO marshalled verbatim: strict types, unknown fields kept.
+
+    Serialisation emits exactly the keys core sent (absent optional keys stay absent),
+    so JSON output passes core's DTO through unchanged.
+    """
+
+    model_config = ConfigDict(frozen=True, strict=True, extra="allow")
+
+    @model_serializer(mode="wrap")
+    def _verbatim(self, handler: Any) -> dict[str, Any]:
+        data = handler(self)
+        sent = self.model_fields_set
+        aliases = {name: field.alias for name, field in type(self).model_fields.items()
+                   if field.alias}
+        keys = sent | {aliases[name] for name in sent if name in aliases}
+        return {aliases.get(key, key): value for key, value in data.items() if key in keys}
+
+
+class IncompleteSourceRange(_CoreDto):
+    """A changed line hunk (zero-based lines, exclusive end bytes)."""
+
+    old_start_byte: int = Field(ge=0)
+    old_end_byte: int = Field(ge=0)
+    new_start_byte: int = Field(ge=0)
+    new_end_byte: int = Field(ge=0)
+    old_start_line: int = Field(ge=0)
+    old_end_line: int = Field(ge=0)
+    new_start_line: int = Field(ge=0)
+    new_end_line: int = Field(ge=0)
+
+
+class ReproRegionSide(_CoreDto):
+    start_line: int = Field(ge=0)
+    start_col: int = Field(ge=0)
+    end_line: int = Field(ge=0)
+    end_col: int = Field(ge=0)
+    bytes: int = Field(ge=0)
+
+
+class ReproRegion(_CoreDto):
+    index: int = Field(ge=0)
+    old: ReproRegionSide
+    new: ReproRegionSide
+    old_skeleton: str | None = None
+    old_shape: str | None = None
+    new_skeleton: str | None = None
+    new_shape: str | None = None
+
+
+class ReproPlugin(_CoreDto):
+    id: str | None
+    version: str | None
+
+
+class ReproSuppressedKind(_CoreDto):
+    change_type: str
+    node_type: str
+    count: int = Field(ge=0)
+
+
+class ReproSuppression(_CoreDto):
+    # ``pass`` is a Python keyword; the DTO key is kept verbatim through the alias.
+    pass_: str = Field(alias="pass")
+    removed: list[ReproSuppressedKind]
+    added: list[ReproSuppressedKind]
+
+
+class ReproOutline(_CoreDto):
+    """Core's sanitised structural outline: no source text, filenames or paths."""
+
+    schema_version: int
+    reason: str
+    core_version: str
+    language: str
+    plugin: ReproPlugin | None
+    regions: list[ReproRegion]
+    regions_truncated: bool
+    structure_available: bool
+    suppressions: list[ReproSuppression] | None
+    placeholder_count: int = Field(ge=0)
+
+
+class IncompleteReport(_CoreDto):
+    """Core's pre-built bug report. Bindings preview it and open ``issue_url`` only on
+    explicit user confirmation; ``truncated`` means the URL carries a shortened body."""
+
+    title: str
+    body_markdown: str
+    truncated: bool
+    issue_url: str
+    outline: ReproOutline
+
+
+class IncompleteReview(_CoreDto):
+    """Why core could not explain a source delta; ``message`` is shown verbatim."""
+
+    reason: str
+    message: str
+    report_url: str
+    language: str
+    core_version: str
+    source_ranges: list[IncompleteSourceRange]
+    source_ranges_truncated: bool
+    source_ranges_available: bool
+    report: IncompleteReport
+
+
+ReviewCompleteness = Literal["complete", "equivalent", "incomplete"]
+
+
+# ---------------------------------------------------------------------------
 # Diff result
 # ---------------------------------------------------------------------------
 
@@ -479,6 +607,15 @@ class SemanticDiff(BaseModel, frozen=True):
     # "unstaged" = saved but not staged, "staged" = git-add'd, "unpushed" = committed but not
     # yet pushed to the remote.  None for an ordinary commit-to-commit diff.
     staging_status: str | None = None
+    #: The coarse kind of content core reviewed (Core #308, for vscode#133), from core's
+    #: closed table keyed on the routed language. States what was reviewed, never a risk.
+    content_class: Literal["code", "docs", "config", "data", "text"] | None = None
+    #: Core's completeness verdict (core #252): ``complete``, ``equivalent`` (proved, see
+    #: ``metadata.equivalence_proof``) or ``incomplete``. Never derived in Python; ``None``
+    #: only on a DTO that did not come from core.
+    completeness: ReviewCompleteness | None = None
+    #: Set by core exactly when ``completeness == "incomplete"``; not a clean review.
+    incomplete: IncompleteReview | None = None
     metadata: Mapping[str, Any] = Field(default_factory=dict)
 
     @field_validator("metadata", mode="before")
@@ -503,43 +640,12 @@ class SemanticDiff(BaseModel, frozen=True):
             raise ValueError(
                 "is_style_only and has_semantic_changes cannot both be True"
             )
+        # Shape check only: core sends ``incomplete`` exactly for an incomplete review.
+        if (self.completeness == "incomplete") != (self.incomplete is not None):
+            raise ValueError(
+                "incomplete must be an object exactly when completeness is 'incomplete'"
+            )
         return self
-
-    @classmethod
-    def style_only(
-        cls,
-        old_filename: str,
-        new_filename: str,
-        language: str,
-        *,
-        change_groups: list[ChangeGroup] | None = None,
-        metadata: Mapping[str, Any] | None = None,
-    ) -> SemanticDiff:
-        """Convenience constructor for the style-only shortcut."""
-        return cls(
-            old_filename=old_filename,
-            new_filename=new_filename,
-            language=language,
-            change_groups=change_groups or [],
-            has_semantic_changes=False,
-            is_style_only=True,
-            metadata=metadata or {},
-        )
-
-    @property
-    def file_renamed(self) -> bool:
-        """True when the file was renamed in-place (same directory, different basename)."""
-        old = PurePosixPath(self.old_filename)
-        new = PurePosixPath(self.new_filename)
-        return old.name != new.name and old.parent == new.parent
-
-    @property
-    def file_moved(self) -> bool:
-        """True when the file was moved to a different directory (with or without rename)."""
-        return (
-            PurePosixPath(self.old_filename).parent
-            != PurePosixPath(self.new_filename).parent
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -572,21 +678,33 @@ class EditDelta(BaseModel, frozen=True):
 # ---------------------------------------------------------------------------
 
 
-def _native_rust_core_default() -> bool:
-    """Return the default certified Rust-core policy.
+_RUST_CORE_ENV_VARS = ("INTENTUMDIFF_RUST_CORE", "INTENTUMDIFF_EXPERIMENTAL_RUST_CORE")
+_RUST_CORE_ON_VALUES = frozenset({"1", "true", "yes", "on", "auto", "native"})
 
-    IntentumDiff ships the first-party Rust core in release wheels, so supported
-    native paths should use it automatically.  The legacy
-    ``INTENTUMDIFF_EXPERIMENTAL_RUST_CORE`` env var is still accepted for compatibility,
-    while ``INTENTUMDIFF_RUST_CORE=0`` is the explicit fallback escape hatch.
+
+class RustCoreRequiredError(ValueError):
+    """The configuration asked to run without the Rust core, which is mandatory."""
+
+
+def _native_rust_core_default() -> bool:
+    """Validate the legacy Rust-core environment switches; the core is mandatory.
+
+    ``INTENTUMDIFF_RUST_CORE`` (and the legacy ``INTENTUMDIFF_EXPERIMENTAL_RUST_CORE``)
+    may be unset, empty or an "on" value. There is no Python engine to fall back to, so
+    a disable value (``0``/``false``/``off``/...) or any unrecognised value raises
+    instead of silently routing every file to a fallback review.
     """
 
-    raw = os.getenv("INTENTUMDIFF_RUST_CORE")
-    if raw is None:
-        raw = os.getenv("INTENTUMDIFF_EXPERIMENTAL_RUST_CORE")
-    if raw is None or raw.strip() == "":
-        return True
-    return raw.strip().lower() in {"1", "true", "yes", "on", "auto", "native"}
+    for name in _RUST_CORE_ENV_VARS:
+        raw = os.getenv(name)
+        if raw is None or raw.strip() == "" or raw.strip().lower() in _RUST_CORE_ON_VALUES:
+            continue
+        raise RustCoreRequiredError(
+            f"{name}={raw.strip()!r} is not supported: the Rust core is mandatory and cannot "
+            f"be disabled (there is no Python engine). Unset {name} or set it to one of "
+            f"{sorted(_RUST_CORE_ON_VALUES)}."
+        )
+    return True
 
 
 class Match(NamedTuple):
@@ -629,7 +747,17 @@ class DiffConfig(BaseModel):
     experimental_rust_core: bool = Field(
         default_factory=_native_rust_core_default,
     )
-    """Use the certified Rust core for supported first-party native paths."""
+    """Compatibility field: the Rust core is mandatory, so only ``True`` is accepted."""
+
+    @field_validator("experimental_rust_core")
+    @classmethod
+    def _rust_core_is_mandatory(cls, value: bool) -> bool:
+        if value is not True:
+            raise RustCoreRequiredError(
+                "experimental_rust_core=False is not supported: the Rust core is mandatory "
+                "(there is no Python engine)."
+            )
+        return value
     diagnostics_max_events: int = Field(default=500, ge=0)
     guardrails_enabled: bool = True
     guardrails_strict: bool = False
@@ -647,7 +775,8 @@ class DiffConfig(BaseModel):
     # Extra CST node types to treat as trivia (merged with plugin defaults)
     extra_trivia_types: list[str] = Field(default_factory=list)
 
-    # Plugin control
+    # Plugin control. allowed_plugins follows core's parser_allowlist_matches rule (#311):
+    # None = every parser, [] = none, else exact grammar / plugin / alias / language ids.
     allowed_plugins: list[str] | None = None
     strict_plugins: bool = False
 
@@ -798,6 +927,22 @@ class CrossFileChange(BaseModel, frozen=True):
     description: str = ""
 
 
+class CommitIndexError(BaseModel, frozen=True):
+    """One changed file core could not index for cross-file analysis (#298).
+
+    ``code`` is core's stable machine code (``fuel_exceeded``, ``output_limit_exceeded``,
+    ``malformed_tree``, ``parser_error``); ``reason`` is the human-readable text.
+    """
+
+    path: str
+    old_filename: str = ""
+    new_filename: str = ""
+    language: str = ""
+    side: Literal["old", "new", "both"]
+    code: str
+    reason: str = ""
+
+
 class GuardrailViolation(BaseModel, frozen=True):
     """A project policy rule matched a protected semantic change."""
 
@@ -816,17 +961,22 @@ class GuardrailViolation(BaseModel, frozen=True):
 
 
 class GuardrailCheckResult(BaseModel, frozen=True):
-    """CI-friendly summary of protected semantic guardrail evaluation."""
+    """CI-friendly summary of protected semantic guardrail evaluation.
+
+    The gate (``strict``/``passed``) and the counts are evidence supplied by the producer and
+    carried as given (#296): the DTO never recomputes or overrides them. Absent gate fields,
+    or counts that disagree with ``violations``, are rejected.
+    """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     violations: list[GuardrailViolation] = Field(default_factory=list)
-    violation_count: int = 0
-    immutable_count: int = 0
-    important_count: int = 0
-    checked_files: int = 0
-    strict: bool = False
-    passed: bool = True
+    violation_count: int = Field(ge=0, strict=True)
+    immutable_count: int = Field(ge=0, strict=True)
+    important_count: int = Field(ge=0, strict=True)
+    checked_files: int = Field(ge=0, strict=True)
+    strict: bool = Field(strict=True)
+    passed: bool = Field(strict=True)
     metadata: Mapping[str, Any] = Field(default_factory=dict)
 
     @field_validator("metadata", mode="before")
@@ -846,19 +996,19 @@ class GuardrailCheckResult(BaseModel, frozen=True):
         return dict(v)
 
     @model_validator(mode="after")
-    def _derive_counts(self) -> GuardrailCheckResult:
-        immutable_count = sum(
-            violation.severity == GuardrailSeverity.IMMUTABLE
-            for violation in self.violations
+    def _reject_inconsistent_counts(self) -> GuardrailCheckResult:
+        # Structural evidence check only: reject, never repair. The gate is not checked here.
+        supplied = (self.violation_count, self.immutable_count, self.important_count)
+        carried = (
+            len(self.violations),
+            sum(v.severity == GuardrailSeverity.IMMUTABLE for v in self.violations),
+            sum(v.severity == GuardrailSeverity.IMPORTANT for v in self.violations),
         )
-        important_count = sum(
-            violation.severity == GuardrailSeverity.IMPORTANT
-            for violation in self.violations
-        )
-        object.__setattr__(self, "violation_count", len(self.violations))
-        object.__setattr__(self, "immutable_count", immutable_count)
-        object.__setattr__(self, "important_count", important_count)
-        object.__setattr__(self, "passed", not (self.strict and immutable_count))
+        if supplied != carried:
+            raise ValueError(
+                "guardrail check counts (violation, immutable, important) "
+                f"{supplied} disagree with the carried violations {carried}"
+            )
         return self
 
 
@@ -874,3 +1024,10 @@ class CommitDiff(BaseModel, frozen=True):
     file_diffs: list[SemanticDiff] = Field(default_factory=list)
     cross_file_changes: list[CrossFileChange] = Field(default_factory=list)
     parse_errors: list[str] = Field(default_factory=list)
+    # Commit cross-file index completeness, as reported by core (#298). ``None`` when the
+    # producer did not run core's commit index (the fields are core's, never inferred here).
+    # ``cross_file_changes`` proves "no cross-file change" only when the status is "complete".
+    cross_file_index_status: Literal["complete", "partial"] | None = None
+    cross_file_index_complete: bool | None = None
+    indexed_file_count: int | None = None
+    index_errors: list[CommitIndexError] = Field(default_factory=list)

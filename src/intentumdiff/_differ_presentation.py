@@ -1,21 +1,11 @@
-"""Tree, markdown-presentation, fallback-diff and stream helpers for intentumdiff.differ."""
+"""Tree and fallback-diff helpers for intentumdiff.differ."""
 
 from __future__ import annotations
 
-import hashlib
-import json
 import logging
 from typing import Any
 
-from intentumdiff.analysis.text_review import (
-    PresentationResult,
-)
 from intentumdiff.core.models import (
-    Change,
-    ChangeGroup,
-    ChangeGroupKind,
-    ChangeType,
-    NodePosition,
     SemanticDiff,
     SemanticNode,
 )
@@ -44,37 +34,6 @@ def _validate_tree_ids(root: SemanticNode, context: str) -> None:
         )
 
 
-def _root_structural_hash(node: SemanticNode) -> str:
-    """Return the structural hash of a SemanticNode root (already computed)."""
-    return node.structural_hash
-
-
-def _node_to_dict(node: SemanticNode) -> dict[str, Any]:
-    return json.loads(node.model_dump_json())
-
-
-def _compute_structural_hash_for_tree(cst_json: str) -> str:
-    """
-    Compute the structural hash of the FILTERED (trivia-stripped) CST.
-    Used for the style-only shortcut before running the full diff algorithm.
-    """
-    from intentumdiff.plugins.loader import _structural_hash_impl
-
-    return _structural_hash_impl(cst_json)
-
-
-def _count_cst_nodes(cst_json: str) -> int:
-    """Count total nodes in a CST JSON string (recursive depth-first)."""
-
-    def _count(node: Any) -> int:
-        return 1 + sum(_count(c) for c in node.get("children", ()))
-
-    try:
-        return _count(json.loads(cst_json))
-    except Exception:
-        return 0
-
-
 def _count_semantic_nodes(root: SemanticNode) -> int:
     return 1 + len(root.descendants())
 
@@ -82,31 +41,6 @@ def _count_semantic_nodes(root: SemanticNode) -> int:
 def _empty_semantic_tree(language: str) -> SemanticNode:
     from intentumdiff.rust_core import _c_abi_call
     return SemanticNode.model_validate(_c_abi_call("empty_semantic_tree", language))
-
-
-def _markdown_presentation(presented: PresentationResult, *, old_source: str, new_source: str,
-                           old_filename: str, new_filename: str, phase: str) -> PresentationResult:
-    """DTO adapter for complete Rust reconciliation; core errors propagate."""
-    from intentumdiff.rust_core import _c_abi_call, _require_source_anchored_changes
-    result = _c_abi_call("reconcile_markdown", {
-        "changes": [change.model_dump(mode="json") for change in presented.changes],
-        "change_groups": [group.model_dump(mode="json") for group in presented.change_groups],
-        "ignored_style_changes": presented.ignored_style_changes,
-    }, old_source, new_source, old_filename, new_filename, phase)
-    return PresentationResult(
-        changes=[Change.model_validate(value) for value in
-                 _require_source_anchored_changes(result["changes"], "Rust Markdown reconciliation")],
-        change_groups=[ChangeGroup.model_validate(value) for value in result["change_groups"]],
-        ignored_style_changes=result["ignored_style_changes"],
-    )
-
-
-def _markdown_section_move_presentation(presented: PresentationResult, **kwargs: Any) -> PresentationResult:
-    return _markdown_presentation(presented, phase="moves", **kwargs)
-
-
-def _markdown_section_heading_rename_presentation(presented: PresentationResult, **kwargs: Any) -> PresentationResult:
-    return _markdown_presentation(presented, phase="renames", **kwargs)
 
 
 def _has_error_node(tree: SemanticNode) -> bool:
@@ -125,11 +59,6 @@ def _token_fallback_diff(
     result = source_fallback_diff(old_content, new_content, old_filename,
         new_filename, language, str(details.get("fallback_reason", "parse_errors")))
     return result.model_copy(update={"metadata": {**details, **dict(result.metadata)}})
-
-
-# ---------------------------------------------------------------------------
-# Streaming helpers
-# ---------------------------------------------------------------------------
 
 
 def _enrich_literal_labels(root: SemanticNode, source: str) -> SemanticNode:

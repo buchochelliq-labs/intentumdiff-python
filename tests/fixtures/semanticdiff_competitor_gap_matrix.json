@@ -294,7 +294,6 @@
       "implementation_owner": "rust_wasm_parser",
       "implementation_paths": [
         "crates/parsers/json-parser/src/lib.rs",
-        "src/intentumdiff/analysis/keyed_profiles.py",
         "src/intentumdiff/analysis/schema_resolver.py"
       ],
       "next_action": "Keep adding schema-specific config fixtures as new profiles ship.",

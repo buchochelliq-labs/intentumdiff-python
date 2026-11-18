@@ -241,9 +241,10 @@ def _has_position_evidence(diff: SemanticDiff) -> bool:
 
 def _change_family(change_type: str) -> str:
     upper = change_type.upper()
+    # ChangeType values are ADDITION / DELETION; "DELETE" is not a substring of "DELETION".
     if "ADD" in upper or "INSERT" in upper:
         return "addition"
-    if "DELETE" in upper or "REMOVE" in upper:
+    if "DELET" in upper or "REMOV" in upper:
         return "deletion"
     if "MOVE" in upper or "RENAME" in upper or "REFACTOR" in upper:
         return "refactoring"

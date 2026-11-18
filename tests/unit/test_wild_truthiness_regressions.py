@@ -770,7 +770,7 @@ def test_yaml_block_to_flow_style_is_zero_change(
     Source: difftastic #417, #723.
 
     Root cause: the cataloged ``data.yaml.representation_equivalence`` rule
-    at ``invariances/rules.yaml`` is ``status: catalog, evaluator: null`` —
+    in core's invariance catalogue is ``status: catalog, evaluator: null`` —
     i.e. documented but unimplemented. The ``flow_node`` MODIFICATION
     surfaces on both matchers once the Phase A cascade guard stops hiding
     it. Phase C of the noise-suppression retune implements the evaluator.
@@ -1289,7 +1289,12 @@ def test_javascript_numeric_separator_is_zero_change(
 def test_json_number_spelling_is_zero_change(
     matcher: MatcherChoice,
 ) -> None:
-    """``1e3`` and ``1000`` are the same JSON number (IEEE-754 double)."""
+    """``1e3`` and ``1000`` are the same JSON number (exact decimal).
+
+    Core #320 proves the respelling equivalent: the review is ``equivalent`` with
+    ``keyed_data.number_exact_decimal_respelling`` as its proof (not style-only), and
+    each respelled pair stays visible as an ``IGNORED_STYLE`` group as written.
+    """
     diff = _diff(
         '{"count": 1000, "rate": 1.0}\n',
         '{"count": 1e3, "rate": 1}\n',
@@ -1297,15 +1302,15 @@ def test_json_number_spelling_is_zero_change(
         filename="cfg.json",
         matcher=matcher,
     )
-    try:
-        _assert_no_change(diff, matcher=matcher, case="JSON number spelling")
-    except AssertionError:
-        if matcher == 'rust' or matcher == 'python':
-            pytest.xfail(
-                'Rust core invariance engine does not yet' \
-                'implement IEEE-754 number literal equivalence.'
-            )
-        raise
+    _assert_no_change(diff, matcher=matcher, case="JSON number spelling")
+    assert diff.completeness == "equivalent"
+    assert diff.metadata["equivalence_proof"] == "keyed_data.number_exact_decimal_respelling"
+    assert not diff.is_style_only and not diff.has_semantic_changes
+    assert sorted((g.kind.value, tuple(g.old_labels), tuple(g.new_labels))
+                  for g in diff.change_groups) == [
+        ("IGNORED_STYLE", ("1.0",), ("1",)),
+        ("IGNORED_STYLE", ("1000",), ("1e3",)),
+    ]
 
 
 def test_xml_cdata_entity_equivalence_is_zero_change(

@@ -82,37 +82,58 @@ class TestChange:
 
 
 class TestSemanticDiff:
-    def test_style_only_constructor(self):
-        d = SemanticDiff.style_only("a.py", "b.py", "python")
-        assert d.is_style_only
-        assert not d.has_semantic_changes
-        assert d.changes == []
-        assert d.change_groups == []
+    def test_no_python_style_only_verdict_constructor(self):
+        # #302: the style-only verdict is core-certified; the DTO only carries it.
+        assert not hasattr(SemanticDiff, "style_only")
 
-    def test_style_only_constructor_accepts_evidence(self):
-        group = ChangeGroup(
-            kind=ChangeGroupKind.IGNORED_STYLE,
-            rule_id="test.style",
-            metadata={"reason": "ignored"},
-        )
-        d = SemanticDiff.style_only(
-            "a.py",
-            "b.py",
-            "python",
-            change_groups=[group],
-            metadata={"ignored_style_changes": [{"rule_id": "test.style"}]},
-        )
+    def test_core_style_only_verdict_is_transported_unchanged(self):
+        canned = {
+            "old_filename": "a.py",
+            "new_filename": "b.py",
+            "language": "python",
+            "changes": [],
+            "change_groups": [{
+                "kind": "IGNORED_STYLE",
+                "rule_id": "core.authored.rule",
+                "metadata": {"reason": "core-authored"},
+            }],
+            "has_semantic_changes": False,
+            "is_style_only": True,
+            "metadata": {"ignored_style_changes": [{"rule_id": "core.authored.rule"}]},
+        }
+        d = SemanticDiff.model_validate(canned)
+        dumped = d.model_dump(mode="json")
 
-        assert d.is_style_only
-        assert d.change_groups == [group]
-        assert d.metadata["ignored_style_changes"][0]["rule_id"] == "test.style"
+        assert {key: dumped[key] for key in canned if key != "change_groups"} == {
+            key: value for key, value in canned.items() if key != "change_groups"
+        }
+        assert dumped["change_groups"][0]["rule_id"] == "core.authored.rule"
+        assert dumped["change_groups"][0]["metadata"] == {"reason": "core-authored"}
+
+    def test_dto_does_not_classify_file_lifecycle_from_paths(self):
+        # #303: rename/move is a core lifecycle fact; the DTO carries the filenames verbatim
+        # and derives nothing from them.
+        canned = {
+            "old_filename": "src/old/a.py",
+            "new_filename": "src/new/b.py",
+            "language": "python",
+            "metadata": {"file_lifecycle": "modified"},
+        }
+        d = SemanticDiff.model_validate(canned)
+
+        assert not hasattr(SemanticDiff, "file_renamed")
+        assert not hasattr(SemanticDiff, "file_moved")
+        dumped = d.model_dump(mode="json")
+        assert {key: dumped[key] for key in canned} == canned
+        assert not {"file_renamed", "file_moved", "renamed", "moved"} & set(dumped)
 
     def test_style_only_metadata_is_immutable_copy_and_json_safe(self):
         metadata = {"ignored_style_changes": [{"rule_id": "test.style"}]}
-        d = SemanticDiff.style_only(
-            "a.py",
-            "b.py",
-            "python",
+        d = SemanticDiff(
+            old_filename="a.py",
+            new_filename="b.py",
+            language="python",
+            is_style_only=True,
             metadata=metadata,
         )
 
@@ -136,7 +157,8 @@ class TestSemanticDiff:
             )
 
     def test_model_json_round_trip(self):
-        d = SemanticDiff.style_only("a.py", "b.py", "python")
+        d = SemanticDiff(old_filename="a.py", new_filename="b.py", language="python",
+                         is_style_only=True)
         restored = SemanticDiff.model_validate_json(d.model_dump_json())
         assert restored == d
 
@@ -245,6 +267,7 @@ class TestSemanticDiff:
             violations=[violation],
             violation_count=1,
             immutable_count=1,
+            important_count=0,
             checked_files=1,
             strict=True,
             passed=False,
@@ -256,7 +279,43 @@ class TestSemanticDiff:
         assert result.metadata["policy"] == "intentumdiff.yaml"
         assert result.model_dump(mode="json")["metadata"] == {"policy": "intentumdiff.yaml"}
 
-    def test_guardrail_check_result_derives_counts_from_violations(self):
+    def test_guardrail_check_result_preserves_the_supplied_gate(self):
+        # #296: the DTO carries the producer's gate; it never recomputes "passed".
+        violation = GuardrailViolation(
+            rule_id="prod-host",
+            severity=GuardrailSeverity.IMMUTABLE,
+            file="config.yaml",
+            language="yaml",
+            semantic_path="server.host",
+        )
+        evidence = dict(violation_count=1, immutable_count=1, important_count=0, checked_files=1)
+
+        advisory = GuardrailCheckResult(violations=[violation], strict=False, passed=False, **evidence)
+        gated = GuardrailCheckResult(violations=[violation], strict=True, passed=True, **evidence)
+
+        assert advisory.model_dump(mode="json")["passed"] is False
+        assert gated.model_dump(mode="json")["passed"] is True
+        restored = GuardrailCheckResult.model_validate_json(advisory.model_dump_json())
+        assert restored == advisory
+
+    @pytest.mark.parametrize("missing", ["passed", "strict", "violation_count", "checked_files"])
+    def test_guardrail_check_result_rejects_absent_evidence(self, missing):
+        payload = {
+            "violations": [], "violation_count": 0, "immutable_count": 0,
+            "important_count": 0, "checked_files": 0, "strict": False, "passed": True,
+        }
+        del payload[missing]
+        with pytest.raises(ValidationError):
+            GuardrailCheckResult.model_validate(payload)
+
+    def test_guardrail_check_result_rejects_non_bool_gate(self):
+        with pytest.raises(ValidationError):
+            GuardrailCheckResult.model_validate({
+                "violations": [], "violation_count": 0, "immutable_count": 0,
+                "important_count": 0, "checked_files": 0, "strict": False, "passed": "yes",
+            })
+
+    def test_guardrail_check_result_rejects_inconsistent_counts(self):
         immutable = GuardrailViolation(
             rule_id="prod-host",
             severity=GuardrailSeverity.IMMUTABLE,
@@ -272,16 +331,16 @@ class TestSemanticDiff:
             }
         )
 
-        result = GuardrailCheckResult(
-            violations=[immutable, important],
-            checked_files=1,
-            strict=True,
-        )
-
-        assert result.violation_count == 2
-        assert result.immutable_count == 1
-        assert result.important_count == 1
-        assert result.passed is False
+        with pytest.raises(ValidationError, match="disagree"):
+            GuardrailCheckResult(
+                violations=[immutable, important],
+                violation_count=2,
+                immutable_count=2,
+                important_count=0,
+                checked_files=1,
+                strict=True,
+                passed=False,
+            )
 
 
 class TestDiffConfig:

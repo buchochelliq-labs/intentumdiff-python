@@ -95,3 +95,27 @@ class PluginLoadError(PluginError):
 
 class PluginSecurityError(PluginLoadError):
     """A security gate denied loading; parser fallback must not bypass the denial."""
+
+
+class RegistryManifestError(RuntimeError):
+    """The plugin registry manifest is not valid YAML or fails core's validator (#309, #329).
+
+    A ``RuntimeError``, the error :func:`~intentumdiff.plugins.hub.fetch_official_registry`
+    documents for a registry it cannot fetch or parse. The message lists every violation;
+    ``errors`` carries core's ``validate_registry_manifest`` errors unchanged, each a
+    ``{"path": <RFC 6901 pointer>, "message": str}`` dict (empty for a YAML/JSON error).
+    """
+
+    def __init__(self, message: str, errors: list[dict[str, str]] | None = None) -> None:
+        super().__init__(message)
+        self.errors: list[dict[str, str]] = list(errors or [])
+
+
+class RegistryManifestWarning(UserWarning):
+    """Core's validator rejected part of the plugin registry manifest; loading continued (#309).
+
+    Entries core reports under ``/plugins/<name>`` are skipped and every other entry loads; a
+    manifest whose top level is unusable (core errors at ``/`` or ``/plugins``) loads none. The
+    message lists core's ``"<pointer>: <message>"`` errors and names the entries not loaded.
+    Strict tooling uses :func:`~intentumdiff.plugins.registry_schema.check_registry_manifest`.
+    """

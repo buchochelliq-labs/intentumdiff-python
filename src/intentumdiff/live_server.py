@@ -327,19 +327,12 @@ if sys.platform == "win32":  # pragma: no cover
         DACL when the module-level struct could not be built.
         """
         handle = ctypes.windll.kernel32.CreateNamedPipeW(
-            name,
-            _PIPE_ACCESS_DUPLEX,
-            _PIPE_TYPE_BYTE | _PIPE_WAIT,
-            _PIPE_UNLIMITED_INSTANCES,
-            65536,
-            65536,
-            0,
+            name, _PIPE_ACCESS_DUPLEX, _PIPE_TYPE_BYTE | _PIPE_WAIT, _PIPE_UNLIMITED_INSTANCES,
+            65536, 65536, 0,
             ctypes.byref(_pipe_sa) if _pipe_sa is not None else None,  # type: ignore[name-defined]
         )
         if handle == _INVALID_HANDLE:
-            raise OSError(
-                f"CreateNamedPipeW failed (error {ctypes.GetLastError()})"
-            )
+            raise OSError(f"CreateNamedPipeW failed (error {ctypes.GetLastError()})")
         return handle
 
     def _open_pipe_client(name: str) -> None:
@@ -386,9 +379,7 @@ if sys.platform == "win32":  # pragma: no cover
             server stop-event is set."""
             avail = _wt.DWORD(0)
             while not self._stop_event.is_set():
-                ok = _PeekNamedPipe(
-                    self._handle, None, 0, None, ctypes.byref(avail), None
-                )
+                ok = _PeekNamedPipe(self._handle, None, 0, None, ctypes.byref(avail), None)
                 if not ok:
                     return b""  # pipe broken
                 if avail.value > 0:
@@ -403,10 +394,9 @@ if sys.platform == "win32":  # pragma: no cover
             return b""  # stop requested
 
         def sendall(self, data: bytes) -> None:
-            n_written = _wt.DWORD(0)
-            ctypes.windll.kernel32.WriteFile(
-                self._handle, data, len(data), ctypes.byref(n_written), None
-            )
+            n, kernel32 = _wt.DWORD(0), ctypes.windll.kernel32  # a failed WriteFile counts 0
+            _write_all(lambda chunk: kernel32.WriteFile(
+                self._handle, chunk, len(chunk), ctypes.byref(n), None) and n.value, data)
 
         def close(self) -> None:
             if not self._closed:
@@ -1466,6 +1456,16 @@ def _write_line(stream: "Any", obj: dict[str, Any]) -> None:
         stream.flush()
     except OSError:
         pass
+
+
+def _write_all(write: Any, data: bytes) -> None:
+    """Send all of *data* via ``write(chunk) -> bytes written`` (0 = failed), or raise (#327)."""
+    view = memoryview(data)
+    while view:
+        written = write(bytes(view))
+        if not written:  # WriteFile failed, or wrote nothing: the peer is gone
+            raise BrokenPipeError("named-pipe write failed before the whole response was sent")
+        view = view[written:]
 
 
 def _write_line_bytes(sock: socket.socket, obj: dict[str, Any]) -> None:

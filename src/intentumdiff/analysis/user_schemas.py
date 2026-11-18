@@ -51,23 +51,8 @@ logger = logging.getLogger(__name__)
 USER_SCHEMA_DIR_ENV = "INTENTUMDIFF_USER_SCHEMA_DIR"
 USER_SCHEMAS_TOGGLE_ENV = "INTENTUMDIFF_USER_SCHEMAS"
 
-# Provider-id roots owned by built-in detection; a registered language_id must
-# not collide with these (the invariance guard from issue #63's acceptance).
-BUILTIN_PROVIDER_ROOTS = frozenset(
-    {
-        "adf",
-        "azure-pipelines",
-        "databricks",
-        "dbt",
-        "embedded",
-        "github-actions",
-        "kubernetes",
-        "none",
-        "openapi",
-        "user",
-    }
-)
-
+# Built-in provider roots (and the collision rule for registered language ids) are owned
+# by core `schema_profiles` "validate" (#298).
 _DESCRIPTOR_SUFFIXES = (".yml", ".yaml", ".json")
 
 

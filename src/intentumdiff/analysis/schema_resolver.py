@@ -6,6 +6,7 @@ import hashlib
 import ipaddress
 import json
 import logging
+import math
 import os
 import socket
 import ssl
@@ -32,66 +33,8 @@ logger = logging.getLogger(__name__)
 DEFAULT_SCHEMA_TTL_SECONDS = 86_400
 DEFAULT_TIMEOUT_SECONDS = 5.0
 DEFAULT_MAX_BYTES = 5 * 1024 * 1024
-IDENTITY_FIELD_CANDIDATES = frozenset(
-    {
-        "git",
-        "id",
-        "job_cluster_key",
-        "key",
-        "local",
-        "name",
-        "operationid",
-        "package",
-        "task",
-        "task_key",
-    }
-)
-
-DBT_SCHEMA_BASE = "https://raw.githubusercontent.com/dbt-labs/dbt-jsonschema/main/schemas/latest"
-DBT_SCHEMA_URLS = {
-    "dbt_cloud": f"{DBT_SCHEMA_BASE}/dbt_cloud-latest.json",
-    "dbt_project": f"{DBT_SCHEMA_BASE}/dbt_project-latest.json",
-    "dbt_yml_files": f"{DBT_SCHEMA_BASE}/dbt_yml_files-latest.json",
-    "dependencies": f"{DBT_SCHEMA_BASE}/dependencies-latest.json",
-    "packages": f"{DBT_SCHEMA_BASE}/packages-latest.json",
-    "selectors": f"{DBT_SCHEMA_BASE}/selectors-latest.json",
-}
-ADVISORY_ADF_NO_RAW_SCHEMA_URL = (
-    "https://learn.microsoft.com/en-sg/answers/questions/2125264/"
-    "are-there-json-schemas-for-adf-source-files"
-)
-DATABRICKS_BUNDLE_SCHEMA_URL = (
-    "https://raw.githubusercontent.com/databricks/cli/main/bundle/schema/jsonschema.json"
-)
-OPENAPI_31_SCHEMA_URL = "https://spec.openapis.org/oas/3.1/schema/2022-10-07"
-OPENAPI_30_SCHEMA_URL = "https://spec.openapis.org/oas/3.0/schema/2021-09-28"
-KUBERNETES_SCHEMA_URL = "https://json.schemastore.org/kubernetes.json"
-GITHUB_WORKFLOW_SCHEMA_URL = "https://json.schemastore.org/github-workflow.json"
-AZURE_PIPELINES_SCHEMA_URL = "https://json.schemastore.org/azure-pipelines.json"
-DBT_IDENTITY_FIELDS = frozenset(
-    {
-        "exposure",
-        "macro",
-        "metric",
-        "model",
-        "models",
-        "name",
-        "package_name",
-        "packages",
-        "project_name",
-        "resource_type",
-        "selector",
-        "selectors",
-        "seed",
-        "snapshot",
-        "snapshots",
-        "source",
-        "sources",
-        "test",
-        "tests",
-        "version",
-    }
-)
+# Schema identity, provider selection and the built-in provider URL catalogue are owned
+# by core (``schema_profiles``); this module only performs the host fetch/cache I/O.
 
 
 @dataclass(frozen=True)
@@ -300,12 +243,6 @@ def _identity_fields_for(
     return frozenset({*candidate.identity_fields, *derive_identity_fields(schema)})
 
 
-def schema_cache_fingerprint(resolution: SchemaResolution | None) -> str:
-    if resolution is None:
-        return "schema:none"
-    return resolution.cache_fingerprint
-
-
 def schema_resolution_metadata(
     resolution: SchemaResolution | None,
 ) -> dict[str, Any] | None:
@@ -337,7 +274,7 @@ def _fetch_or_cache(
     url = candidate.url
     if url is None:
         raise ValueError("schema candidate has no URL to fetch")
-    cached = _read_cache(candidate, root)
+    cached = _read_cache(candidate, root, now)
     if cached and now - cached["fetched_at"] < ttl:
         return _resolution_from_cache(candidate, cached, "cache_hit")
 
@@ -389,19 +326,11 @@ def _resolve_from_cache(
     *,
     allow_stale: bool,
 ) -> SchemaResolution:
-    cached = _read_cache(candidate, root)
-    if not cached:
+    cached = _read_cache(candidate, root, now)
+    if not cached or (not allow_stale and now - cached["fetched_at"] >= ttl):
         return SchemaResolution(
-            provider_id=candidate.provider_id,
-            source_url=candidate.url,
-            status="cache_miss",
-            identity_fields=candidate.identity_fields,
-        )
-    if not allow_stale and now - cached["fetched_at"] >= ttl:
-        return SchemaResolution(
-            provider_id=candidate.provider_id,
-            source_url=candidate.url,
-            status="cache_stale",
+            provider_id=candidate.provider_id, source_url=candidate.url,
+            status="cache_miss" if not cached else "cache_stale",
             identity_fields=candidate.identity_fields,
         )
     status = "cache_hit" if now - cached["fetched_at"] < ttl else "stale_cache"
@@ -432,21 +361,28 @@ def _resolution_from_cache(
     )
 
 
-def _read_cache(candidate: SchemaCandidate, root: Path) -> dict[str, Any] | None:
+def _read_cache(candidate: SchemaCandidate, root: Path, now: float) -> dict[str, Any] | None:
+    """A complete cache record, or None (a cache miss) for a missing or malformed one (#307)."""
     path = _cache_file(candidate, root)
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-        if isinstance(data, dict):
-            return data
-    except Exception:
-        return None
+    except (OSError, ValueError, RecursionError):
+        data = None
+    stamp = data.get("fetched_at") if isinstance(data, dict) else None
+    if (type(stamp) in (int, float) and math.isfinite(stamp) and stamp <= now
+            and isinstance(data.get("schema"), dict)):
+        return data
+    if path.exists():
+        logger.warning("Ignoring malformed schema cache record %s", path)
     return None
 
 
 def _write_cache(candidate: SchemaCandidate, root: Path, data: Mapping[str, Any]) -> None:
     path = _cache_file(candidate, root)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, sort_keys=True, indent=2), encoding="utf-8")
+    temporary = path.with_name(f"{path.name}.{os.getpid()}.tmp")  # readers never see a partial
+    temporary.write_text(json.dumps(data, sort_keys=True, indent=2), encoding="utf-8")
+    os.replace(temporary, path)
 
 
 def _cache_file(candidate: SchemaCandidate, root: Path) -> Path:
@@ -536,9 +472,9 @@ def _schema_commands_allowed(env: Mapping[str, str]) -> bool:
 
 def _schema_ttl_seconds(env: Mapping[str, str]) -> int:
     raw = env.get("INTENTUMDIFF_SCHEMA_CACHE_TTL_SECONDS", "")
-    try:
+    try:  # nan / inf / exponent overflow fall back to the default (#307)
         return max(0, int(float(raw)))
-    except ValueError:
+    except (ValueError, OverflowError):
         return DEFAULT_SCHEMA_TTL_SECONDS
 
 
