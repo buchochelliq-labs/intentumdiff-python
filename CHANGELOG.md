@@ -4,10 +4,15 @@
 
 A pre-release: install it with `pip install --pre intentumdiff-python`.
 
-### Registry 9889613 (registry #20) parser components
+### Core 33ec1e9 and registry eb02686 (registry #20/#21) parser components
 
-- `REGISTRY_REF` pins registry `9889613d4829c0f43d7a29e89b9ddf1a783d9c24` (registry #20),
-  which re-pins 41 parser components to their reviewed `release/v0.0.3-rc` CI builds.
+- `CORE_REF` pins core `33ec1e9ec44d5f51df9b24320ff87ff4f7162ff3` (core #321): the
+  certified native Python route ids operator leaves by child index, like the component, and
+  number respellings are proved equivalent (core #320).
+- `REGISTRY_REF` pins registry `eb02686ba69eb8d03e751977ee3a4c9a84fae8a0` (registry #21),
+  which keeps registry #20's re-pin of 41 parser components to their reviewed
+  `release/v0.0.3-rc` CI builds and adds make-parser#9 (whitespace inside a make value is
+  data again).
   The previous wheel staged components from registry `8911328` (#17), which predates
   registry #18/#19 and every parser fix merged since, including the complete-literal
   JS/TS/JSON/SQL/YAML components.

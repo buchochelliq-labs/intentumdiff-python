@@ -38,7 +38,7 @@ def test_stage_core_accepts_immutable_commit(tmp_path, monkeypatch):
 def test_registry_uses_reviewed_immutable_commit():
     script = Path(__file__).resolve().parents[2] / "scripts" / "provision_build_inputs.py"
     namespace = runpy.run_path(str(script))
-    expected = "9889613d4829c0f43d7a29e89b9ddf1a783d9c24"  # Registry #20: 41 parsers re-pinned to reviewed RC CI builds
+    expected = "eb02686ba69eb8d03e751977ee3a4c9a84fae8a0"  # Registry #21: #20 re-pins plus make-parser#9
     seen = []
     def get(url, **kwargs):
         seen.append(url)
