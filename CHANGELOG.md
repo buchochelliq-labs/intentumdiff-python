@@ -1,6 +1,16 @@
 # Changelog
 
-## v0.0.3b1 — pre-release (unreleased)
+## Unreleased — final 0.0.3
+
+- A file the parser cannot read mid-edit no longer makes `intentumdiff diff` exit 1 with
+  `Plugin 'yaml' returned invalid output: Empty semantic tree` (core #314, yaml-parser#9). A
+  parser's in-band error now raises `PluginParseError`, a `PluginOutputError` subclass. With
+  `fallback_to_token_diff` (the default), the differ returns Rust's explicit source fallback,
+  with `is_fallback=true`, `metadata.fallback_reason = "plugin_parse_error"`, the parser's
+  message in `metadata.plugin_error` and the edit preserved. Half-typed YAML and XML are
+  covered by integration tests.
+
+## v0.0.3b1 — pre-release (2026-11-18)
 
 A pre-release: install it with `pip install --pre intentumdiff-python`.
 

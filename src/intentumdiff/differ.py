@@ -135,6 +135,7 @@ from intentumdiff.plugins.exceptions import (
     PluginFuelExhausted,
     PluginNotFoundError,
     PluginOutputError,
+    PluginParseError,
 )
 from intentumdiff.plugins.registry import PluginRegistry
 from intentumdiff.rust_core import (
@@ -1145,35 +1146,83 @@ class SemanticDiffer:
         # Historical entries omit the Rust engine/configuration identity and
         # can silently replay stale style-only results after semantic fixes.
         # Parser-tree caching remains available and is keyed by actual Wasm bytes.
-        with profiler.phase("wasm_plugin_execution"):
-            old_side_absent = file_lifecycle == "added" and old_content == ""
-            new_side_absent = file_lifecycle == "deleted" and new_content == ""
-            if self._cache is not None:
-                old_tree = (
-                    _empty_semantic_tree(language)
-                    if old_side_absent
-                    else self._cached_process(
-                        parser, old_content, language, filename, adaptive_fuel
+        try:
+            with profiler.phase("wasm_plugin_execution"):
+                old_side_absent = file_lifecycle == "added" and old_content == ""
+                new_side_absent = file_lifecycle == "deleted" and new_content == ""
+                if self._cache is not None:
+                    old_tree = (
+                        _empty_semantic_tree(language)
+                        if old_side_absent
+                        else self._cached_process(
+                            parser, old_content, language, filename, adaptive_fuel
+                        )
                     )
-                )
-                new_tree = (
-                    _empty_semantic_tree(language)
-                    if new_side_absent
-                    else self._cached_process(
-                        parser, new_content, language, filename, adaptive_fuel
+                    new_tree = (
+                        _empty_semantic_tree(language)
+                        if new_side_absent
+                        else self._cached_process(
+                            parser, new_content, language, filename, adaptive_fuel
+                        )
                     )
+                else:
+                    old_tree = (
+                        _empty_semantic_tree(language)
+                        if old_side_absent
+                        else parser.process(old_content, language, filename, fuel=adaptive_fuel)
+                    )
+                    new_tree = (
+                        _empty_semantic_tree(language)
+                        if new_side_absent
+                        else parser.process(new_content, language, filename, fuel=adaptive_fuel)
+                    )
+        except PluginParseError as exc:
+            # core #314: the parser component could not read one side (its in-band error
+            # envelope: half-typed YAML/XML mid-edit reads ``Empty semantic tree``). That is
+            # incomplete input, not an engine failure: preserve the edit through Rust's
+            # source fallback, exactly like a tree with parse errors (§8.5).
+            if not self._config.fallback_to_token_diff:
+                raise
+            logger.warning(
+                "Parser %r could not read %r (%s) - using Rust source fallback",
+                parser.grammar_id, filename, exc,
+            )
+            diagnostics.record(
+                stage="fallback",
+                action="token_fallback",
+                rule_id="pipeline.plugin_parse_error",
+                reason="parser plugin returned an error for one side",
+                metadata={"plugin_error": str(exc)},
+            )
+            parse_fallback_metadata: dict[str, Any] = {
+                "fallback_reason": "plugin_parse_error",
+                "plugin_error": str(exc),
+            }
+            if diagnostics.enabled:
+                diagnostics.summary.update(
+                    {"early_exit": "token_fallback", "final_change_count": None}
                 )
-            else:
-                old_tree = (
-                    _empty_semantic_tree(language)
-                    if old_side_absent
-                    else parser.process(old_content, language, filename, fuel=adaptive_fuel)
-                )
-                new_tree = (
-                    _empty_semantic_tree(language)
-                    if new_side_absent
-                    else parser.process(new_content, language, filename, fuel=adaptive_fuel)
-                )
+                parse_fallback_metadata["diagnostics"] = diagnostics.snapshot()
+            parse_fallback = _token_fallback_diff(
+                old_raw,
+                new_raw,
+                filename,
+                new_filename if new_filename is not None else filename,
+                language,
+                metadata=parse_fallback_metadata,
+            )
+            parse_fallback = _apply_file_lifecycle_to_diff(parse_fallback, file_lifecycle)
+            return apply_guardrails_to_diff(
+                parse_fallback,
+                old_tree=None,
+                new_tree=None,
+                old_source=old_raw,
+                new_source=new_raw,
+                config=self._config,
+                policy_filename=policy_source_filename,
+                policy_old_filename=policy_old_filename,
+                diagnostics=diagnostics,
+            )
         diagnostics.record(
             stage="parse",
             action="full_parse",

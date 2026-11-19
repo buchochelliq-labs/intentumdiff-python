@@ -46,6 +46,14 @@ class PluginOutputError(PluginError):
         )
 
 
+class PluginParseError(PluginOutputError):
+    """A parser plugin declined to parse its input and returned its in-band
+    ``{"error": ...}`` envelope (core #314). Usually incomplete or invalid source mid-edit;
+    the differ preserves the edit through Rust's source fallback when
+    ``fallback_to_token_diff`` is enabled. Subclasses ``PluginOutputError`` so existing
+    handlers keep catching it."""
+
+
 class GrammarNotInstalledError(PluginError):
     """A Python tree-sitter grammar package is not installed."""
 
