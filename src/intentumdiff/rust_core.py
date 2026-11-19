@@ -513,6 +513,20 @@ def source_fallback_diff(old: str, new: str, old_filename: str, new_filename: st
     return SemanticDiff.model_validate(_require_complete_batch_diff_dto(json.loads(raw)))
 
 
+def plugin_parse_error_review(old: str, new: str, old_filename: str, new_filename: str,
+                              language: str, side: str, message: str,
+                              config: DiffConfig) -> SemanticDiff | None:
+    """Rust's review of a pair a parser could not read (core #314); ``None`` = Rust declined."""
+    raw = _c_abi_call(
+        "plugin_parse_error_review", old, new, old_filename, new_filename, language, side,
+        message, json.dumps(config.model_dump(mode="json")),
+    )
+    data = json.loads(raw) if isinstance(raw, str) else raw
+    if data.get("declined") is True:
+        return None
+    return SemanticDiff.model_validate(_require_complete_batch_diff_dto(data["diff"]))
+
+
 def _decode_rust_boolean(payload: str, handler: str) -> bool:
     """Validate Rust's boolean DTO without Python truthiness reinterpretation."""
     decoded = json.loads(payload)

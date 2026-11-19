@@ -135,6 +135,7 @@ from intentumdiff.plugins.exceptions import (
     PluginFuelExhausted,
     PluginNotFoundError,
     PluginOutputError,
+    PluginParseError,
 )
 from intentumdiff.plugins.registry import PluginRegistry
 from intentumdiff.rust_core import (
@@ -1000,6 +1001,36 @@ class SemanticDiffer:
         # Save originals for the enricher pass (enrichers see un-preprocessed source)
         old_raw, new_raw = old_content, new_content
         file_lifecycle = _infer_file_lifecycle(old_raw, new_raw)
+
+        def source_fallback(
+            rule_id: str, reason: str, served: SemanticDiff | None = None, **fields: Any
+        ) -> SemanticDiff:
+            """Rust's source fallback for this pair (or one Rust already *served*), with
+            lifecycle and guardrails applied."""
+            diagnostics.record(
+                stage="fallback", action="token_fallback", rule_id=rule_id, reason=reason
+            )
+            metadata: dict[str, Any] = dict(fields)
+            if diagnostics.enabled:
+                diagnostics.summary.update(
+                    {"early_exit": "token_fallback", "final_change_count": None}
+                )
+                metadata["diagnostics"] = diagnostics.snapshot()
+            fallback_diff = (
+                served.model_copy(update={"metadata": {**metadata, **dict(served.metadata)}})
+                if served is not None
+                else _token_fallback_diff(
+                    old_raw, new_raw, filename,
+                    new_filename if new_filename is not None else filename,
+                    language, metadata=metadata,
+                )
+            )
+            return apply_guardrails_to_diff(
+                _apply_file_lifecycle_to_diff(fallback_diff, file_lifecycle),
+                old_tree=None, new_tree=None, old_source=old_raw, new_source=new_raw,
+                config=self._config, policy_filename=policy_source_filename,
+                policy_old_filename=policy_old_filename, diagnostics=diagnostics,
+            )
         diagnostics.summary["file_lifecycle"] = file_lifecycle
         with profiler.phase("schema_resolution"):
             schema_resolution = resolve_schema(
@@ -1145,35 +1176,41 @@ class SemanticDiffer:
         # Historical entries omit the Rust engine/configuration identity and
         # can silently replay stale style-only results after semantic fixes.
         # Parser-tree caching remains available and is keyed by actual Wasm bytes.
-        with profiler.phase("wasm_plugin_execution"):
-            old_side_absent = file_lifecycle == "added" and old_content == ""
-            new_side_absent = file_lifecycle == "deleted" and new_content == ""
-            if self._cache is not None:
-                old_tree = (
-                    _empty_semantic_tree(language)
-                    if old_side_absent
-                    else self._cached_process(
-                        parser, old_content, language, filename, adaptive_fuel
-                    )
-                )
-                new_tree = (
-                    _empty_semantic_tree(language)
-                    if new_side_absent
-                    else self._cached_process(
-                        parser, new_content, language, filename, adaptive_fuel
-                    )
-                )
-            else:
-                old_tree = (
-                    _empty_semantic_tree(language)
-                    if old_side_absent
-                    else parser.process(old_content, language, filename, fuel=adaptive_fuel)
-                )
-                new_tree = (
-                    _empty_semantic_tree(language)
-                    if new_side_absent
-                    else parser.process(new_content, language, filename, fuel=adaptive_fuel)
-                )
+        parsing_side = "old"
+        try:
+            with profiler.phase("wasm_plugin_execution"):
+
+                def parse(content: str, absent: bool) -> SemanticNode:
+                    if absent:
+                        return _empty_semantic_tree(language)
+                    if self._cache is not None:
+                        return self._cached_process(
+                            parser, content, language, filename, adaptive_fuel
+                        )
+                    return parser.process(content, language, filename, fuel=adaptive_fuel)
+
+                old_tree = parse(old_content, file_lifecycle == "added" and old_content == "")
+                parsing_side = "new"
+                new_tree = parse(new_content, file_lifecycle == "deleted" and new_content == "")
+        except PluginParseError as exc:
+            # core #314: the parser could not read one side (half-typed YAML/XML mid-edit reads
+            # ``Empty semantic tree``). Rust decides the review; Python relays it, or re-raises
+            # the parser error when Rust declines (``fallback_to_token_diff`` off).
+            from intentumdiff.rust_core import plugin_parse_error_review
+
+            served = plugin_parse_error_review(
+                old_raw, new_raw, filename,
+                new_filename if new_filename is not None else filename,
+                language, parsing_side, exc.detail, self._config,
+            )
+            if served is None:
+                raise
+            # Debug, not warning: the served diff already says so (is_fallback, fallback_reason),
+            # and a CLI review of a file mid-edit must keep stderr clean.
+            logger.debug("Parser %r could not read %r: %s", parser.grammar_id, filename, exc)
+            return source_fallback(
+                "pipeline.plugin_parse_error", "parser plugin returned an error", served=served
+            )
         diagnostics.record(
             stage="parse",
             action="full_parse",
@@ -1249,37 +1286,8 @@ class SemanticDiffer:
                 "Parse errors detected in %r - using Rust source fallback",
                 filename,
             )
-            diagnostics.record(
-                stage="fallback",
-                action="token_fallback",
-                rule_id="pipeline.token_fallback",
-                reason="semantic tree contains ERROR nodes",
-            )
-            metadata: dict[str, Any] = {}
-            if diagnostics.enabled:
-                diagnostics.summary.update(
-                    {"early_exit": "token_fallback", "final_change_count": None}
-                )
-                metadata["diagnostics"] = diagnostics.snapshot()
-            fallback_diff = _token_fallback_diff(
-                old_raw,
-                new_raw,
-                filename,
-                new_filename if new_filename is not None else filename,
-                language,
-                metadata=metadata,
-            )
-            fallback_diff = _apply_file_lifecycle_to_diff(fallback_diff, file_lifecycle)
-            return apply_guardrails_to_diff(
-                fallback_diff,
-                old_tree=None,
-                new_tree=None,
-                old_source=old_raw,
-                new_source=new_raw,
-                config=self._config,
-                policy_filename=policy_source_filename,
-                policy_old_filename=policy_old_filename,
-                diagnostics=diagnostics,
+            return source_fallback(
+                "pipeline.token_fallback", "semantic tree contains ERROR nodes"
             )
         # ── 9. Matching + finalize routing ─────────────────────────────────────
         # Rust owns matching and finalization; there is no Python matching path.
@@ -1390,39 +1398,10 @@ class SemanticDiffer:
             language,
         )
         _raise_rust_only_gate_error("rust finalize declined")
-        diagnostics.record(
-            stage="fallback",
-            action="token_fallback",
-            rule_id="pipeline.finalize_declined",
-            reason="rust finalize declined; python pipeline retired (#57)",
-        )
-        fallback_metadata: dict[str, Any] = {
-            "fallback_reason": "rust_finalize_declined",
-        }
-        if diagnostics.enabled:
-            diagnostics.summary.update(
-                {"early_exit": "token_fallback", "final_change_count": None}
-            )
-            fallback_metadata["diagnostics"] = diagnostics.snapshot()
-        fallback_diff = _token_fallback_diff(
-            old_raw,
-            new_raw,
-            filename,
-            new_filename if new_filename is not None else filename,
-            language,
-            metadata=fallback_metadata,
-        )
-        fallback_diff = _apply_file_lifecycle_to_diff(fallback_diff, file_lifecycle)
-        return apply_guardrails_to_diff(
-            fallback_diff,
-            old_tree=None,
-            new_tree=None,
-            old_source=old_raw,
-            new_source=new_raw,
-            config=self._config,
-            policy_filename=policy_source_filename,
-            policy_old_filename=policy_old_filename,
-            diagnostics=diagnostics,
+        return source_fallback(
+            "pipeline.finalize_declined",
+            "rust finalize declined; python pipeline retired (#57)",
+            fallback_reason="rust_finalize_declined",
         )
 
     def diff_stream_progressive(
