@@ -2,6 +2,12 @@
 
 ## Unreleased — final 0.0.3
 
+- `CORE_REF` pins core `7e898b4a146a94264f3b68471bb00eceea4bf10a`:
+  - a reference swap such as `max_depth -= 1` → `depth -= 1` is a modification, not a variable
+    rename, and the JavaScript form of it is no longer lost (core #316);
+  - a LaTeX or AsciiDoc section retitle is a content change (core #166);
+  - parser errors on incomplete input are typed `plugin_parse_error`, with the new
+    `plugin_parse_error_review` operation (core #314).
 - A file the parser cannot read mid-edit no longer makes `intentumdiff diff` exit 1 with
   `Plugin 'yaml' returned invalid output: Empty semantic tree` (core #314, yaml-parser#9). A
   parser's in-band error now raises `PluginParseError` (a `PluginOutputError` subclass that
