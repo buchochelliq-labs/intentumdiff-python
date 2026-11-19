@@ -1205,7 +1205,9 @@ class SemanticDiffer:
             )
             if served is None:
                 raise
-            logger.warning("Parser %r could not read %r: %s", parser.grammar_id, filename, exc)
+            # Debug, not warning: the served diff already says so (is_fallback, fallback_reason),
+            # and a CLI review of a file mid-edit must keep stderr clean.
+            logger.debug("Parser %r could not read %r: %s", parser.grammar_id, filename, exc)
             return source_fallback(
                 "pipeline.plugin_parse_error", "parser plugin returned an error", served=served
             )

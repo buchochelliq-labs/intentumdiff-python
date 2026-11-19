@@ -34,10 +34,16 @@ def _diff(old: str, new: str, filename: str, *, fallback: bool = True):
 
 
 @pytest.mark.parametrize("filename,wasm,old,new", CASES)
-def test_half_typed_file_is_an_explicit_source_fallback(filename, wasm, old, new):
+def test_half_typed_file_is_an_explicit_source_fallback(filename, wasm, old, new, caplog):
     if not (_WASM_DIR / wasm).exists():
         pytest.skip(f"Wasm not built: {wasm}")
-    diff = _diff(old, new, filename)
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger="intentumdiff"):
+        diff = _diff(old, new, filename)
+    # The fallback is reported in the diff itself; a file mid-edit must not print warnings
+    # (the wheel smoke test requires clean stderr).
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING], caplog.text
     assert diff.is_fallback is True
     assert diff.metadata.get("fallback_reason") == "plugin_parse_error"
     assert "plugin_error" in diff.metadata
