@@ -2,6 +2,14 @@
 
 ## Unreleased — final 0.0.3
 
+- `CORE_REF` pins core `97bb60cf98e4155c2a7e5fec6404432a89c4aede`: repeated Terraform blocks
+  that share a key are matched in order, so an identical file no longer reports
+  `Update attribute("x")`, and an edit stays at its own block (terraform-parser#4).
+- The reviewed registry is `187eded1030f5f2d5925cf0035d430496a7d5314` (registry #23, #24): the
+  CMake parser no longer reports additions for identical `${…}` references and reports broken
+  input as a parse error (cmake-parser#4); JSON numbers with an explicit `+` exponent keep
+  their value (json-parser#6). The renderer bundle moves to core `97bb60c` because the
+  previous artifact expired; the four renderer checksums are unchanged.
 - `CORE_REF` pins core `7e898b4a146a94264f3b68471bb00eceea4bf10a`:
   - a reference swap such as `max_depth -= 1` → `depth -= 1` is a modification, not a variable
     rename, and the JavaScript form of it is no longer lost (core #316);
