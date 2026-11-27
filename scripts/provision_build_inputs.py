@@ -32,7 +32,7 @@ CORE_REPO = "https://github.com/buchochelliq-labs/intentumdiff-core"
 CORE_REF = os.environ.get("INTENTUMDIFF_CORE_REF", "97bb60cf98e4155c2a7e5fec6404432a89c4aede")
 # Registry #17 pins the exact successful C/C++ character-literal CI artifact.
 # Each staged component remains separately verified by source commit and SHA-256.
-REGISTRY_REF = "3653ac48ebdbdc0114f74fc852112e25f13c91ba"
+REGISTRY_REF = "187eded1030f5f2d5925cf0035d430496a7d5314"
 
 
 def load_reviewed_registry(get, api: str, org: str):

@@ -38,7 +38,7 @@ def test_stage_core_accepts_immutable_commit(tmp_path, monkeypatch):
 def test_registry_uses_reviewed_immutable_commit():
     script = Path(__file__).resolve().parents[2] / "scripts" / "provision_build_inputs.py"
     namespace = runpy.run_path(str(script))
-    expected = "3653ac48ebdbdc0114f74fc852112e25f13c91ba"  # Registry #23: CMake and JSON 0.0.3 parser fixes
+    expected = "187eded1030f5f2d5925cf0035d430496a7d5314"  # Registry #24: #23 parser fixes plus renderer re-pin
     seen = []
     def get(url, **kwargs):
         seen.append(url)
