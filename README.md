@@ -17,7 +17,7 @@ does: **meaningful**, **refactoring**, **moved**, or **ignored style**.
 pip install --pre intentumdiff-python
 ```
 
-0.0.3b1 is a pre-release, so `--pre` is needed. Without it pip finds no installable version,
+0.0.3b2 is a pre-release, so `--pre` is needed. Without it pip finds no installable version,
 because the only stable release, 0.0.1, has been yanked.
 Requires **Python 3.12+**. The wheel bundles the Rust engine and language parser
 components; built-in parsing needs no separate component download.

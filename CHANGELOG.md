@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased — final 0.0.3
+## v0.0.3b2 — pre-release (unreleased)
 
 - `CORE_REF` pins core `97bb60cf98e4155c2a7e5fec6404432a89c4aede`: repeated Terraform blocks
   that share a key are matched in order, so an identical file no longer reports
