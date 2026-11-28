@@ -1,6 +1,35 @@
 # Changelog
 
-## v0.0.3b1 — pre-release (unreleased)
+## v0.0.3b2 — pre-release (unreleased)
+
+- `CORE_REF` pins core `97bb60cf98e4155c2a7e5fec6404432a89c4aede`: repeated Terraform blocks
+  that share a key are matched in order, so an identical file no longer reports
+  `Update attribute("x")`, and an edit stays at its own block (terraform-parser#4).
+- The reviewed registry is `187eded1030f5f2d5925cf0035d430496a7d5314` (registry #23, #24): the
+  CMake parser no longer reports additions for identical `${…}` references and reports broken
+  input as a parse error (cmake-parser#4); JSON numbers with an explicit `+` exponent keep
+  their value (json-parser#6). The renderer bundle moves to core `97bb60c` because the
+  previous artifact expired; the four renderer checksums are unchanged.
+- `CORE_REF` pins core `7e898b4a146a94264f3b68471bb00eceea4bf10a`:
+  - a reference swap such as `max_depth -= 1` → `depth -= 1` is a modification, not a variable
+    rename, and the JavaScript form of it is no longer lost (core #316);
+  - a LaTeX or AsciiDoc section retitle is a content change (core #166);
+  - parser errors on incomplete input are typed `plugin_parse_error`, with the new
+    `plugin_parse_error_review` operation (core #314).
+- A file the parser cannot read mid-edit no longer makes `intentumdiff diff` exit 1 with
+  `Plugin 'yaml' returned invalid output: Empty semantic tree` (core #314, yaml-parser#9). A
+  parser's in-band error now raises `PluginParseError` (a `PluginOutputError` subclass that
+  carries the parser's `detail`). The differ relays it, with the side and the configuration,
+  to core's `plugin_parse_error_review`, and core decides:
+  - with `fallback_to_token_diff` (the default), core's source fallback, with
+    `fallback_reason = "plugin_parse_error"`, the parser's message and side, and the edit
+    preserved;
+  - otherwise the parser error is raised as before.
+
+  Python makes no fallback decision. The three source-fallback exits in `differ.py` share
+  one helper. Needs a core pin that includes `plugin_parse_error_review`.
+
+## v0.0.3b1 — pre-release (2026-11-18)
 
 A pre-release: install it with `pip install --pre intentumdiff-python`.
 

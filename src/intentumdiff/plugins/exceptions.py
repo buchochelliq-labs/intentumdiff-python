@@ -41,9 +41,17 @@ class PluginOutputError(PluginError):
 
     def __init__(self, plugin_id: str, detail: str) -> None:
         self.plugin_id = plugin_id
+        self.detail = detail
         super().__init__(
             f"Plugin {plugin_id!r} returned invalid output: {detail}"
         )
+
+
+class PluginParseError(PluginOutputError):
+    """A parser plugin declined to parse its input and returned its in-band
+    ``{"error": ...}`` envelope (core #314). Usually incomplete or invalid source mid-edit;
+    the differ relays it to Rust's ``plugin_parse_error_review``, which decides the review.
+    Subclasses ``PluginOutputError`` so existing handlers keep catching it."""
 
 
 class GrammarNotInstalledError(PluginError):

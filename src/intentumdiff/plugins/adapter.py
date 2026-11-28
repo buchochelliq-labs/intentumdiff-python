@@ -22,7 +22,7 @@ import re
 from pydantic import ValidationError
 
 from intentumdiff.core.models import LanguagePluginInfo, SemanticNode
-from intentumdiff.plugins.exceptions import PluginOutputError
+from intentumdiff.plugins.exceptions import PluginOutputError, PluginParseError
 from intentumdiff.plugins.language_metadata import fallback_language_info
 from intentumdiff.plugins.loader import LoadedPlugin
 
@@ -301,7 +301,7 @@ class ParserAdapter:
             raise PluginOutputError(self.grammar_id, f"invalid JSON: {exc}") from exc
 
         if isinstance(data, dict) and "error" in data:
-            raise PluginOutputError(self.grammar_id, data["error"])
+            raise PluginParseError(self.grammar_id, str(data["error"]))
 
         try:
             return SemanticNode.model_validate(data)
