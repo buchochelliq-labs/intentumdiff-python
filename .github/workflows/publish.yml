@@ -1,5 +1,15 @@
 name: Promote independently reviewed platform wheels
 # No wheel is rebuilt, repaired, or retagged in the publication workflow.
+#
+# Two ways to release, told apart by scripts/release_mode.py (docs/PYPI_RELEASE.md):
+# - repo: push a v* tag here; pins come from the INTENTUMDIFF_PYPI_* variables.
+# - orchestrated: buchochelliq-labs/intentumdiff-release creates an annotated tag with a
+#   Release-Orchestrator line and dispatches this workflow on it, every pin an input.
+run-name: >-
+  ${{ github.event_name == 'workflow_dispatch' && inputs.orchestrator_run != ''
+  && format('Orchestrated {0} {1} ({2})', inputs.dry_run && 'rehearsal of' || 'release of', github.ref_name, inputs.orchestrator_run)
+  || github.event_name == 'workflow_dispatch' && format('Rehearsal on {0}', github.ref_name)
+  || format('Release {0}', github.ref_name) }}
 on:
   push:
     tags:
@@ -26,11 +36,44 @@ on:
       candidate_wheels_json:
         description: 'JSON: four runner names mapped to {"id":artifact_ID,"sha256":wheel_SHA256}'
         type: string
+      orchestrator_run:
+        description: "Set only by intentumdiff-release: its run URL. Empty for a repo release or rehearsal"
+        type: string
+        default: ""
 
 permissions: {}
 jobs:
+  mode:
+    name: Release mode
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      mode: ${{ steps.mode.outputs.mode }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Decide repo, orchestrated, deferred or rehearsal
+        id: mode
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          REF_NAME: ${{ github.ref_name }}
+          REPOSITORY: ${{ github.repository }}
+          ORCHESTRATOR_RUN: ${{ inputs.orchestrator_run }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          REQUIRED_INPUTS: candidate_run_id,candidate_source_sha,candidate_core_sha,candidate_wheels_json
+          INPUT_CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+          INPUT_CANDIDATE_SOURCE_SHA: ${{ inputs.candidate_source_sha }}
+          INPUT_CANDIDATE_CORE_SHA: ${{ inputs.candidate_core_sha }}
+          INPUT_CANDIDATE_WHEELS_JSON: ${{ inputs.candidate_wheels_json }}
+        run: python3 scripts/release_mode.py
   promote:
     name: Verify and retain exact reviewed PyPI wheels
+    needs: mode
+    if: needs.mode.outputs.mode != 'deferred' && needs.mode.outputs.mode != 'none'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -91,10 +134,13 @@ jobs:
           retention-days: 30
       - name: Record promotion provenance
         shell: bash
+        env:
+          RELEASE_MODE: ${{ needs.mode.outputs.mode }}
         run: |
           {
             echo "### Reviewed, immutable wheels (not rebuilt)"
             echo ""
+            echo "Release mode: $RELEASE_MODE"
             echo "Source: $REVIEWED_SOURCE_SHA"
             echo "Core: $REVIEWED_CORE_SHA"
             echo "CI run: $REVIEWED_RUN_ID"
@@ -103,8 +149,13 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
   publish:
     name: Publish approved wheels to PyPI
-    needs: promote
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: [mode, promote]
+    # A repo release (its own tag push) or an orchestrated release (dispatched on the
+    # orchestrator's tag). Never a rehearsal, and never the tag push of an orchestrated tag.
+    if: >-
+      startsWith(github.ref, 'refs/tags/v')
+      && ((github.event_name == 'push' && needs.mode.outputs.mode == 'repo')
+      || (github.event_name == 'workflow_dispatch' && needs.mode.outputs.mode == 'orchestrated'))
     runs-on: ubuntu-latest
     environment:
       name: pypi
@@ -125,8 +176,10 @@ jobs:
           attestations: false
   publish-testpypi:
     name: Explicitly publish reviewed bytes to TestPyPI
-    needs: promote
-    if: github.event_name == 'workflow_dispatch' && inputs.publish_testpypi && !inputs.dry_run
+    needs: [mode, promote]
+    if: >-
+      github.event_name == 'workflow_dispatch' && inputs.publish_testpypi && !inputs.dry_run
+      && needs.mode.outputs.mode == 'rehearsal'
     runs-on: ubuntu-latest
     environment:
       name: testpypi

@@ -34,7 +34,25 @@ match the candidate being published. These CI wheels are built with the release 
 profile and exact source/component identities; rebuilt publication wheels still
 require checksum, packaging and installed-wheel verification. Media provenance must identify the exact installed wheel used for recording.
 
-## Before tagging: point publish at the reviewed run
+## Two ways to release
+
+`publish.yml` starts with a **Release mode** job (`scripts/release_mode.py`). Its decision
+is in the run name and the job summary, so the two kinds of release never look alike:
+
+| Mode | How it starts | Pins from | Publishes to PyPI |
+|---|---|---|---|
+| `repo` | a maintainer pushes a `v*` tag to this repository | the `INTENTUMDIFF_PYPI_*` variables below | yes |
+| `orchestrated` | `buchochelliq-labs/intentumdiff-release` creates an annotated tag with a `Release-Orchestrator: <run URL>` line and dispatches `publish.yml` on it | dispatch inputs only; variables are never read | yes |
+| `deferred` | the tag push that an orchestrated tag also fires | nothing | no: the orchestrated dispatch publishes |
+| `orchestrated-dry-run` | the orchestrator rehearsing (`dry_run: true`) | dispatch inputs | no |
+| `rehearsal` | a manual `workflow_dispatch`, as before | inputs or variables | no (TestPyPI if asked) |
+
+The repo release below is unchanged and still supported. An orchestrated release runs the
+same verification on the same tag; only where the pins come from differs. A dispatch that
+names an orchestrator run must carry every pin, must run on a tag whose message names a
+run of `intentumdiff-release`, and fails closed otherwise.
+
+## Repo release: point publish at the reviewed run
 
 `publish.yml` promotes the four wheels from one successful `CI` run, triggered by a push
 to the release branch derived from the version (`0.0.3b1` → `release/v0.0.3-rc`). After
