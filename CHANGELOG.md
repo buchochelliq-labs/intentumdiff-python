@@ -2,6 +2,11 @@
 
 ## v0.0.3b2 — pre-release (unreleased)
 
+- Releases can be orchestrated from `buchochelliq-labs/intentumdiff-release` as well as from a
+  tag pushed here. `publish.yml` first decides its release mode (`repo`, `orchestrated`,
+  `deferred`, `orchestrated-dry-run` or `rehearsal`) and names the run after it. A repo
+  release is unchanged; an orchestrated one takes every pin as a dispatch input, never from
+  repository variables, and publishes only on a tag the orchestrator created.
 - `CORE_REF` pins core `97bb60cf98e4155c2a7e5fec6404432a89c4aede`: repeated Terraform blocks
   that share a key are matched in order, so an identical file no longer reports
   `Update attribute("x")`, and an edit stays at its own block (terraform-parser#4).

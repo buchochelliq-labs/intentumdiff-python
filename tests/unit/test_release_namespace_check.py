@@ -123,14 +123,23 @@ def test_publish_workflow_has_testpypi_trusted_publisher_lane() -> None:
     production = jobs["publish"]
     testpypi = jobs["publish-testpypi"]
 
-    assert production["needs"] == "promote"
+    # Production publishes only from a tag: a repo release's own tag push, or the
+    # orchestrator's dispatch on its tag. Rehearsals and deferred tag pushes never do.
+    assert production["needs"] == ["mode", "promote"]
     assert production["if"] == (
-        "github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')"
+        "startsWith(github.ref, 'refs/tags/v') "
+        "&& ((github.event_name == 'push' && needs.mode.outputs.mode == 'repo') "
+        "|| (github.event_name == 'workflow_dispatch' && needs.mode.outputs.mode == 'orchestrated'))"
     )
-    assert testpypi["needs"] == "promote"
+    assert testpypi["needs"] == ["mode", "promote"]
     assert testpypi["if"] == (
-        "github.event_name == 'workflow_dispatch' && inputs.publish_testpypi && !inputs.dry_run"
+        "github.event_name == 'workflow_dispatch' && inputs.publish_testpypi && !inputs.dry_run "
+        "&& needs.mode.outputs.mode == 'rehearsal'"
     )
+    assert jobs["promote"]["if"] == (
+        "needs.mode.outputs.mode != 'deferred' && needs.mode.outputs.mode != 'none'"
+    )
+    assert "run: python3 scripts/release_mode.py" in workflow
     assert "name: testpypi" in workflow
     assert "repository-url: https://test.pypi.org/legacy/" in workflow
     assert "dry_run:" in workflow and "default: true" in workflow
